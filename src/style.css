@@ -18,7 +18,8 @@
 }
 
 * { box-sizing: border-box; }
-html, body, #app { width:100%; height:100%; margin:0; overflow:hidden; }
+html, body, #app { width:100%; height:100%; height:100dvh; margin:0; overflow:hidden; overscroll-behavior:none; }
+#scene { width:100%; height:100%; }
 body { background:#86c7d6; }
 button { font:inherit; color:inherit; }
 button:focus-visible { outline:2px solid var(--gold); outline-offset:3px; }
@@ -97,16 +98,19 @@ h1 em { font-family:Spectral, Georgia, serif; font-weight:600; color:var(--gold)
 .title-wrap small { display:block; margin-top:22px; color:rgba(255,255,255,.38); font-size:9px; letter-spacing:.08em; }
 .version { position:absolute; right:25px; bottom:20px; font-size:8px; letter-spacing:.2em; color:rgba(255,255,255,.45); }
 
-.modal-card { position:fixed; z-index:60; left:50%; top:50%; transform:translate(-50%,-50%); width:min(520px, calc(100vw - 34px)); max-height:90vh; overflow:auto; padding:25px; border-radius:10px; color:#21333b; background:linear-gradient(145deg,#fffdf1,#eee8ce); box-shadow:0 30px 80px rgba(8,18,22,.42); border:1px solid rgba(255,255,255,.8); }
+.modal-card { position:fixed; z-index:80; left:50%; top:50%; transform:translate(-50%,-50%); width:min(520px, calc(100dvw - 24px)); max-height:calc(100dvh - 24px); overflow:auto; padding:25px; touch-action:manipulation; pointer-events:auto; border-radius:10px; color:#21333b; background:linear-gradient(145deg,#fffdf1,#eee8ce); box-shadow:0 30px 80px rgba(8,18,22,.42); border:1px solid rgba(255,255,255,.8); }
 .modal-card .eyebrow { color:#a17424; }
 .modal-card h2 { margin:4px 0 10px; font-family:Spectral,Georgia,serif; font-style:italic; font-size:28px; line-height:1.2; }
 .modal-card > p { color:#526068; font-size:12px; line-height:1.6; }
 .modal-card .primary { margin-top:10px; background:#233942; color:#fff9de; width:100%; }
-.close-modal { position:absolute; right:12px; top:10px; border:0; background:transparent; color:#788389; font-size:24px; cursor:pointer; }
+.close-modal { position:absolute; right:6px; top:6px; width:44px; height:44px; display:grid; place-items:center; border:0; border-radius:50%; background:rgba(35,57,66,.08); color:#5c6b72; font-size:24px; line-height:1; cursor:pointer; z-index:2; -webkit-tap-highlight-color:transparent; touch-action:manipulation; }
+.close-modal:active { background:rgba(35,57,66,.18); transform:scale(.94); }
 .modal-copy { margin-bottom:17px; }
 .choice-list { display:grid; gap:8px; }
 .choice-list > button { display:flex; gap:12px; width:100%; padding:12px; text-align:left; border:1px solid #d4ceb6; border-radius:7px; background:rgba(255,255,255,.55); color:#273942; cursor:pointer; transition:.2s; }
 .choice-list > button:hover { transform:translateX(3px); border-color:#bd8a2f; background:#fffdf3; }
+.choice-list > button { -webkit-tap-highlight-color:transparent; touch-action:manipulation; }
+.choice-list > button:active { transform:scale(.985); border-color:#bd8a2f; background:#fff3d0; }
 .choice-list i { font-style:normal; display:grid; place-items:center; flex:0 0 28px; height:28px; border-radius:50%; background:#e7dfc0; color:#6b5d30; font-size:9px; font-weight:800; }
 .choice-list span { display:grid; gap:3px; }
 .choice-list b { font-size:12px; }
@@ -211,3 +215,9 @@ h1 em { font-family:Spectral, Georgia, serif; font-weight:600; color:var(--gold)
   #joystick { width:96px; height:96px; }
   #joystickKnob { left:27px; top:27px; width:42px; height:42px; }
 }
+
+/* === Perbaikan panel & layar HP === */
+#app.modal-open #touchControls, #app.modal-open #sysHud, #app.modal-open #desktopHelp { pointer-events:none !important; }
+#app.modal-open #touchControls { opacity:0; transition:opacity .2s; }
+#app.modal-open .round-action, #app.modal-open #joystick, #app.modal-open #lookZone { pointer-events:none !important; }
+.sys-btn, .round-action, .primary, .text-button { -webkit-tap-highlight-color:transparent; touch-action:manipulation; }

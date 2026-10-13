@@ -24,6 +24,8 @@ Alur: dekati roh → **AMATI** saat ia bereaksi → gunakan **UJI** (berpura-pur
 
 ## ✨ Yang sudah ada di Playtest 0.2
 
+> **Perbaikan 0.2.1 (panel & layar HP):** panel UJI/TAFSIR kini pasti bisa ditutup & dipilih di layar sentuh (tombol ✕ besar 44px, ketuk di luar panel untuk menutup, `Esc` di desktop, kontrol di belakang panel mati total saat panel terbuka). Layar mengikuti `visualViewport` + `100dvh` dan ada tombol **⛶ layar penuh** agar tidak kepotong toolbar browser.
+
 - **Kamera first-person penuh**: pointer-lock mouse, sentuh-geser di HP, *head-bob*, kamera miring saat strafing/dodge, FOV dinamis saat lari & menghindar, langkah kaki bersuara sintetis.
 - **Viewmodel tangan + jimat penafsir** di layar: berayun saat berjalan, terangkat saat mengamati, permata berubah warna (membidik = emas, siap tafsir = hijau, mengamati = berdenyut).
 - **Dunia cel-shaded prosedural**: desa dengan 5 rumah, ladang gandum, lonceng, kuil batu, pagar, bunga, bebatuan, lentera hangat, pegunungan, awan bergerak, langit gradasi + matahari, serbuk sari beterbangan, burung melintas, pohon bergoyang.

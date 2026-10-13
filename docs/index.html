@@ -8,8 +8,8 @@
     <meta name="description" content="Prototipe game first-person Duel Interpretasi" />
     <link rel="manifest" href="./manifest.webmanifest" />
     <title>Duel Interpretasi — Prototipe</title>
-    <script type="module" crossorigin src="./assets/index-DPqgglOp.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-CWLeOxvw.css">
+    <script type="module" crossorigin src="./assets/index-Cn59Tm1t.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-BmnRG9Zm.css">
   </head>
   <body>
     <div id="app">
@@ -26,8 +26,29 @@
         <section class="clarity-card glass">
           <div class="clarity-label"><span>KEJERNIHAN</span><b id="clarityValue">100</b></div>
           <div class="bar"><i id="clarityFill"></i></div>
+          <div class="clarity-label stamina-label"><span>STAMINA · SHIFT</span></div>
+          <div class="bar stamina"><i id="staminaFill"></i></div>
         </section>
       </header>
+
+      <div id="compass" class="hidden-game-ui" aria-hidden="true">
+        <div id="compassStrip">
+          <span class="compass-mark cardinal" data-mark="N">U</span>
+          <span class="compass-mark cardinal" data-mark="E">T</span>
+          <span class="compass-mark cardinal" data-mark="S">S</span>
+          <span class="compass-mark cardinal" data-mark="W">B</span>
+          <span id="compassEnemy" class="compass-mark target-mark">◆</span>
+          <span id="compassBell" class="compass-mark bell-mark">♪</span>
+        </div>
+        <i class="compass-notch"></i>
+      </div>
+
+      <div id="sysHud" class="hidden-game-ui">
+        <span id="perfHud"><b id="fpsValue">60</b> FPS · <span id="qualityValue">TINGGI</span></span>
+        <button id="fullscreenBtn" class="sys-btn" aria-label="Layar penuh">⛶</button>
+        <button id="muteBtn" class="sys-btn" aria-label="Bisukan atau bunyikan suara">♪</button>
+        <button id="pauseBtn" class="sys-btn" aria-label="Jeda">❚❚</button>
+      </div>
 
       <aside id="evidencePanel" class="glass hidden-game-ui">
         <button id="evidenceToggle" aria-label="Buka atau tutup catatan">
@@ -50,7 +71,7 @@
       <div id="toast" role="status"></div>
 
       <div id="desktopHelp" class="glass hidden-game-ui">
-        <span><kbd>WASD</kbd> Gerak</span><span><kbd>E</kbd> Amati</span><span><kbd>F</kbd> Uji</span><span><kbd>SPASI</kbd> Hindar</span><span><kbd>R</kbd> Tafsirkan</span>
+        <span><kbd>WASD</kbd> Gerak</span><span><kbd>SHIFT</kbd> Lari</span><span><kbd>E</kbd> Amati</span><span><kbd>F</kbd> Uji</span><span><kbd>SPASI</kbd> Hindar</span><span><kbd>R</kbd> Tafsirkan</span><span><kbd>P</kbd> Jeda</span><span><kbd>M</kbd> Suara</span>
       </div>
 
       <div id="touchControls" class="hidden-game-ui" aria-hidden="true">
@@ -75,7 +96,7 @@
           </div>
           <small>Gunakan headphone · Landscape direkomendasikan</small>
         </div>
-        <div class="version">PLAYTEST 0.1</div>
+        <div class="version">PLAYTEST 0.2.1 · WEB PREVIEW</div>
       </section>
 
       <section id="tutorialCard" class="modal-card hidden">
@@ -130,6 +151,19 @@
             <button id="replayBtn" class="primary">UJI LAGI</button>
             <button id="continueExploreBtn" class="text-button">Kembali ke desa</button>
           </div>
+        </div>
+      </section>
+
+      <section id="pauseScreen" class="screen pause-screen">
+        <div class="result-card">
+          <span class="chapter">JEDA</span>
+          <h2>Desa menunggu.</h2>
+          <p>Kejernihan dan jejak pikiranmu tersimpan otomatis sebagai checkpoint.</p>
+          <div class="result-actions">
+            <button id="resumeBtn" class="primary">LANJUTKAN <span>→</span></button>
+            <button id="restartBtn" class="text-button">Mulai ulang encounter</button>
+          </div>
+          <small class="pause-hint">Tekan <kbd>P</kbd> untuk lanjut · <kbd>M</kbd> untuk suara · <kbd>Esc</kbd> tutup panel</small>
         </div>
       </section>
 

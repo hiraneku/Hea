@@ -581,6 +581,7 @@ function updateStaminaUI() {
 
 function startGame() {
   initAudio();
+  fitViewport();
   $('#startScreen').classList.remove('active');
   app.classList.add('playing');
   gameState = 'playing';
@@ -659,17 +660,47 @@ function lockPointer() {
   if (!isTouch && gameState === 'playing' && !modalOpen && document.pointerLockElement !== canvas) canvas.requestPointerLock?.();
 }
 
+let openModalId = null;
+let modalOpenedAt = 0;
+const closableModals = new Set(['testPanel', 'interpretPanel']);
+function syncModalChrome() {
+  const anyModal = !!document.querySelector('.modal-card:not(.hidden)') || paused;
+  app.classList.toggle('modal-open', anyModal);
+}
+function releaseTouchControls() {
+  joystick.id = null;
+  joystick.x = 0;
+  joystick.y = 0;
+  const knobEl = $('#joystickKnob');
+  if (knobEl) knobEl.style.transform = 'translate(0,0)';
+  lookPointer = null;
+}
 function openModal(id) {
   modalOpen = true;
+  openModalId = id;
+  modalOpenedAt = performance.now();
+  releaseTouchControls();
   document.exitPointerLock?.();
   $('#' + id).classList.remove('hidden');
+  syncModalChrome();
 }
 
 function closeModal(id) {
   $('#' + id).classList.add('hidden');
-  modalOpen = false;
-  if (!isTouch) setTimeout(lockPointer, 80);
+  if (openModalId === id) openModalId = null;
+  modalOpen = !!document.querySelector('.modal-card:not(.hidden)');
+  syncModalChrome();
+  if (!modalOpen && !isTouch) setTimeout(lockPointer, 80);
 }
+
+// Ketuk di luar kartu menutup panel yang boleh ditutup (UJI / TAFSIR).
+document.addEventListener('pointerup', (event) => {
+  if (!openModalId || !closableModals.has(openModalId)) return;
+  if (performance.now() - modalOpenedAt < 450) return;
+  if (event.target.closest?.('.modal-card, .round-action, .sys-btn, .modal-card *')) return;
+  const card = $('#' + openModalId);
+  if (card && !card.contains(event.target)) closeModal(openModalId);
+});
 
 function showToast(text, duration = 3100) {
   const toast = $('#toast');
@@ -900,6 +931,8 @@ function tryInterpret() {
 function chooseInterpretation(choice) {
   if (evidence.size < 3 || $('#interpretPanel').classList.contains('hidden')) return;
   $('#interpretPanel').classList.add('hidden');
+  openModalId = null;
+  syncModalChrome();
   if (choice !== 'abandonment') {
     modalOpen = false;
     enemy.enragedUntil = performance.now() / 1000 + 7;
@@ -949,6 +982,8 @@ const outcomes = {
 function resolveEnemy(type) {
   if (!enemy.revealed || $('#resolvePanel').classList.contains('hidden')) return;
   $('#resolvePanel').classList.add('hidden');
+  openModalId = null;
+  syncModalChrome();
   enemy.resolved = true;
   enemy.revealed = true;
   gameState = 'resolved';
@@ -1328,6 +1363,10 @@ addEventListener('keydown', (event) => {
   if (event.code === 'Space') { event.preventDefault(); dodge(); }
   if (event.code === 'KeyR') tryInterpret();
   if (event.code === 'KeyP') setPaused(!paused);
+  if (event.code === 'Escape') {
+    if (openModalId && closableModals.has(openModalId)) closeModal(openModalId);
+    else if (paused) setPaused(false);
+  }
   if (event.code === 'KeyM') { initAudio(); setMuted(!muted); }
 });
 addEventListener('keyup', (event) => keys.delete(event.code));
@@ -1392,54 +1431,103 @@ lookZone.addEventListener('pointermove', (event) => {
 lookZone.addEventListener('pointerup', (event) => { if (event.pointerId === lookPointer) lookPointer = null; });
 lookZone.addEventListener('pointercancel', (event) => { if (event.pointerId === lookPointer) lookPointer = null; });
 
-// UI events.
-$('#startBtn').addEventListener('click', startGame);
-$('#resetBtn').addEventListener('click', () => {
+// UI events — onTap memakai pointerup + click (anti dobel) agar tap di HP selalu terdaftar,
+// dan semua pendaftaran dijaga null agar satu elemen hilang tidak mematikan tombol lain.
+function onTap(el, handler) {
+  if (!el) return;
+  let last = 0;
+  const fire = (event) => {
+    const now = performance.now();
+    if (now - last < 450) return;
+    last = now;
+    event.preventDefault?.();
+    event.stopPropagation?.();
+    handler(event);
+  };
+  el.addEventListener('pointerup', fire);
+  el.addEventListener('click', fire);
+}
+
+onTap($('#startBtn'), startGame);
+onTap($('#resetBtn'), () => {
   localStorage.removeItem('duel-interpretasi-checkpoint');
   localStorage.removeItem('duel-interpretasi-outcome');
   $('#resetBtn').textContent = 'Checkpoint dihapus';
 });
-$('#tutorialOk').addEventListener('click', () => {
+onTap($('#tutorialOk'), () => {
   $('#tutorialCard').classList.add('hidden');
   modalOpen = false;
+  openModalId = null;
+  syncModalChrome();
   showToast('Temukan Roh Ladang di sepanjang jalan menuju ladang.', 3500);
   if (!isTouch) lockPointer();
 });
-$('#observeBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); observe(); });
-$('#testBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); openTest(); });
-$('#dodgeBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); dodge(); });
-$('#interpretBtn').addEventListener('pointerdown', (e) => { e.preventDefault(); tryInterpret(); });
-$('#evidenceToggle').addEventListener('click', () => $('#evidencePanel').classList.toggle('collapsed'));
-$('#pauseBtn').addEventListener('click', () => setPaused(true));
-$('#muteBtn').addEventListener('click', () => { initAudio(); setMuted(!muted); });
-$('#resumeBtn').addEventListener('click', () => setPaused(false));
-$('#restartBtn').addEventListener('click', () => { setPaused(false); resetEncounter(true); showToast('Encounter dimulai ulang dari penanda desa.'); });
-$$('[data-close]').forEach((button) => button.addEventListener('click', () => closeModal(button.dataset.close)));
-$$('[data-test]').forEach((button) => button.addEventListener('click', () => selectTest(button.dataset.test)));
-$$('[data-interpret]').forEach((button) => button.addEventListener('click', () => chooseInterpretation(button.dataset.interpret)));
-$$('[data-resolve]').forEach((button) => button.addEventListener('click', () => resolveEnemy(button.dataset.resolve)));
-$('#replayBtn').addEventListener('click', () => {
+$('#observeBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); observe(); });
+$('#testBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); openTest(); });
+$('#dodgeBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); dodge(); });
+$('#interpretBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); tryInterpret(); });
+onTap($('#evidenceToggle'), () => $('#evidencePanel')?.classList.toggle('collapsed'));
+onTap($('#pauseBtn'), () => setPaused(true));
+onTap($('#muteBtn'), () => { initAudio(); setMuted(!muted); });
+onTap($('#fullscreenBtn'), toggleFullscreen);
+onTap($('#resumeBtn'), () => setPaused(false));
+onTap($('#restartBtn'), () => { setPaused(false); resetEncounter(true); showToast('Encounter dimulai ulang dari penanda desa.'); });
+$$('[data-close]').forEach((button) => onTap(button, () => closeModal(button.dataset.close)));
+$$('[data-test]').forEach((button) => onTap(button, () => selectTest(button.dataset.test)));
+$$('[data-interpret]').forEach((button) => onTap(button, () => chooseInterpretation(button.dataset.interpret)));
+$$('[data-resolve]').forEach((button) => onTap(button, () => resolveEnemy(button.dataset.resolve)));
+onTap($('#replayBtn'), () => {
   scene.background.setHex(0x91ced9);
   scene.fog.color.setHex(0x91ced9);
   skyUniforms.topColor.value.setHex(0x5fb2cf);
   enemy.group.visible = true;
   resetEncounter(true);
 });
-$('#continueExploreBtn').addEventListener('click', () => {
+onTap($('#continueExploreBtn'), () => {
   $('#resultScreen').classList.remove('active');
   modalOpen = false;
+  openModalId = null;
+  syncModalChrome();
   gameState = 'playing';
   updateObjective();
   if (!isTouch) lockPointer();
   showToast('Prototipe selesai. Kamu masih dapat menjelajahi Desa Aster.');
 });
 
-addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
+function fitViewport() {
+  const vv = window.visualViewport;
+  const w = Math.round(vv?.width || innerWidth);
+  const h = Math.round(vv?.height || innerHeight);
+  if (!w || !h) return;
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.35 : 1.8));
-  renderer.setSize(innerWidth, innerHeight);
-});
+  renderer.setSize(w, h);
+}
+addEventListener('resize', fitViewport);
+addEventListener('orientationchange', () => { setTimeout(fitViewport, 60); setTimeout(fitViewport, 350); });
+window.visualViewport?.addEventListener('resize', fitViewport);
+document.addEventListener('fullscreenchange', () => setTimeout(fitViewport, 120));
+fitViewport();
+
+async function toggleFullscreen() {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      const el = document.documentElement;
+      if (el.requestFullscreen) {
+        try { await el.requestFullscreen({ navigationUI: 'hide' }); }
+        catch { await el.requestFullscreen(); }
+      }
+      if (isTouch && screen.orientation?.lock) {
+        try { await screen.orientation.lock('landscape'); } catch { /* tidak didukung */ }
+      }
+    }
+  } catch { /* abaikan */ }
+  setTimeout(fitViewport, 120);
+  setTimeout(fitViewport, 450);
+}
 addEventListener('contextmenu', (event) => event.preventDefault());
 
 updateEvidenceUI();
