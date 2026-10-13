@@ -15,6 +15,7 @@
       <div id="skyGrain"></div>
       <div id="damageFlash"></div>
       <div id="vignette"></div>
+      <div id="fsOverlay"></div>
 
       <header id="topHud" class="hidden-game-ui">
         <section class="objective-card glass">
@@ -22,10 +23,17 @@
           <strong id="objective">Dekati ladang yang sunyi</strong>
         </section>
         <section class="clarity-card glass">
-          <div class="clarity-label"><span>KEJERNIHAN</span><b id="clarityValue">100</b></div>
+          <div class="clarity-label"><span>KEJERNIHAN · HP</span><b id="clarityValue">100</b></div>
           <div class="bar"><i id="clarityFill"></i></div>
+          <div class="clarity-label stamina-label"><span>MANA</span><b id="manaValue" class="mana-num">60</b></div>
+          <div class="bar mana"><i id="manaFill"></i></div>
           <div class="clarity-label stamina-label"><span>STAMINA · SHIFT</span></div>
           <div class="bar stamina"><i id="staminaFill"></i></div>
+          <div class="eye-rows">
+            <div class="eye-row"><span>KIRI · ANALISIS</span><div class="bar eye"><i id="cognitiveFill"></i></div></div>
+            <div class="eye-row"><span>KANAN · PREDIKSI</span><div class="bar eye"><i id="temporalFill"></i></div></div>
+          </div>
+          <div class="pd-row"><span>PERFECT DODGE</span><span id="pdDots"><i class="on"></i><i class="on"></i><i class="on"></i></span></div>
         </section>
       </header>
 
@@ -49,19 +57,28 @@
       </div>
 
       <aside id="evidencePanel" class="glass hidden-game-ui">
-        <button id="evidenceToggle" aria-label="Buka atau tutup catatan">
-          <span>JEJAK PIKIRAN</span><b id="evidenceCount">0 / 3</b>
+        <button id="evidenceToggle" aria-label="Buka atau tutup Archive">
+          <span>ARCHIVE</span><b id="evidenceCount">0 / 3</b>
         </button>
         <div id="evidenceList">
-          <div class="evidence locked" data-key="guard"><i>01</i><p>Belum dipahami</p></div>
-          <div class="evidence locked" data-key="departure"><i>02</i><p>Belum dipahami</p></div>
-          <div class="evidence locked" data-key="bell"><i>03</i><p>Belum dipahami</p></div>
+          <div class="evidence locked" data-key="formula"><i>F</i><p>Formula proyektil roh — belum direkam</p></div>
+          <div class="evidence locked" data-key="mechanism"><i>M</i><p>Mekanisme roh — belum dianalisis</p></div>
+          <div class="evidence locked" data-key="identity"><i>?</i><p>Identitas roh — serpihan cerita (bonus)</p></div>
         </div>
+        <div id="synthHint">Tahan <b>Q</b> menganalisis target · <b>T</b> Synthesis</div>
       </aside>
 
       <div id="enemyTag" class="hidden-game-ui">
         <span>ROH LADANG</span>
         <b id="enemyState">Tidak terbaca</b>
+        <div class="bar enemy-hp"><i id="enemyHpFill"></i></div>
+      </div>
+
+      <div id="spellBar" class="hidden-game-ui">
+        <button class="spell-slot selected" data-slot="0"><b>1</b><span>Kosong</span></button>
+        <button class="spell-slot" data-slot="1"><b>2</b><span>Kosong</span></button>
+        <button class="spell-slot" data-slot="2"><b>3</b><span>Kosong</span></button>
+        <button class="spell-slot" data-slot="3"><b>4</b><span>Kosong</span></button>
       </div>
       <div id="crosshair" class="hidden-game-ui"><i></i><i></i><i></i><i></i></div>
       <div id="scanRing"><span></span></div>
@@ -69,17 +86,18 @@
       <div id="toast" role="status"></div>
 
       <div id="desktopHelp" class="glass hidden-game-ui">
-        <span><kbd>WASD</kbd> Gerak</span><span><kbd>SHIFT</kbd> Lari</span><span><kbd>E</kbd> Amati</span><span><kbd>F</kbd> Uji</span><span><kbd>SPASI</kbd> Hindar</span><span><kbd>R</kbd> Tafsirkan</span><span><kbd>P</kbd> Jeda</span><span><kbd>M</kbd> Suara</span>
+        <span><kbd>WASD</kbd> Gerak</span><span><kbd>SHIFT</kbd> Lari</span><span><kbd>Q</kbd> Appraisal</span><span><kbd>E</kbd> Future Sight</span><span><kbd>KLIK</kbd> Sihir</span><span><kbd>1–4</kbd> Slot</span><span><kbd>T</kbd> Synthesis</span><span><kbd>F</kbd> Interaksi</span><span><kbd>SPASI</kbd> Hindar</span><span><kbd>P</kbd> Jeda</span>
       </div>
 
       <div id="touchControls" class="hidden-game-ui" aria-hidden="true">
         <div id="joystick"><div id="joystickKnob"></div></div>
         <div id="lookZone"></div>
         <div id="actionButtons">
-          <button id="observeBtn" class="round-action observe"><span>◉</span><b>AMATI</b></button>
-          <button id="testBtn" class="round-action test"><span>◇</span><b>UJI</b></button>
+          <button id="observeBtn" class="round-action observe"><span>◉</span><b>ANALISIS</b></button>
+          <button id="testBtn" class="round-action test"><span>◐</span><b>PREDIKSI</b></button>
+          <button id="castBtn" class="round-action cast"><span>✦</span><b>SIHIR</b></button>
           <button id="dodgeBtn" class="round-action dodge"><span>»</span><b>HINDAR</b></button>
-          <button id="interpretBtn" class="round-action interpret" disabled><span>✦</span><b>TAFSIR</b></button>
+          <button id="interpretBtn" class="round-action interpret"><span>⬡</span><b>SINTESIS</b></button>
         </div>
       </div>
 
@@ -94,41 +112,39 @@
           </div>
           <small>Gunakan headphone · Landscape direkomendasikan</small>
         </div>
-        <div class="version">PLAYTEST 0.2.1 · WEB PREVIEW</div>
+        <div class="version">PLAYTEST 0.3.0 · SISTEM EMPAT KEMAMPUAN</div>
       </section>
 
       <section id="tutorialCard" class="modal-card hidden">
         <span class="eyebrow">CARA BERMAIN</span>
-        <h2>Jangan buru-buru menyerang.</h2>
-        <p>Hadapi roh, amati perilakunya, lalu gunakan <b>UJI</b> untuk memancing respons. Setelah tiga bukti terkumpul, susun interpretasimu.</p>
+        <h2>Kamu belum punya sihir. Matamu punya.</h2>
+        <p><b>Mata kiri (Q)</b> menganalisis struktur sihir — data masuk <b>Archive</b>: Observasi → Analisis → Terverifikasi. <b>Mata kanan (E)</b> melihat 1 detik ke depan. Keduanya punya beban overload. Bertahanlah, pelajari musuhmu, lalu pilih pemberian pertamamu.</p>
         <button id="tutorialOk" class="primary">SAYA MENGERTI</button>
       </section>
 
-      <section id="testPanel" class="modal-card choice-card hidden">
-        <button class="close-modal" data-close="testPanel">×</button>
-        <span class="eyebrow">UJI DUGAAN</span>
-        <h2>Bagaimana kamu memancing reaksinya?</h2>
+      <section id="grantPanel" class="modal-card choice-card hidden">
+        <span class="eyebrow">PEMBERIAN PERTAMA</span>
+        <h2>Seseorang mempercayakan satu formula kepadamu.</h2>
+        <p class="modal-copy">Pilih satu. Sisanya hanya bisa kamu peroleh dengan belajar — melihat, menganalisis, dan mengarsipkannya sendiri.</p>
         <div class="choice-list">
-          <button data-test="retreat"><i>01</i><span><b>Berpura-pura pergi</b><small>Mundur menjauhi ladang dan perhatikan reaksinya.</small></span></button>
-          <button data-test="bell"><i>02</i><span><b>Pinjam suara lonceng</b><small>Pindahkan suara lonceng tua ke tengah ladang.</small></span></button>
-          <button data-test="stone"><i>03</i><span><b>Lempar batu ke arahnya</b><small>Respons langsung, tetapi mungkin tidak mengungkap niatnya.</small></span></button>
+          <button data-grant="cahaya"><i>✦</i><span><b>Pecahan Cahaya</b><small>Proyektil cepat dan lurus. Sederhana, dapat diandalkan. (Mana 10)</small></span></button>
+          <button data-grant="angin"><i>≋</i><span><b>Hembusan Aster</b><small>Gelombang dorong: kerusakan kecil, mendorong roh mundur dan menunda serangannya. (Mana 14)</small></span></button>
+          <button data-grant="perisai"><i>⬡</i><span><b>Perisai Sekejap</b><small>Benteng cahaya 2,5 detik yang menahan proyektil roh. (Mana 18)</small></span></button>
         </div>
       </section>
 
-      <section id="interpretPanel" class="modal-card choice-card hidden">
-        <button class="close-modal" data-close="interpretPanel">×</button>
-        <span class="eyebrow">SUSUN INTERPRETASI</span>
-        <h2>Apa yang sebenarnya menggerakkan roh ini?</h2>
-        <p class="modal-copy">Pilih kesimpulan yang paling konsisten dengan seluruh jejak perilakunya.</p>
-        <div class="choice-list interpretation-list">
-          <button data-interpret="power"><i>A</i><span><b>Ia menginginkan kekuasaan</b><small>Ladang hanyalah wilayah yang ingin dikuasainya.</small></span></button>
-          <button data-interpret="abandonment"><i>B</i><span><b>Ia takut ditinggalkan</b><small>Amarahnya lahir dari tugas menjaga seseorang yang tak kembali.</small></span></button>
-          <button data-interpret="sound"><i>C</i><span><b>Ia membenci suara lonceng</b><small>Lonceng adalah sumber penderitaan dan kemarahannya.</small></span></button>
-        </div>
+      <section id="synthesisPanel" class="modal-card choice-card hidden">
+        <button class="close-modal" data-close="synthesisPanel">×</button>
+        <span class="eyebrow">SYNTHESIS · WAKTU MELAMBAT</span>
+        <h2>Rancang formula baru</h2>
+        <p class="modal-copy">Pilih <b>dua</b> formula yang sudah kamu miliki. Kombinasi yang belum teruji menghasilkan versi lemah — sempurnakan nanti di tempat aman.</p>
+        <div id="synthList" class="choice-list"></div>
+        <p id="synthResult" class="modal-copy">Belum ada kombinasi dipilih.</p>
+        <button id="synthCraft" class="primary" disabled>RANCANG FORMULA</button>
       </section>
 
       <section id="resolvePanel" class="modal-card choice-card hidden">
-        <span class="eyebrow">IDENTITASNYA TERBUKA</span>
+        <span class="eyebrow">MEKANISMENYA LUMPUH · IDENTITAS TERBACA</span>
         <h2>“Aku tetap menjaga… karena jika pergi, siapa yang akan menunggunya?”</h2>
         <p class="modal-copy">Pemahaman tidak menentukan apa yang harus dilakukan. Keputusan terakhir tetap milikmu.</p>
         <div class="choice-list resolution-list">
@@ -140,13 +156,13 @@
 
       <section id="resultScreen" class="screen result-screen">
         <div class="result-card">
-          <span class="chapter">HASIL INTERPRETASI</span>
+          <span class="chapter">HASIL PENYELESAIAN</span>
           <div id="resultSigil">○</div>
           <h2 id="resultTitle">Penjaga yang Memilih</h2>
           <p id="resultText"></p>
           <blockquote id="resultQuote"></blockquote>
           <div class="result-actions">
-            <button id="replayBtn" class="primary">UJI LAGI</button>
+            <button id="replayBtn" class="primary">MAIN LAGI</button>
             <button id="continueExploreBtn" class="text-button">Kembali ke desa</button>
           </div>
         </div>
@@ -156,7 +172,7 @@
         <div class="result-card">
           <span class="chapter">JEDA</span>
           <h2>Desa menunggu.</h2>
-          <p>Kejernihan dan jejak pikiranmu tersimpan otomatis sebagai checkpoint.</p>
+          <p>Archive dan formula yang sudah kamu pelajari tidak akan hilang — bahkan oleh kematian.</p>
           <div class="result-actions">
             <button id="resumeBtn" class="primary">LANJUTKAN <span>→</span></button>
             <button id="restartBtn" class="text-button">Mulai ulang encounter</button>

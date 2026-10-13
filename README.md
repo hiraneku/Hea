@@ -24,6 +24,8 @@ Alur: dekati roh → **AMATI** saat ia bereaksi → gunakan **UJI** (berpura-pur
 
 ## ✨ Yang sudah ada di Playtest 0.2
 
+> **Playtest 0.3.0 — Sistem Empat Kemampuan diterapkan:** Duel Interpretasi versi menu diganti inti baru: Appraisal (Q, mata kiri) & Future Sight (E, mata kanan) sebagai toggle dengan overload masing-masing; Archive bertingkat Observasi→Analisis→Terverifikasi; pemain mulai tanpa sihir dan memilih 1 dari 3 pemberian; mana + 4 slot sihir; Synthesis (T, waktu melambat, gagal = versi lemah); Perfect Dodge otomatis stok 3; mati tidak menghapus Archive. Kontrol baru: `Q` Appraisal · `E` Future Sight · `Klik kiri` Sihir · `1–4`/roda mouse slot · `T` Synthesis · `F` Interaksi (lonceng/penanda).
+>
 > **Perbaikan 0.2.1 (panel & layar HP):** panel UJI/TAFSIR kini pasti bisa ditutup & dipilih di layar sentuh (tombol ✕ besar 44px, ketuk di luar panel untuk menutup, `Esc` di desktop, kontrol di belakang panel mati total saat panel terbuka). Layar mengikuti `visualViewport` + `100dvh` dan ada tombol **⛶ layar penuh** agar tidak kepotong toolbar browser.
 
 - **Kamera first-person penuh**: pointer-lock mouse, sentuh-geser di HP, *head-bob*, kamera miring saat strafing/dodge, FOV dinamis saat lari & menghindar, langkah kaki bersuara sintetis.

@@ -406,8 +406,10 @@ const enemy = {
   rushEnd: 0,
   enragedUntil: 0,
   attackTimer: 2.1,
-  learnedDodge: false,
-  dodgeCount: 0,
+  hp: 120,
+  maxHp: 120,
+  vel: null,
+  lastPos: null,
 };
 
 function createEnemy() {
@@ -453,6 +455,28 @@ function createEnemy() {
 }
 createEnemy();
 
+// Bayangan masa depan (Future Sight): ghost musuh + garis lintasan proyektil.
+const fsGhost = new THREE.Group();
+{
+  const ghostMat = new THREE.MeshBasicMaterial({ color: 0xbfefff, transparent: true, opacity: 0.32, depthWrite: false });
+  const body = new THREE.Mesh(new THREE.ConeGeometry(0.72, 1.6, 7), ghostMat);
+  body.position.y = 2.4; body.rotation.x = Math.PI;
+  const headG = new THREE.Mesh(new THREE.SphereGeometry(0.48, 10, 8), ghostMat);
+  headG.position.y = 3.4;
+  fsGhost.add(body, headG);
+  fsGhost.visible = false;
+  scene.add(fsGhost);
+}
+const FS_MAX_LINES = 14;
+const fsLinePos = new Float32Array(FS_MAX_LINES * 2 * 3);
+const fsLineGeo = new THREE.BufferGeometry();
+fsLineGeo.setAttribute('position', new THREE.BufferAttribute(fsLinePos, 3));
+const fsLines = new THREE.LineSegments(fsLineGeo, new THREE.LineBasicMaterial({ color: 0xffb199, transparent: true, opacity: 0.75 }));
+fsLines.visible = false;
+fsLines.frustumCulled = false;
+scene.add(fsLines);
+const enemyVelHistory = [];
+
 // --- First-person viewmodel: sleeve, hand and the interpreter's charm. ---
 const viewmodel = new THREE.Group();
 const vmParts = {};
@@ -486,12 +510,11 @@ const bursts = [];
 const rings = [];
 
 function spawnProjectile(now) {
-  const projectileMat = new THREE.MeshBasicMaterial({ color: enemy.learnedDodge ? 0xffba68 : 0xff6259 });
+  const projectileMat = new THREE.MeshBasicMaterial({ color: 0xff6259 });
   const core = mesh(new THREE.IcosahedronGeometry(.17, 0), projectileMat, { shadow: false });
   core.position.copy(enemy.group.position).add(new THREE.Vector3(0, 2.4, 0));
   const target = player.position.clone();
-  if (enemy.learnedDodge) target.add(player.lastMove.clone().multiplyScalar(1.6));
-  const velocity = target.sub(core.position).normalize().multiplyScalar(enemy.learnedDodge ? 8.8 : 6.7);
+  const velocity = target.sub(core.position).normalize().multiplyScalar(6.9);
   const light = new THREE.PointLight(0xff5149, 1.7, 3.5);
   core.add(light);
   scene.add(core);
@@ -529,6 +552,10 @@ const player = {
   yaw: 0,
   pitch: -.05,
   clarity: 100,
+  mana: 60,
+  maxMana: 60,
+  pdCharges: 3,
+  pdReadyAt: 0,
   stamina: 100,
   sprintExhausted: false,
   sprinting: false,
@@ -559,7 +586,40 @@ let actionLock = false;
 let toastTimer = 0;
 let audioCtx = null;
 let checkpoint = null;
-const evidence = new Set();
+const evidence = new Set(); // (lama) digantikan Archive di bawah
+
+// === Sistem Empat Kemampuan (Playtest 0.3) ===
+const archive = { formula: 0, mechanism: 0, identity: 0 }; // progres 0..100 per data
+const archiveTierName = (v) => v >= 100 ? 'Terverifikasi' : v >= 75 ? 'Analisis Mendalam' : v >= 40 ? 'Analisis' : v > 0 ? 'Observasi' : 'Belum direkam';
+const ownedFormulas = new Set();
+const spellSlots = [null, null, null, null];
+let selectedSlot = 0;
+const spellCooldowns = {};
+let granted = false;
+let appraisalOn = false;
+let futureSightOn = false;
+let temporalLoad = 0;   // detik beban Future Sight (tahap: 30 / 60 / 120)
+let cognitiveLoad = 0;  // beban Appraisal 0..130 (lelah menumpuk > 60)
+let fsLocked = false;
+let shieldUntil = 0;
+let synthesisOpen = false;
+let enemyBroken = false;
+const playerProjectiles = [];
+
+const FORMULAS = {
+  cahaya: { name: 'Pecahan Cahaya', cost: 10, cd: 0.55, dmg: 16, speed: 27, color: 0xffe9a8, kind: 'bolt' },
+  angin: { name: 'Hembusan Aster', cost: 14, cd: 1.1, dmg: 7, speed: 20, color: 0xbfeee2, kind: 'knock' },
+  perisai: { name: 'Perisai Sekejap', cost: 18, cd: 6, dmg: 0, color: 0x8ddbd2, kind: 'shield' },
+  proyektilRoh: { name: 'Proyektil Roh', cost: 12, cd: 0.8, dmg: 13, speed: 21, color: 0xff8d84, kind: 'bolt' },
+  jarumCahaya: { name: 'Jarum Cahaya Ladang', cost: 16, cd: 0.7, dmg: 27, speed: 30, color: 0xfff3b0, kind: 'bolt' },
+  badaiJarum: { name: 'Badai Jarum', cost: 20, cd: 1.3, dmg: 15, speed: 23, color: 0xd8ffd8, kind: 'knock' },
+  perisaiDuri: { name: 'Perisai Berduri', cost: 22, cd: 7, dmg: 0, color: 0xa8f0d8, kind: 'shield' },
+};
+const RECIPES = {
+  'cahaya+proyektilRoh': 'jarumCahaya',
+  'angin+proyektilRoh': 'badaiJarum',
+  'perisai+proyektilRoh': 'perisaiDuri',
+};
 
 const clueText = {
   guard: 'Ia selalu kembali menghadap batu penanda di belakangnya.',
@@ -600,7 +660,22 @@ function startGame() {
 
 function resetEncounter(clearSave = true) {
   if (clearSave) localStorage.removeItem('duel-interpretasi-checkpoint');
-  evidence.clear();
+  Object.keys(archive).forEach((k) => { archive[k] = 0; });
+  ownedFormulas.clear();
+  spellSlots.fill(null);
+  selectedSlot = 0;
+  granted = false;
+  enemyBroken = false;
+  appraisalOn = false;
+  futureSightOn = false;
+  temporalLoad = 0;
+  cognitiveLoad = 0;
+  player.mana = player.maxMana;
+  player.pdCharges = 3;
+  enemy.hp = enemy.maxHp;
+  lastArchiveSnapshot = '__reset__';
+  updateArchiveUI(true);
+  updateSpellBar();
   player.position.set(0, 1.68, 13);
   player.yaw = 0;
   player.pitch = -.05;
@@ -615,27 +690,31 @@ function resetEncounter(clearSave = true) {
   enemy.revealed = false;
   enemy.resolved = false;
   enemy.rushing = false;
-  enemy.learnedDodge = false;
-  enemy.dodgeCount = 0;
+  enemy.hp = enemy.maxHp;
   enemy.stunnedUntil = 0;
   enemy.attackTimer = 2.1;
   projectiles.splice(0).forEach((p) => scene.remove(p.mesh));
-  updateEvidenceUI();
+  updateArchiveUI();
   updateClarity();
   updateObjective();
   gameState = 'playing';
   modalOpen = false;
   $('#resultScreen').classList.remove('active');
   $('#resolvePanel').classList.add('hidden');
-  $('#interpretPanel').classList.add('hidden');
-  if (!isTouch) setTimeout(lockPointer, 80);
+  $('#synthesisPanel')?.classList.add('hidden');
+  synthesisOpen = false;
+  if (!granted) openModal('grantPanel');
+  else if (!isTouch) setTimeout(lockPointer, 80);
 }
 
 function saveCheckpoint() {
   if (gameState !== 'playing' || enemy.resolved) return;
   checkpoint = {
     position: [player.position.x, player.position.y, player.position.z],
-    evidence: [...evidence],
+    archive: { ...archive },
+    formulas: [...ownedFormulas],
+    slots: [...spellSlots],
+    granted,
     clarity: player.clarity,
   };
   localStorage.setItem('duel-interpretasi-checkpoint', JSON.stringify(checkpoint));
@@ -646,9 +725,14 @@ function restoreCheckpoint() {
     const saved = JSON.parse(localStorage.getItem('duel-interpretasi-checkpoint'));
     if (!saved) return;
     if (Array.isArray(saved.position)) player.position.fromArray(saved.position);
-    if (Array.isArray(saved.evidence)) saved.evidence.forEach((key) => evidence.add(key));
+    if (saved.archive) Object.assign(archive, saved.archive);
+    if (Array.isArray(saved.formulas)) saved.formulas.forEach((k) => { if (FORMULAS[k]) ownedFormulas.add(k); });
+    if (Array.isArray(saved.slots)) saved.slots.forEach((k, i) => { spellSlots[i] = k && FORMULAS[k] ? k : null; });
+    granted = !!saved.granted || ownedFormulas.size > 0;
+    updateArchiveUI(true);
+    updateSpellBar();
     player.clarity = Math.max(45, saved.clarity || 100);
-    updateEvidenceUI();
+    updateArchiveUI();
     updateClarity();
     showToast('Checkpoint desa dipulihkan.');
   } catch {
@@ -662,7 +746,7 @@ function lockPointer() {
 
 let openModalId = null;
 let modalOpenedAt = 0;
-const closableModals = new Set(['testPanel', 'interpretPanel']);
+const closableModals = new Set(['synthesisPanel']);
 function syncModalChrome() {
   const anyModal = !!document.querySelector('.modal-card:not(.hidden)') || paused;
   app.classList.toggle('modal-open', anyModal);
@@ -699,7 +783,10 @@ document.addEventListener('pointerup', (event) => {
   if (performance.now() - modalOpenedAt < 450) return;
   if (event.target.closest?.('.modal-card, .round-action, .sys-btn, .modal-card *')) return;
   const card = $('#' + openModalId);
-  if (card && !card.contains(event.target)) closeModal(openModalId);
+  if (card && !card.contains(event.target)) {
+    if (openModalId === 'synthesisPanel') closeSynthesis();
+    else closeModal(openModalId);
+  }
 });
 
 function showToast(text, duration = 3100) {
@@ -719,39 +806,74 @@ function setPrompt(text = '') {
 function updateObjective() {
   const objective = $('#objective');
   if (enemy.resolved) objective.textContent = 'Jelajahi desa setelah keputusanmu';
-  else if (evidence.size >= 3) objective.textContent = 'Susun interpretasi tentang Roh Ladang';
-  else if (player.testMode === 'retreat') objective.textContent = 'Mundur dan biarkan ia melihatmu pergi';
-  else if (evidence.size === 0) objective.textContent = 'Hadapi Roh Ladang dan amati perilakunya';
-  else objective.textContent = `Temukan jejak perilaku lainnya (${evidence.size}/3)`;
+  else if (enemyBroken) objective.textContent = 'Tentukan nasib Roh Ladang';
+  else if (!granted) objective.textContent = 'Terima pemberian pertamamu';
+  else if (archive.formula < 100) objective.textContent = 'Analisis Roh Ladang (Q) hingga formulanya Terverifikasi';
+  else objective.textContent = 'Lumpuhkan mekanisme Roh Ladang dengan sihirmu';
 }
 
-function addEvidence(key) {
-  if (evidence.has(key)) {
-    showToast('Jejak ini sudah kamu pahami. Cari respons yang berbeda.');
-    return;
-  }
-  evidence.add(key);
-  updateEvidenceUI();
-  updateObjective();
-  saveCheckpoint();
-  spawnBurst(enemy.group.position.clone().add(new THREE.Vector3(0, 2.4, 0)), 0xffd267, 28, 2.2);
-  tone(523, .16, 'sine', .045);
-  setTimeout(() => tone(659, .26, 'sine', .04), 110);
-  showToast(`Jejak dipahami: “${clueText[key]}”`, 4300);
-}
-
-function updateEvidenceUI() {
-  $('#evidenceCount').textContent = `${evidence.size} / 3`;
+const archiveText = {
+  formula: ['Formula proyektil roh — belum direkam', 'Terekam: proyektil energi merah, lintasan lurus ke target.', 'Struktur terbaca: inti energi terbentuk di dada roh sebelum ditembakkan.', 'TERVERIFIKASI — formula tersimpan di Archive dan siap dipakai.'],
+  mechanism: ['Mekanisme roh — belum dianalisis', 'Teramati: roh terikat pada batu penanda di belakangnya.', 'Mekanisme: penanda adalah jangkar; roh kembali ke sana di antara serangan.', 'TERVERIFIKASI — kelemahan: serang saat ia tertegun (lonceng) untuk kerusakan besar.'],
+  identity: ['Identitas roh — serpihan cerita (bonus)', 'Serpihan: ia menunggu seseorang yang tak pernah kembali.', 'Serpihan: amarahnya adalah takut ditinggalkan yang membusuk.', '“Aku tetap menjaga… karena jika pergi, siapa yang akan menunggunya?”'],
+};
+function tierIndex(v) { return v >= 100 ? 3 : v >= 75 ? 2 : v >= 40 ? 1 : 0; }
+let lastArchiveSnapshot = '';
+function updateArchiveUI(force = false) {
+  const snap = `${tierIndex(archive.formula)}|${tierIndex(archive.mechanism)}|${tierIndex(archive.identity)}`;
+  if (snap === lastArchiveSnapshot && !force) return;
+  lastArchiveSnapshot = snap;
+  const verified = [archive.formula, archive.mechanism, archive.identity].filter((v) => v >= 100).length;
+  $('#evidenceCount').textContent = `${verified} / 3`;
   $$('.evidence').forEach((item) => {
     const key = item.dataset.key;
-    const found = evidence.has(key);
-    item.classList.toggle('locked', !found);
-    item.classList.toggle('revealed', found);
-    item.querySelector('p').textContent = found ? clueText[key] : 'Belum dipahami';
+    const v = archive[key] ?? 0;
+    item.classList.toggle('locked', v < 100);
+    item.classList.toggle('revealed', v >= 100);
+    item.querySelector('p').textContent = archiveText[key][tierIndex(v)];
   });
-  const ready = evidence.size >= 3;
-  $('#interpretBtn').disabled = !ready;
-  $('#interpretBtn').classList.toggle('ready', ready);
+  updateObjective();
+}
+function archiveGain(key, amount, now) {
+  const before = tierIndex(archive[key]);
+  archive[key] = Math.min(100, archive[key] + amount);
+  const after = tierIndex(archive[key]);
+  if (after > before) {
+    cognitiveLoad = Math.min(130, cognitiveLoad + 11);
+    tone(523, .14, 'sine', .04);
+    showToast(`Archive · ${key === 'formula' ? 'Formula proyektil' : key === 'mechanism' ? 'Mekanisme roh' : 'Identitas roh'}: ${archiveTierName(archive[key])}`, 2600);
+    if (key === 'formula' && archive[key] >= 100 && !ownedFormulas.has('proyektilRoh')) {
+      ownFormula('proyektilRoh');
+      showToast('Formula Terverifikasi masuk Archive: “Proyektil Roh” kini bisa kamu pakai & sintesis.', 4200);
+    }
+    if (key === 'mechanism' && archive[key] >= 100) showToast('Kelemahan terverifikasi: roh menerima kerusakan besar saat tertegun lonceng.', 4200);
+  }
+  updateArchiveUI();
+}
+function ownFormula(key, silent = false) {
+  if (ownedFormulas.has(key)) return;
+  ownedFormulas.add(key);
+  const empty = spellSlots.indexOf(null);
+  if (empty >= 0) spellSlots[empty] = key;
+  updateSpellBar();
+  if (!silent) tone(659, .2, 'sine', .04);
+}
+function updateSpellBar() {
+  $$('.spell-slot').forEach((el, i) => {
+    const key = spellSlots[i];
+    el.classList.toggle('selected', i === selectedSlot);
+    el.classList.toggle('empty', !key);
+    el.querySelector('span').textContent = key ? FORMULAS[key].name : 'Kosong';
+  });
+}
+function updateResourceUI() {
+  $('#manaValue').textContent = Math.round(player.mana);
+  $('#manaFill').style.width = `${(player.mana / player.maxMana) * 100}%`;
+  $('#temporalFill').style.width = `${Math.min(100, (temporalLoad / 120) * 100)}%`;
+  $('#cognitiveFill').style.width = `${Math.min(100, (cognitiveLoad / 130) * 100)}%`;
+  $$('#pdDots i').forEach((dot, i) => dot.classList.toggle('on', i < player.pdCharges));
+  const hpFill = $('#enemyHpFill');
+  if (hpFill) hpFill.style.width = `${Math.max(0, (enemy.hp / enemy.maxHp) * 100)}%`;
 }
 
 function updateClarity() {
@@ -800,6 +922,12 @@ function setMuted(value) {
 function damage(amount) {
   const now = performance.now() / 1000;
   if (now < player.invulnerableUntil || gameState !== 'playing') return;
+  if (now < shieldUntil) {
+    spawnRing(player.position, 0x8ddbd2, 1.6);
+    tone(660, .1, 'sine', .04);
+    showToast('Perisai menahan serangan.', 900);
+    return;
+  }
   player.clarity -= amount;
   player.invulnerableUntil = now + .55;
   updateClarity();
@@ -811,11 +939,16 @@ function damage(amount) {
 
 function loseClarity() {
   gameState = 'fading';
-  showToast('Interpretasimu runtuh. Kamu kembali ke penanda desa…', 2600);
+  showToast('Kamu pingsan dan dibangunkan di penanda desa. Archive-mu utuh — pengetahuan tidak ikut hilang.', 2800);
   document.exitPointerLock?.();
   setTimeout(() => {
     player.position.set(0, 1.68, 10);
     player.clarity = 100;
+    player.mana = player.maxMana;
+    player.pdCharges = 3;
+    enemy.hp = enemy.maxHp;
+    enemyBroken = false;
+    updateResourceUI();
     player.invulnerableUntil = performance.now() / 1000 + 2;
     enemy.group.position.copy(enemy.anchor);
     enemy.rushing = false;
@@ -834,54 +967,160 @@ function isAimingAtEnemy(threshold = .91, maxDistance = 28) {
   return distance < maxDistance && tempV.dot(tempV2) > threshold;
 }
 
-function observe() {
-  if (gameState !== 'playing' || modalOpen || actionLock) return;
-  const observationTime = performance.now() / 1000;
-  const reactionInProgress = observationTime < enemy.rushRecentUntil || observationTime < enemy.bellRecentUntil;
-  if (!isAimingAtEnemy(reactionInProgress ? .58 : .88, reactionInProgress ? 44 : 28)) {
-    showToast('Arahkan pandangan ke Roh Ladang untuk mengamati.');
+// === Mata kiri: Appraisal (toggle) ===
+function toggleAppraisal() {
+  if (gameState !== 'playing' || modalOpen) return;
+  appraisalOn = !appraisalOn;
+  $('#observeBtn')?.classList.toggle('eye-on', appraisalOn);
+  setPrompt(appraisalOn ? 'Appraisal aktif — arahkan pandangan ke roh…' : '');
+  tone(appraisalOn ? 330 : 220, .12, 'sine', .03);
+}
+
+// === Mata kanan: Future Sight (toggle) ===
+function toggleFutureSight() {
+  if (gameState !== 'playing' || modalOpen) return;
+  if (!futureSightOn && fsLocked) { showToast('Mata kanan masih gelap. Biarkan beban temporalnya turun dulu.'); return; }
+  futureSightOn = !futureSightOn;
+  $('#testBtn')?.classList.toggle('eye-on', futureSightOn);
+  tone(futureSightOn ? 392 : 262, .12, 'sine', .03);
+}
+
+function fsStage() { return temporalLoad >= 120 ? 3 : temporalLoad >= 60 ? 2 : temporalLoad >= 30 ? 1 : 0; }
+
+function updateEyes(dt, now) {
+  // Beban & pemulihan temporal (bertahap: ringan cepat, berat lambat)
+  if (futureSightOn) temporalLoad += dt;
+  else {
+    const rate = temporalLoad < 30 ? 4 : temporalLoad < 60 ? 1.1 : 0.45;
+    temporalLoad = Math.max(0, temporalLoad - rate * dt);
+  }
+  if (temporalLoad >= 120 && futureSightOn) {
+    futureSightOn = false;
+    fsLocked = true;
+    $('#testBtn')?.classList.remove('eye-on');
+    showToast('TEMPORAL SHUTDOWN — mata kanan gelap sementara. Beban harus turun di bawah separuh.', 4200);
+    tone(90, .5, 'sawtooth', .05);
+  }
+  if (fsLocked && temporalLoad < 55) { fsLocked = false; showToast('Penglihatan mata kanan kembali jernih.'); }
+  const stage = fsStage();
+  app.classList.toggle('fs-stage1', futureSightOn && stage === 1);
+  app.classList.toggle('fs-stage2', futureSightOn && stage >= 2);
+
+  // Beban kognitif Appraisal (menumpuk, tanpa shutdown — hanya memperlambat)
+  if (appraisalOn) cognitiveLoad = Math.min(130, cognitiveLoad + dt * 2.1);
+  else cognitiveLoad = Math.max(0, cognitiveLoad - dt * 4.5);
+  const cogFactor = cognitiveLoad > 90 ? 0.3 : cognitiveLoad > 60 ? 0.55 : 1;
+
+  // Kemajuan Archive saat Appraisal aktif
+  if (appraisalOn && gameState === 'playing' && !modalOpen && enemy.group.visible && !enemy.resolved) {
+    const dist = horizontalDistance(player.position, enemy.group.position);
+    if (dist < 30 && isAimingAtEnemy(0.72, 32)) {
+      archiveGain('mechanism', dt * 8.5 * cogFactor, now);
+      if (projectiles.length) archiveGain('formula', dt * 11 * cogFactor, now);
+      if (now < enemy.stunnedUntil) archiveGain('identity', dt * 13 * cogFactor, now);
+    }
+  }
+
+  // Ghost & lintasan Future Sight
+  const showFs = futureSightOn && gameState !== 'menu';
+  fsGhost.visible = showFs && enemy.group.visible;
+  fsLines.visible = showFs;
+  if (showFs) {
+    if (enemy.lastPos) enemyVelHistory.push({ t: now, v: enemy.group.position.clone().sub(enemy.lastPos).divideScalar(Math.max(dt, 0.001)) });
+    while (enemyVelHistory.length && now - enemyVelHistory[0].t > 0.6) enemyVelHistory.shift();
+    let vel = new THREE.Vector3();
+    if (enemyVelHistory.length) {
+      vel = stage >= 2
+        ? (enemyVelHistory[0]?.v.clone() || vel) // tahap 2: prediksi memakai data lama -> menyesatkan
+        : enemyVelHistory[enemyVelHistory.length - 1].v.clone();
+    }
+    fsGhost.position.copy(enemy.group.position).addScaledVector(vel, 1);
+    fsGhost.rotation.y = enemy.group.rotation.y;
+    if (stage >= 2) fsGhost.position.x += Math.sin(now * 7.3) * 0.22;
+    let li = 0;
+    for (const pr of projectiles) {
+      if (li >= FS_MAX_LINES) break;
+      const from = pr.mesh.position;
+      const to = from.clone().addScaledVector(pr.velocity, 1);
+      if (stage >= 2) to.x += Math.sin(now * 9 + li) * 0.3;
+      fsLinePos[li * 6] = from.x; fsLinePos[li * 6 + 1] = from.y; fsLinePos[li * 6 + 2] = from.z;
+      fsLinePos[li * 6 + 3] = to.x; fsLinePos[li * 6 + 4] = to.y; fsLinePos[li * 6 + 5] = to.z;
+      li++;
+    }
+    for (let i = li * 6; i < fsLinePos.length; i++) fsLinePos[i] = 0;
+    fsLineGeo.attributes.position.needsUpdate = true;
+  }
+  enemy.lastPos = enemy.group.position.clone();
+  updateResourceUI();
+}
+
+// === Sihir pemain ===
+function castSelected() {
+  if (gameState !== 'playing' || modalOpen) return;
+  const key = spellSlots[selectedSlot];
+  const now = performance.now() / 1000;
+  if (!key) { showToast('Slot ini kosong. Terima pemberian atau rancang formula lewat Synthesis (T).'); return; }
+  const f = FORMULAS[key];
+  if ((spellCooldowns[key] || 0) > now) return;
+  if (player.mana < f.cost) { showToast('Mana tidak cukup.'); tone(140, .12, 'square', .03); return; }
+  player.mana -= f.cost;
+  spellCooldowns[key] = now + f.cd;
+  tone(key === 'perisai' || key === 'perisaiDuri' ? 520 : 740, .09, 'triangle', .035);
+  if (f.kind === 'shield') {
+    shieldUntil = now + (key === 'perisaiDuri' ? 3.6 : 2.5);
+    spawnRing(player.position, 0x8ddbd2, 2.2);
+    showToast('Perisai Sekejap aktif — proyektil roh tertahan.', 1500);
+    updateResourceUI();
     return;
   }
-  actionLock = true;
-  $('#scanRing').classList.add('active');
-  setPrompt('Membaca perubahan gerak dan niat…');
-  tone(280, .55, 'sine', .025);
-  setTimeout(() => {
-    $('#scanRing').classList.remove('active');
-    setPrompt('');
-    actionLock = false;
-    const now = performance.now() / 1000;
-    if (now < enemy.rushRecentUntil) addEvidence('departure');
-    else if (now < enemy.bellRecentUntil) addEvidence('bell');
-    else if (!evidence.has('guard')) addEvidence('guard');
-    else if (!evidence.has('departure')) showToast('Perilakunya saat kamu diam tidak berubah. Gunakan UJI untuk berpura-pura pergi.');
-    else if (!evidence.has('bell')) showToast('Ada simbol lonceng pada tubuhnya. Gunakan UJI untuk meminjam suara lonceng.');
-    else showToast('Seluruh jejak utama telah terbaca.');
-  }, 820);
+  camera.getWorldDirection(tempV);
+  const proj = mesh(new THREE.IcosahedronGeometry(0.13, 0), new THREE.MeshBasicMaterial({ color: f.color }), { shadow: false });
+  proj.position.copy(camera.position).addScaledVector(tempV, 0.7);
+  proj.add(new THREE.PointLight(f.color, 1.2, 3, 2));
+  scene.add(proj);
+  playerProjectiles.push({ mesh: proj, velocity: tempV.clone().multiplyScalar(f.speed), formula: key, born: now });
+  spawnBurst(proj.position, f.color, 5, 0.7);
 }
 
-function openTest() {
-  if (gameState !== 'playing' || modalOpen) return;
-  openModal('testPanel');
-}
-
-function selectTest(type) {
-  closeModal('testPanel');
+function hitEnemy(formulaKey, atPos) {
+  if (enemyBroken || enemy.resolved) return;
+  const f = FORMULAS[formulaKey];
   const now = performance.now() / 1000;
-  if (type === 'retreat') {
-    player.testMode = 'retreat';
-    player.testStartDistance = horizontalDistance(player.position, enemy.group.position);
-    player.retreatDeadline = now + 1.5;
-    showToast('Uji dimulai: berpalinglah dan bergerak menjauh dari ladang.', 3700);
-    updateObjective();
-  } else if (type === 'bell') {
-    ringBell(now);
-  } else {
-    enemy.enragedUntil = now + 5;
-    enemy.attackTimer = .2;
-    showToast('Batu itu hanya membuatnya marah. Respons ini tidak cukup menjelaskan niatnya.');
-    tone(120, .18, 'square', .04);
+  let dmg = f.dmg;
+  if (now < enemy.stunnedUntil && archive.mechanism >= 100) { dmg *= 1.8; setPrompt('KELEMAHAN TERKENA!'); setTimeout(() => setPrompt(''), 700); }
+  enemy.hp = Math.max(0, enemy.hp - dmg);
+  spawnBurst(atPos, f.color, 16, 2);
+  tone(180, .1, 'sawtooth', .04);
+  if (f.kind === 'knock') {
+    tempV.copy(enemy.group.position).sub(player.position).setY(0).normalize();
+    enemy.group.position.addScaledVector(tempV, 1.1);
+    enemy.attackTimer += 1.4;
   }
+  updateResourceUI();
+  if (enemy.hp <= 0) breakMechanism(now);
+}
+
+function breakMechanism(now) {
+  enemyBroken = true;
+  enemy.revealed = true;
+  futureSightOn = false;
+  archive.identity = 100;
+  updateArchiveUI(true);
+  $('#enemyState').textContent = 'Penjaga yang tak pernah dibebaskan';
+  spawnBurst(enemy.group.position.clone().add(new THREE.Vector3(0, 2.2, 0)), 0x9ef2c9, 52, 3.2);
+  spawnRing(enemy.group.position, 0x9ef2c9, 8);
+  chord([392, 494, 659], .8);
+  showToast('Mekanisme lumpuh. Identitasnya terbaca: penjaga yang takut ditinggalkan. Tentukan nasibnya.', 4200);
+  setTimeout(() => { if (!enemy.resolved) openModal('resolvePanel'); }, 1600);
+}
+
+// === Interaksi konteks (F): lonceng & penanda ===
+function interact() {
+  if (gameState !== 'playing' || modalOpen) return;
+  const now = performance.now() / 1000;
+  if (bell && horizontalDistance(player.position, bell.position) < 4.5) { ringBell(now); return; }
+  if (horizontalDistance(player.position, enemy.anchor) < 5) { archiveGain('identity', 18, now); showToast('Batu penanda: nama yang ditunggu terukir di sini, hampir terhapus waktu.', 3200); return; }
+  showToast('Tidak ada yang bisa diajak berinteraksi di dekat sini. Lonceng tua ada di barat ladang.', 2600);
 }
 
 function ringBell(now) {
@@ -896,7 +1135,8 @@ function ringBell(now) {
   setTimeout(() => spawnRing(enemy.group.position, 0xffd267, 5), 230);
   spawnBurst(enemy.group.position.clone().add(new THREE.Vector3(0, 2.3, 0)), 0xffd267, 25, 1.7);
   bellSound();
-  showToast('Suara dipindahkan ke ladang. Roh itu berhenti… dan menunduk. Amati sekarang.', 4200);
+  if (appraisalOn) archiveGain('identity', 22, now);
+  showToast('Suara lonceng mencapai ladang. Roh itu berhenti… dan menunduk. Serang sekarang bila Mekanismenya sudah terverifikasi.', 3800);
 }
 
 function dodge() {
@@ -910,52 +1150,99 @@ function dodge() {
   player.dodgeVelocity.copy(dir).multiplyScalar(8.2);
   player.fovKick = 8;
   player.invulnerableUntil = now + .58;
-  enemy.dodgeCount++;
   tone(240, .08, 'sine', .025);
-  if (enemy.dodgeCount === 3 && !enemy.learnedDodge) {
-    enemy.learnedDodge = true;
-    showToast('Roh itu membaca pola hindarmu. Proyektil berikutnya akan memotong arah gerakmu.', 4300);
-    $('#enemyState').textContent = 'Mempelajari kebiasaanmu';
-  }
 }
 
-function tryInterpret() {
+// Penyelamat terakhir: hanya saat serangan di luar pandangan atau pemain terkunci fokus.
+function tryPerfectDodge(projectilePos, now) {
+  if (player.pdCharges <= 0 || now < player.pdReadyAt) return false;
+  camera.getWorldDirection(tempV);
+  tempV2.copy(projectilePos).sub(player.position).setY(0).normalize();
+  const fromBlindSide = tempV.setY(0).normalize().dot(tempV2) < 0.15;
+  const lockedInFocus = appraisalOn || synthesisOpen;
+  if (!fromBlindSide && !lockedInFocus) return false;
+  player.pdCharges--;
+  player.pdReadyAt = now + 2;
+  tempV2.copy(player.position).sub(projectilePos).setY(0).normalize();
+  player.dodgeVelocity.copy(tempV2).multiplyScalar(10.5);
+  player.fovKick = 10;
+  player.invulnerableUntil = now + .7;
+  setPrompt('PERFECT DODGE');
+  setTimeout(() => setPrompt(''), 800);
+  spawnBurst(player.position.clone().add(new THREE.Vector3(0, 1, 0)), 0xffd267, 18, 2.2);
+  tone(880, .16, 'sine', .05);
+  setTimeout(() => tone(1174, .22, 'sine', .04), 70);
+  updateResourceUI();
+  return true;
+}
+
+// === Synthesis ===
+let synthPicks = [];
+function openSynthesis() {
   if (gameState !== 'playing' || modalOpen) return;
-  if (evidence.size < 3) {
-    showToast(`Interpretasi belum stabil. Temukan ${3 - evidence.size} jejak lagi.`);
-    return;
-  }
-  openModal('interpretPanel');
+  synthesisOpen = true;
+  synthPicks = [];
+  renderSynthesis();
+  openModal('synthesisPanel');
 }
-
-function chooseInterpretation(choice) {
-  if (evidence.size < 3 || $('#interpretPanel').classList.contains('hidden')) return;
-  $('#interpretPanel').classList.add('hidden');
-  openModalId = null;
-  syncModalChrome();
-  if (choice !== 'abandonment') {
-    modalOpen = false;
-    enemy.enragedUntil = performance.now() / 1000 + 7;
-    player.clarity = Math.max(15, player.clarity - 18);
-    updateClarity();
-    const text = choice === 'power'
-      ? 'Interpretasi ditolak: ia selalu kembali ke penanda, bukan memperluas wilayah.'
-      : 'Interpretasi ditolak: lonceng menghentikan amarahnya; suara itu bukan hal yang dibenci.';
-    showToast(text, 4400);
-    tone(105, .28, 'sawtooth', .05);
-    if (!isTouch) setTimeout(lockPointer, 80);
-    return;
+function synthesisResultKey() {
+  if (synthPicks.length !== 2) return null;
+  if (synthPicks[0] === synthPicks[1]) return null;
+  return RECIPES[[...synthPicks].sort().join('+')] || null;
+}
+function renderSynthesis() {
+  const list = $('#synthList');
+  list.innerHTML = '';
+  const owned = [...ownedFormulas];
+  if (!owned.length) list.innerHTML = '<p class="modal-copy">Archive masih kosong. Analisis roh (Q) atau terima pemberian dulu.</p>';
+  owned.forEach((key) => {
+    const b = document.createElement('button');
+    if (synthPicks.includes(key)) b.classList.add('picked');
+    b.innerHTML = `<i>${synthPicks.includes(key) ? '✓' : '·'}</i><span><b>${FORMULAS[key].name}</b><small>Mana ${FORMULAS[key].cost} · kerusakan ${FORMULAS[key].dmg}</small></span>`;
+    onTap(b, () => {
+      if (synthPicks.includes(key)) synthPicks = synthPicks.filter((k) => k !== key);
+      else { synthPicks.push(key); if (synthPicks.length > 2) synthPicks.shift(); }
+      renderSynthesis();
+    });
+    list.appendChild(b);
+  });
+  const resultKey = synthesisResultKey();
+  const resultEl = $('#synthResult');
+  const craftBtn = $('#synthCraft');
+  if (synthPicks.length === 2) {
+    if (resultKey) {
+      resultEl.textContent = `Kombinasi terbaca jelas → “${FORMULAS[resultKey].name}” (kerusakan ${FORMULAS[resultKey].dmg}, mana ${FORMULAS[resultKey].cost}).`;
+      craftBtn.disabled = ownedFormulas.has(resultKey);
+      if (craftBtn.disabled) resultEl.textContent += ' Sudah kamu miliki.';
+    } else {
+      resultEl.textContent = 'Kombinasi ini belum punya hubungan mekanis yang jelas. Tetap bisa dirancang — hasilnya versi lemah dan tidak stabil.';
+      craftBtn.disabled = false;
+    }
+  } else {
+    resultEl.textContent = owned.length ? `Pilih ${2 - synthPicks.length} formula lagi.` : 'Belum ada kombinasi dipilih.';
+    craftBtn.disabled = true;
   }
-  gameState = 'revelation';
-  modalOpen = true;
-  enemy.revealed = true;
-  projectiles.splice(0).forEach((p) => scene.remove(p.mesh));
-  $('#enemyState').textContent = 'Takut ditinggalkan';
-  spawnBurst(enemy.group.position.clone().add(new THREE.Vector3(0, 2.2, 0)), 0x9ef2c9, 52, 3.2);
-  spawnRing(enemy.group.position, 0x9ef2c9, 8);
-  chord([392, 494, 659], .8);
-  showToast('Identitas terbuka: Penjaga yang Tak Pernah Dibebaskan.', 3400);
-  setTimeout(() => openModal('resolvePanel'), 2000);
+}
+function craftSynthesis() {
+  if (synthPicks.length !== 2) return;
+  const resultKey = synthesisResultKey();
+  if (resultKey) {
+    ownFormula(resultKey);
+    showToast(`Formula baru dirancang: “${FORMULAS[resultKey].name}”.`, 3600);
+    chord([523, 659, 784], .6);
+  } else {
+    const [a, b] = synthPicks.map((k) => FORMULAS[k]);
+    const weakKey = 'lemah' + Date.now();
+    FORMULAS[weakKey] = { name: `Sintesis Belum Stabil`, cost: Math.round((a.cost + b.cost) / 2), cd: 1.2, dmg: Math.max(3, Math.round(((a.dmg + b.dmg) / 2) * 0.45)), speed: 20, color: 0xcfd8dc, kind: 'bolt' };
+    ownFormula(weakKey);
+    showToast('Rancangan dipaksakan: hasilnya lemah dan tidak stabil. Sempurnakan di tempat aman kelak.', 3800);
+    tone(160, .3, 'sawtooth', .04);
+  }
+  closeSynthesis();
+}
+function closeSynthesis() {
+  synthesisOpen = false;
+  closeModal('synthesisPanel');
 }
 
 const outcomes = {
@@ -1103,6 +1390,11 @@ function updatePlayer(dt, now) {
     updateObjective();
     tone(110, .4, 'sawtooth', .06);
   }
+  player.mana = Math.min(player.maxMana, player.mana + dt * 7);
+  if (horizontalDistance(player.position, new THREE.Vector3(0, 0, 13)) < 4 && horizontalDistance(player.position, enemy.group.position) > 20 && player.pdCharges < 3) {
+    player.pdCharges = 3;
+    updateResourceUI();
+  }
   player.saveTimer += dt;
   if (player.saveTimer > 6) { player.saveTimer = 0; saveCheckpoint(); }
 }
@@ -1140,14 +1432,14 @@ function updateEnemy(dt, now) {
   const flatTarget = tempV.set(player.position.x, enemy.group.position.y, player.position.z);
   enemy.group.lookAt(flatTarget);
 
-  if (gameState !== 'playing' || modalOpen || !enemy.active) return;
+  if (gameState !== 'playing' || modalOpen || !enemy.active || enemyBroken) return;
   if (now < enemy.stunnedUntil) {
     enemy.head.rotation.x = .42;
     $('#enemyState').textContent = 'Mengingat sesuatu';
     return;
   }
   enemy.head.rotation.x = 0;
-  $('#enemyState').textContent = now < enemy.enragedUntil ? 'Interpretasi ditolak' : enemy.learnedDodge ? 'Mempelajari kebiasaanmu' : 'Tidak terbaca';
+  $('#enemyState').textContent = enemyBroken ? 'Mekanisme lumpuh' : appraisalOn ? archiveTierName(Math.max(archive.mechanism, archive.formula)) : 'Tidak terbaca';
 
   if (enemy.rushing) {
     tempV.copy(player.position).sub(enemy.group.position).setY(0);
@@ -1174,7 +1466,7 @@ function updateEnemy(dt, now) {
   enemy.attackTimer -= dt * (now < enemy.enragedUntil ? 1.8 : 1);
   if (enemy.attackTimer <= 0 && distance < 25) {
     spawnProjectile(now);
-    enemy.attackTimer = enemy.learnedDodge ? 2.15 : 2.85;
+    enemy.attackTimer = 2.85;
   }
 }
 
@@ -1185,6 +1477,11 @@ function updateEffects(dt, now) {
     p.mesh.rotation.x += dt * 8;
     p.mesh.rotation.y += dt * 5;
     if (p.mesh.position.distanceTo(player.position) < .55) {
+      if (tryPerfectDodge(p.mesh.position.clone(), now)) {
+        scene.remove(p.mesh);
+        projectiles.splice(i, 1);
+        continue;
+      }
       damage(18);
       spawnBurst(p.mesh.position, 0xff6259, 14, 1.8);
       scene.remove(p.mesh);
@@ -1194,6 +1491,22 @@ function updateEffects(dt, now) {
     if (now - p.born > p.life) {
       scene.remove(p.mesh);
       projectiles.splice(i, 1);
+    }
+  }
+  for (let i = playerProjectiles.length - 1; i >= 0; i--) {
+    const pp = playerProjectiles[i];
+    pp.mesh.position.addScaledVector(pp.velocity, dt);
+    pp.mesh.rotation.x += dt * 9;
+    const target = enemy.group.position.clone().add(new THREE.Vector3(0, 2.2, 0));
+    if (enemy.group.visible && pp.mesh.position.distanceTo(target) < 1.15) {
+      hitEnemy(pp.formula, pp.mesh.position.clone());
+      scene.remove(pp.mesh);
+      playerProjectiles.splice(i, 1);
+      continue;
+    }
+    if (now - pp.born > 2.6 || pp.mesh.position.y < 0) {
+      scene.remove(pp.mesh);
+      playerProjectiles.splice(i, 1);
     }
   }
   for (let i = bursts.length - 1; i >= 0; i--) {
@@ -1265,7 +1578,7 @@ function updateViewmodel(dt, now) {
   viewmodel.rotation.x = 0.15 + (scanning ? -0.25 : Math.sin(player.bobPhase * 2) * 0.02);
   vmParts.ring.rotation.z += dt * (scanning ? 2.6 : 0.5);
   const aimed = isAimingAtEnemy(0.88, 30);
-  const ready = evidence.size >= 3 && !enemy.resolved;
+  const ready = archive.formula >= 100 && !enemy.resolved;
   const gemColor = ready ? 0x9ef2c9 : aimed ? 0xffd267 : 0x8ddbd2;
   vmParts.gem.material.color.setHex(gemColor);
   vmParts.gem.material.emissive.setHex(gemColor);
@@ -1304,9 +1617,10 @@ function trackPerformance(dt) {
 
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), .05);
+  const rawDt = Math.min(clock.getDelta(), .05);
+  const dt = rawDt * (synthesisOpen ? 0.12 : 1);
   const now = performance.now() / 1000;
-  trackPerformance(dt);
+  trackPerformance(rawDt);
   if (paused) { renderer.render(scene, camera); return; }
   if (gameState === 'menu') updateMenuCamera(now);
   else {
@@ -1315,6 +1629,7 @@ function animate() {
     updateEffects(dt, now);
     updateViewmodel(dt, now);
     updateCompass();
+    updateEyes(dt, now);
   }
   renderer.render(scene, camera);
 }
@@ -1358,13 +1673,19 @@ function bellSound() {
 addEventListener('keydown', (event) => {
   keys.add(event.code);
   if (event.repeat) return;
-  if (event.code === 'KeyE') observe();
-  if (event.code === 'KeyF') openTest();
+  if (event.code === 'KeyQ') toggleAppraisal();
+  if (event.code === 'KeyE') toggleFutureSight();
+  if (event.code === 'KeyT') openSynthesis();
+  if (event.code === 'KeyF') interact();
   if (event.code === 'Space') { event.preventDefault(); dodge(); }
-  if (event.code === 'KeyR') tryInterpret();
+  if (event.code.startsWith('Digit')) {
+    const n = Number(event.code.slice(5));
+    if (n >= 1 && n <= 4) { selectedSlot = n - 1; updateSpellBar(); }
+  }
   if (event.code === 'KeyP') setPaused(!paused);
   if (event.code === 'Escape') {
-    if (openModalId && closableModals.has(openModalId)) closeModal(openModalId);
+    if (openModalId === 'synthesisPanel') closeSynthesis();
+    else if (openModalId && closableModals.has(openModalId)) closeModal(openModalId);
     else if (paused) setPaused(false);
   }
   if (event.code === 'KeyM') { initAudio(); setMuted(!muted); }
@@ -1377,6 +1698,14 @@ addEventListener('mousemove', (event) => {
   player.pitch = THREE.MathUtils.clamp(player.pitch, -1.22, 1.22);
 });
 canvas.addEventListener('click', lockPointer);
+canvas.addEventListener('mousedown', (e) => {
+  if (e.button === 0 && document.pointerLockElement === canvas && gameState === 'playing' && !modalOpen) castSelected();
+});
+addEventListener('wheel', (e) => {
+  if (gameState !== 'playing' || modalOpen) return;
+  selectedSlot = (selectedSlot + (e.deltaY > 0 ? 1 : 3)) % 4;
+  updateSpellBar();
+}, { passive: true });
 
 // Touch joystick and camera.
 const joystickEl = $('#joystick');
@@ -1459,22 +1788,36 @@ onTap($('#tutorialOk'), () => {
   modalOpen = false;
   openModalId = null;
   syncModalChrome();
-  showToast('Temukan Roh Ladang di sepanjang jalan menuju ladang.', 3500);
-  if (!isTouch) lockPointer();
+  if (!granted) openModal('grantPanel');
+  else if (!isTouch) lockPointer();
 });
-$('#observeBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); observe(); });
-$('#testBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); openTest(); });
+$$('[data-grant]').forEach((button) => onTap(button, () => {
+  ownFormula(button.dataset.grant);
+  granted = true;
+  selectedSlot = 0;
+  updateSpellBar();
+  closeModal('grantPanel');
+  saveCheckpoint();
+  showToast(`Pemberian diterima: “${FORMULAS[button.dataset.grant].name}”. Sekarang analisis roh itu (Q) — jangan hanya menyerangnya.`, 4600);
+}));
+onTap($('#synthCraft'), craftSynthesis);
+$('#synthesisPanel')?.addEventListener('pointerup', () => { /* menjaga modal tetap sinkron */ syncModalChrome(); });
+$('#observeBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); toggleAppraisal(); });
+$('#testBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); toggleFutureSight(); });
+$('#castBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); castSelected(); });
 $('#dodgeBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); dodge(); });
-$('#interpretBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); tryInterpret(); });
+$('#interpretBtn')?.addEventListener('pointerdown', (e) => { e.preventDefault(); openSynthesis(); });
 onTap($('#evidenceToggle'), () => $('#evidencePanel')?.classList.toggle('collapsed'));
 onTap($('#pauseBtn'), () => setPaused(true));
 onTap($('#muteBtn'), () => { initAudio(); setMuted(!muted); });
 onTap($('#fullscreenBtn'), toggleFullscreen);
 onTap($('#resumeBtn'), () => setPaused(false));
 onTap($('#restartBtn'), () => { setPaused(false); resetEncounter(true); showToast('Encounter dimulai ulang dari penanda desa.'); });
-$$('[data-close]').forEach((button) => onTap(button, () => closeModal(button.dataset.close)));
-$$('[data-test]').forEach((button) => onTap(button, () => selectTest(button.dataset.test)));
-$$('[data-interpret]').forEach((button) => onTap(button, () => chooseInterpretation(button.dataset.interpret)));
+$$('[data-close]').forEach((button) => onTap(button, () => {
+  if (button.dataset.close === 'synthesisPanel') closeSynthesis();
+  else closeModal(button.dataset.close);
+}));
+$$('.spell-slot').forEach((el) => onTap(el, () => { selectedSlot = Number(el.dataset.slot); updateSpellBar(); }));
 $$('[data-resolve]').forEach((button) => onTap(button, () => resolveEnemy(button.dataset.resolve)));
 onTap($('#replayBtn'), () => {
   scene.background.setHex(0x91ced9);
@@ -1530,5 +1873,7 @@ async function toggleFullscreen() {
 }
 addEventListener('contextmenu', (event) => event.preventDefault());
 
-updateEvidenceUI();
+updateArchiveUI(true);
 updateClarity();
+updateSpellBar();
+updateResourceUI();
