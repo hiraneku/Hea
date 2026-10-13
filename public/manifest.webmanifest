@@ -1,0 +1,15 @@
+{
+  "name": "Duel Interpretasi — Prototipe FPS",
+  "short_name": "Duel Interpretasi",
+  "description": "Game first-person 3D di web: amati, uji, dan tafsirkan Roh Ladang Desa Aster.",
+  "lang": "id",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#152732",
+  "theme_color": "#9fd8e7",
+  "icons": [
+    { "src": "./icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

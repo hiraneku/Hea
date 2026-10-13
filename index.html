@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="id">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#9fd8e7" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Ccircle cx='32' cy='32' r='28' fill='%2321333a' stroke='%23ffd267' stroke-width='4'/%3E%3Cpath d='M20 34c7-11 17-11 24 0-7 11-17 11-24 0Z' fill='%23fff7d6'/%3E%3Ccircle cx='32' cy='34' r='5' fill='%23ef6f68'/%3E%3C/svg%3E" />
+    <meta name="description" content="Prototipe game first-person Duel Interpretasi" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <title>Duel Interpretasi — Prototipe</title>
+  </head>
+  <body>
+    <div id="app">
+      <canvas id="scene" aria-label="Area permainan 3D"></canvas>
+      <div id="skyGrain"></div>
+      <div id="damageFlash"></div>
+      <div id="vignette"></div>
+
+      <header id="topHud" class="hidden-game-ui">
+        <section class="objective-card glass">
+          <span class="eyebrow">TUJUAN SAAT INI</span>
+          <strong id="objective">Dekati ladang yang sunyi</strong>
+        </section>
+        <section class="clarity-card glass">
+          <div class="clarity-label"><span>KEJERNIHAN</span><b id="clarityValue">100</b></div>
+          <div class="bar"><i id="clarityFill"></i></div>
+        </section>
+      </header>
+
+      <aside id="evidencePanel" class="glass hidden-game-ui">
+        <button id="evidenceToggle" aria-label="Buka atau tutup catatan">
+          <span>JEJAK PIKIRAN</span><b id="evidenceCount">0 / 3</b>
+        </button>
+        <div id="evidenceList">
+          <div class="evidence locked" data-key="guard"><i>01</i><p>Belum dipahami</p></div>
+          <div class="evidence locked" data-key="departure"><i>02</i><p>Belum dipahami</p></div>
+          <div class="evidence locked" data-key="bell"><i>03</i><p>Belum dipahami</p></div>
+        </div>
+      </aside>
+
+      <div id="enemyTag" class="hidden-game-ui">
+        <span>ROH LADANG</span>
+        <b id="enemyState">Tidak terbaca</b>
+      </div>
+      <div id="crosshair" class="hidden-game-ui"><i></i><i></i><i></i><i></i></div>
+      <div id="scanRing"><span></span></div>
+      <div id="worldPrompt"></div>
+      <div id="toast" role="status"></div>
+
+      <div id="desktopHelp" class="glass hidden-game-ui">
+        <span><kbd>WASD</kbd> Gerak</span><span><kbd>E</kbd> Amati</span><span><kbd>F</kbd> Uji</span><span><kbd>SPASI</kbd> Hindar</span><span><kbd>R</kbd> Tafsirkan</span>
+      </div>
+
+      <div id="touchControls" class="hidden-game-ui" aria-hidden="true">
+        <div id="joystick"><div id="joystickKnob"></div></div>
+        <div id="lookZone"></div>
+        <div id="actionButtons">
+          <button id="observeBtn" class="round-action observe"><span>◉</span><b>AMATI</b></button>
+          <button id="testBtn" class="round-action test"><span>◇</span><b>UJI</b></button>
+          <button id="dodgeBtn" class="round-action dodge"><span>»</span><b>HINDAR</b></button>
+          <button id="interpretBtn" class="round-action interpret" disabled><span>✦</span><b>TAFSIR</b></button>
+        </div>
+      </div>
+
+      <section id="startScreen" class="screen active">
+        <div class="title-wrap">
+          <span class="chapter">PROTOTIPE · BAB 00</span>
+          <h1>DUEL<br><em>INTERPRETASI</em></h1>
+          <p>Di Desa Aster, sesuatu masih menjaga ladang<br class="desktop-only"> meski orang yang ditunggunya tak pernah pulang.</p>
+          <div class="start-actions">
+            <button id="startBtn" class="primary">MULAI PENGUJIAN <span>→</span></button>
+            <button id="resetBtn" class="text-button">Hapus checkpoint</button>
+          </div>
+          <small>Gunakan headphone · Landscape direkomendasikan</small>
+        </div>
+        <div class="version">PLAYTEST 0.1</div>
+      </section>
+
+      <section id="tutorialCard" class="modal-card hidden">
+        <span class="eyebrow">CARA BERMAIN</span>
+        <h2>Jangan buru-buru menyerang.</h2>
+        <p>Hadapi roh, amati perilakunya, lalu gunakan <b>UJI</b> untuk memancing respons. Setelah tiga bukti terkumpul, susun interpretasimu.</p>
+        <button id="tutorialOk" class="primary">SAYA MENGERTI</button>
+      </section>
+
+      <section id="testPanel" class="modal-card choice-card hidden">
+        <button class="close-modal" data-close="testPanel">×</button>
+        <span class="eyebrow">UJI DUGAAN</span>
+        <h2>Bagaimana kamu memancing reaksinya?</h2>
+        <div class="choice-list">
+          <button data-test="retreat"><i>01</i><span><b>Berpura-pura pergi</b><small>Mundur menjauhi ladang dan perhatikan reaksinya.</small></span></button>
+          <button data-test="bell"><i>02</i><span><b>Pinjam suara lonceng</b><small>Pindahkan suara lonceng tua ke tengah ladang.</small></span></button>
+          <button data-test="stone"><i>03</i><span><b>Lempar batu ke arahnya</b><small>Respons langsung, tetapi mungkin tidak mengungkap niatnya.</small></span></button>
+        </div>
+      </section>
+
+      <section id="interpretPanel" class="modal-card choice-card hidden">
+        <button class="close-modal" data-close="interpretPanel">×</button>
+        <span class="eyebrow">SUSUN INTERPRETASI</span>
+        <h2>Apa yang sebenarnya menggerakkan roh ini?</h2>
+        <p class="modal-copy">Pilih kesimpulan yang paling konsisten dengan seluruh jejak perilakunya.</p>
+        <div class="choice-list interpretation-list">
+          <button data-interpret="power"><i>A</i><span><b>Ia menginginkan kekuasaan</b><small>Ladang hanyalah wilayah yang ingin dikuasainya.</small></span></button>
+          <button data-interpret="abandonment"><i>B</i><span><b>Ia takut ditinggalkan</b><small>Amarahnya lahir dari tugas menjaga seseorang yang tak kembali.</small></span></button>
+          <button data-interpret="sound"><i>C</i><span><b>Ia membenci suara lonceng</b><small>Lonceng adalah sumber penderitaan dan kemarahannya.</small></span></button>
+        </div>
+      </section>
+
+      <section id="resolvePanel" class="modal-card choice-card hidden">
+        <span class="eyebrow">IDENTITASNYA TERBUKA</span>
+        <h2>“Aku tetap menjaga… karena jika pergi, siapa yang akan menunggunya?”</h2>
+        <p class="modal-copy">Pemahaman tidak menentukan apa yang harus dilakukan. Keputusan terakhir tetap milikmu.</p>
+        <div class="choice-list resolution-list">
+          <button data-resolve="purify"><i>○</i><span><b>Murnikan</b><small>Bebaskan tugas lamanya dan biarkan ia memilih untuk tinggal.</small></span></button>
+          <button data-resolve="bind"><i>◇</i><span><b>Ikat sebagai Saksi</b><small>Bawa ingatannya bersamamu; desa akan kehilangan suara lonceng.</small></span></button>
+          <button data-resolve="destroy"><i>×</i><span><b>Hancurkan</b><small>Akhiri ancamannya, sekaligus hapus ingatan yang membentuknya.</small></span></button>
+        </div>
+      </section>
+
+      <section id="resultScreen" class="screen result-screen">
+        <div class="result-card">
+          <span class="chapter">HASIL INTERPRETASI</span>
+          <div id="resultSigil">○</div>
+          <h2 id="resultTitle">Penjaga yang Memilih</h2>
+          <p id="resultText"></p>
+          <blockquote id="resultQuote"></blockquote>
+          <div class="result-actions">
+            <button id="replayBtn" class="primary">UJI LAGI</button>
+            <button id="continueExploreBtn" class="text-button">Kembali ke desa</button>
+          </div>
+        </div>
+      </section>
+
+      <div id="rotateNotice"><div>↻</div><b>Putar perangkat</b><span>Mode landscape memberi kontrol terbaik.</span></div>
+    </div>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
