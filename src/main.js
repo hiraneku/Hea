@@ -483,7 +483,7 @@ const vmParts = {};
 function createViewmodel() {
   const sleeve = mesh(new THREE.CylinderGeometry(0.075, 0.095, 0.34, 7), toon(0x35566b, { emissive: 0x0d1c26, emissiveIntensity: 0.4 }), { rx: 1.15, rz: -0.35, shadow: false });
   sleeve.position.set(0.02, -0.1, 0.1);
-  const hand = mesh(new THREE.SphereGeometry(0.075, 10, 8), toon(0xe8b98d), { shadow: false });
+  const hand = mesh(new THREE.SphereGeometry(0.075, 10, 8), toon(0xd9a06b), { shadow: false });
   hand.scale.set(0.85, 0.65, 1.15);
   hand.position.set(0.1, 0.02, -0.05);
   const ring = mesh(new THREE.TorusGeometry(0.11, 0.016, 8, 24), mat.gold, { shadow: false });
@@ -497,7 +497,8 @@ function createViewmodel() {
   cord.position.set(0.12, -0.03, -0.12);
   cord.rotation.z = 0.5;
   viewmodel.add(sleeve, hand, ring, gem, gemLight, cord);
-  viewmodel.position.set(0.34, -0.32, -0.55);
+  viewmodel.position.set(0.37, -0.36, -0.58);
+  viewmodel.scale.setScalar(0.78);
   viewmodel.rotation.set(0.15, -0.22, 0.06);
   camera.add(viewmodel);
   Object.assign(vmParts, { ring, gem, gemLight, basePos: viewmodel.position.clone() });
@@ -1877,3 +1878,4 @@ updateArchiveUI(true);
 updateClarity();
 updateSpellBar();
 updateResourceUI();
+if (isTouch) $('#evidencePanel')?.classList.add('collapsed');
