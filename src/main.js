@@ -541,6 +541,40 @@ function spawnProjectile(now) {
   tone(155, .12, 'sawtooth', .035);
 }
 
+function spawnDebris(position, normal, power = 1) {
+  // Puing tanah/batu gelap beterbangan mengikuti arah pantul permukaan.
+  const n = normal.clone();
+  const count = Math.round(16 + power * 10);
+  const positions = new Float32Array(count * 3);
+  const velocities = [];
+  for (let i = 0; i < count; i++) {
+    positions[i * 3] = position.x; positions[i * 3 + 1] = position.y; positions[i * 3 + 2] = position.z;
+    const v = new THREE.Vector3(seeded(i * 3.1, -1, 1), seeded(i * 5.7, 0.2, 1.5), seeded(i * 7.9, -1, 1)).normalize()
+      .multiplyScalar(seeded(i * 9.3, 1, 2.6 + power));
+    v.addScaledVector(n, 1.6 + power * 0.5);
+    velocities.push(v);
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+  const material = new THREE.PointsMaterial({ color: 0x35302a, size: 0.21, transparent: true, opacity: 1, depthWrite: false });
+  const points = new THREE.Points(geometry, material);
+  scene.add(points);
+  bursts.push({ points, velocities, age: 0, gravity: 5.5, life: 1.1 });
+  // Debu terang yang menyertainya.
+  spawnBurst(position, 0xd8d2c4, Math.round(10 + power * 5), 1.5 + power * 0.4);
+  const dust = bursts[bursts.length - 1];
+  if (dust) { dust.gravity = 0.4; dust.points.material.size = 0.3; dust.points.material.opacity = 0.55; dust.life = 0.9; dust.baseOpacity = 0.55; }
+}
+function spawnGroundMark(position, radius = 0.6, life = 4) {
+  const mat = new THREE.MeshBasicMaterial({ color: 0x2c2620, transparent: true, opacity: 0.55, depthWrite: false });
+  const mark = new THREE.Mesh(new THREE.CircleGeometry(radius, 14), mat);
+  mark.rotation.x = -Math.PI / 2;
+  mark.position.set(position.x, 0.02 + Math.random() * 0.01, position.z);
+  mark.scale.set(1.4, 0.8, 1);
+  mark.rotation.z = Math.random() * Math.PI;
+  scene.add(mark);
+  wallMarks.push({ group: mark, mat, age: 0, life, grow: 0.06, baseOpacity: 0.55 });
+}
 function spawnBurst(position, color = 0xffd267, count = 20, force = 1.6) {
   const positions = new Float32Array(count * 3);
   const velocities = [];
@@ -555,7 +589,7 @@ function spawnBurst(position, color = 0xffd267, count = 20, force = 1.6) {
   const material = new THREE.PointsMaterial({ color, size: .12, transparent: true, opacity: 1, depthWrite: false });
   const points = new THREE.Points(geometry, material);
   scene.add(points);
-  bursts.push({ points, velocities, age: 0 });
+  bursts.push({ points, velocities, age: 0, gravity: 0.65 });
 }
 
 function spawnRing(position, color = 0xffd267, maxScale = 8) {
@@ -635,9 +669,9 @@ const FORMULAS = {
   perisaiDuri: { name: 'Perisai Berduri', cost: 22, cd: 7, dmg: 0, color: 0xa8f0d8, kind: 'shield' },
 };
 export const KNOCKBACK_CONFIG = {
-  lightImpulse: 1.7, mediumImpulse: 3.6, heavyImpulse: 6.2, launchImpulse: 10.5,
-  launchVertical: 4.2, maxSpeed: 11,
-  dampingAir: 1.4, dampingGround: 2.1, gravity: 20,
+  lightImpulse: 1.7, mediumImpulse: 3.6, heavyImpulse: 6.8, launchImpulse: 13.5,
+  launchVertical: 5.0, maxSpeed: 15,
+  dampingAir: 1.1, dampingGround: 2.1, dampingLaunched: 0.55, gravity: 20,
   wallImpactSpeed: 4.2,      // kecepatan menabrak minimum agar jadi wall impact
   wallRecoil: 2.4, wallRecoilPerSpeed: 0.18,
   staggerLight: 0.1, staggerMedium: 0.25, staggerHeavy: 0.5, staggerWall: 0.85,
@@ -1150,7 +1184,12 @@ function applyHitReaction(formulaKey, dmg, dirVel, weaknessHit, now) {
   const impulse = tier === 'launch' ? cfg.launchImpulse : tier === 'heavy' ? cfg.heavyImpulse : tier === 'medium' ? cfg.mediumImpulse : cfg.lightImpulse;
   enemy.kbVel.addScaledVector(dir, impulse);
   if (enemy.kbVel.length() > cfg.maxSpeed) enemy.kbVel.setLength(cfg.maxSpeed);
-  if (tier === 'launch') enemy.kbVy = Math.max(enemy.kbVy, cfg.launchVertical);
+  if (tier === 'launch') {
+    enemy.kbVy = Math.max(enemy.kbVy, cfg.launchVertical);
+    enemy.launched = true;
+    enemy.bounced = false;
+    enemy.skidTimer = 0;
+  }
   enemy.kbActive = true;
   enemy.kbWallHitDone = false;
   enemy.reactUntil = now + (tier === 'launch' ? 0.7 : tier === 'heavy' ? 0.5 : tier === 'medium' ? 0.35 : 0.22);
@@ -1477,6 +1516,7 @@ function onWallImpact(contact, normal, speed, now) {
   enemy.reactUntil = now + 0.6;
   enemy.reactPower = 1;
   spawnWallImpact(contact, n, speed);
+  spawnDebris(contact, n, Math.min(3, speed * 0.35));
   triggerImpactFrame({
     intensity: THREE.MathUtils.clamp(0.45 + speed * 0.055, 0.5, 0.95),
     position: contact.clone(),
@@ -1506,7 +1546,7 @@ function spawnWallImpact(contact, normal, speed) {
   crack.position.copy(contact);
   crack.lookAt(contact.clone().add(normal));
   scene.add(crack);
-  wallMarks.push({ group: crack, mat: crackMat, age: 0 });
+  wallMarks.push({ group: crack, mat: crackMat, age: 0, life: 2.4, grow: 0.22, baseOpacity: 0.85 });
 }
 
 function resolveKnockbackWalls(now) {
@@ -1557,18 +1597,48 @@ function updateKnockback(dt, now) {
     pos.addScaledVector(enemy.kbVel, sdt);
     resolveKnockbackWalls(now);
   }
-  // Lontaran vertikal sederhana di atas bob normal
-  if (enemy.kbY > 0 || enemy.kbVy > 0) {
+  // Vertikal: jatuh, menghantam tanah, dan memantul sekali bila masih kencang
+  const wasAirborne = enemy.kbY > 0 || enemy.kbVy > 0;
+  const vyBefore = enemy.kbVy;
+  if (wasAirborne) {
     enemy.kbVy -= cfg.gravity * dt;
-    enemy.kbY = Math.max(0, enemy.kbY + enemy.kbVy * dt);
-    if (enemy.kbY === 0) enemy.kbVy = 0;
+    enemy.kbY += enemy.kbVy * dt;
+    if (enemy.kbY <= 0) {
+      enemy.kbY = 0;
+      const landingHard = vyBefore < -3.5;
+      if (landingHard) {
+        const at = pos.clone(); at.y = 0.4;
+        spawnDebris(at, new THREE.Vector3(0, 1, 0), Math.min(3, speed * 0.3));
+        spawnGroundMark(pos, 0.55 + Math.min(1.2, speed * 0.09), 4);
+        spawnRing(pos.clone().setY(0.09), 0xd8d2c4, 3.5);
+        tone(65, .2, 'sawtooth', .05);
+        if (speed > 6 && !enemy.bounced) { enemy.kbVy = 2.3; enemy.bounced = true; }
+      }
+      if (enemy.kbVy <= 0) enemy.kbVy = 0;
+      if (!enemy.bounced || enemy.kbVy === 0) enemy.launched = enemy.launched && speed > 5;
+    }
   }
   pos.y = Math.sin(now * 2.1) * 0.055 + enemy.kbY;
-  const damping = enemy.kbY > 0 ? cfg.dampingAir : cfg.dampingGround;
+  // Gesekan: sangat licin selagi terlontar (seperti video), normal setelahnya
+  const damping = enemy.kbY > 0 ? cfg.dampingAir : enemy.launched ? cfg.dampingLaunched : cfg.dampingGround;
   enemy.kbVel.multiplyScalar(Math.exp(-damping * dt));
+  // Menyeret tanah: puing kecil + bekas gesekan selama meluncur kencang di tanah
+  if (enemy.kbY === 0 && enemy.kbVel.length() > 4) {
+    enemy.skidTimer = (enemy.skidTimer || 0) - dt;
+    if (enemy.skidTimer <= 0) {
+      enemy.skidTimer = 0.07;
+      const at = pos.clone(); at.y = 0.25;
+      spawnDebris(at, enemy.kbVel.clone().normalize().negate(), 0.7);
+      if (!enemy.lastSkidPos || enemy.lastSkidPos.distanceTo(pos) > 1.1) {
+        enemy.lastSkidPos = pos.clone();
+        spawnGroundMark(pos, 0.42, 5);
+      }
+    }
+  }
+  if (enemy.kbVel.length() < 2) enemy.launched = false;
   // Reaksi prosedural: tubuh condong & kepala tersentak mengikuti kekuatan
   const react = now < enemy.reactUntil ? enemy.reactPower : 0;
-  enemy.group.rotation.x = -Math.min(0.4, enemy.kbVel.length() * 0.035) - react * 0.12;
+  enemy.group.rotation.x = -Math.min(0.45, enemy.kbVel.length() * 0.04) - react * 0.12;
   if (enemy.head) enemy.head.rotation.x = -react * 0.55;
   if (enemy.kbVel.length() < 0.45 && enemy.kbY === 0) {
     enemy.kbActive = false;
@@ -1706,11 +1776,11 @@ function updateEffects(dt, now) {
       attr.array[j * 3] += burst.velocities[j].x * dt;
       attr.array[j * 3 + 1] += burst.velocities[j].y * dt;
       attr.array[j * 3 + 2] += burst.velocities[j].z * dt;
-      burst.velocities[j].y -= dt * .65;
+      burst.velocities[j].y -= dt * (burst.gravity ?? 0.65);
     }
     attr.needsUpdate = true;
-    burst.points.material.opacity = Math.max(0, 1 - burst.age / 1.35);
-    if (burst.age > 1.35) {
+    burst.points.material.opacity = Math.max(0, (burst.baseOpacity ?? 1) * (1 - burst.age / (burst.life ?? 1.35)));
+    if (burst.age > (burst.life ?? 1.35)) {
       scene.remove(burst.points);
       burst.points.geometry.dispose();
       burst.points.material.dispose();
@@ -1733,9 +1803,10 @@ function updateEffects(dt, now) {
   for (let i = wallMarks.length - 1; i >= 0; i--) {
     const m = wallMarks[i];
     m.age += dt;
-    m.mat.opacity = Math.max(0, 0.85 * (1 - m.age / 0.9));
-    m.group.scale.setScalar(1 + m.age * 0.7);
-    if (m.age > 0.9) { scene.remove(m.group); m.mat.dispose(); wallMarks.splice(i, 1); }
+    const life = m.life ?? 0.9;
+    m.mat.opacity = Math.max(0, (m.baseOpacity ?? 0.85) * (1 - m.age / life));
+    m.group.scale.multiplyScalar(1 + (m.grow ?? 0.7) * dt);
+    if (m.age > life) { scene.remove(m.group); m.mat.dispose(); wallMarks.splice(i, 1); }
   }
   clouds.forEach((cloud) => {
     cloud.position.x += dt * cloud.userData.speed;
