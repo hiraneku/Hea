@@ -82,8 +82,13 @@ export class LaunchRelease {
   }
 }
 
-/** Shoulder-first tumble and frictional skid. No ground restitution or idle unconscious delay. */
+/**
+ * Shoulder-first tumble and frictional skid. No ground restitution or idle unconscious delay.
+ * A body that keeps flying without touching anything rights itself in mid-air after
+ * `airRecovery` seconds instead of waiting for the ground.
+ */
 export class BodyTumble {
+  static readonly airRecovery = 0.85;
   readonly orientation = new Quaternion();
   readonly angularVelocity = new Vector3();
   active = false;
@@ -93,6 +98,8 @@ export class BodyTumble {
   groundTravel = 0;
   bounces = 0;
   landings = 0;
+  airTime = 0;
+  airRecoveries = 0;
   private wasGrounded = false;
   private groundSpeed = 0;
   private roll = new Vector3();
@@ -114,6 +121,8 @@ export class BodyTumble {
       this.groundTravel =
       this.bounces =
       this.landings =
+      this.airTime =
+      this.airRecoveries =
         0;
     this.groundRoll = 0;
     this.angularVelocity.set(0, 0, 0);
@@ -127,6 +136,7 @@ export class BodyTumble {
     this.weight = 1;
     this.grounded = false;
     this.groundRoll = 0;
+    this.airTime = 0;
     this.settled = this.recoveryTime = this.bounces = this.landings = this.groundTravel = 0;
     const direction = impulse.clone().normalize(),
       axis = new Vector3().crossVectors(direction, new Vector3(0, 1, 0));
@@ -145,6 +155,7 @@ export class BodyTumble {
     if (!this.physical) return;
     if (!this.wasGrounded) this.landings++;
     this.grounded = true;
+    this.airTime = 0;
     this.phase = 'slide';
     this.groundSpeed = Math.hypot(velocity.x, velocity.z);
     this.roll
@@ -160,11 +171,19 @@ export class BodyTumble {
   }
   collide(normal: Vector3, velocity: Vector3) {
     if (!this.active) return;
+    // Touching a wall restarts the free-flight clock: the body keeps tumbling.
+    this.airTime = 0;
     const torque = new Vector3()
       .crossVectors(normal, velocity)
       .multiplyScalar(0.1)
       .clampLength(0, 5);
     this.angularVelocity.multiplyScalar(0.6).add(torque).clampLength(0, 12);
+  }
+  private beginRecovery() {
+    this.phase = 'recover';
+    this.recoveryTime = 0;
+    this.riseStart.copy(this.orientation);
+    this.angularVelocity.set(0, 0, 0);
   }
   step(dt: number, desired: Quaternion): Quaternion {
     if (!this.active) {
@@ -182,16 +201,16 @@ export class BodyTumble {
         );
         this.groundRoll += this.angularVelocity.length() * dt;
         if (this.groundRoll > 1.1) this.orientation.slerp(this.slidePose, 1 - Math.exp(-dt * 5));
-        if (this.groundSpeed <= 4) {
-          this.phase = 'recover';
-          this.recoveryTime = 0;
-          this.riseStart.copy(this.orientation);
-          this.angularVelocity.set(0, 0, 0);
-        }
+        if (this.groundSpeed <= 4) this.beginRecovery();
       } else {
         this.phase = 'air';
         this.settled = 0;
+        this.airTime += dt;
         this.angularVelocity.multiplyScalar(Math.exp(-dt * 0.7));
+        if (this.airTime >= BodyTumble.airRecovery) {
+          this.airRecoveries++;
+          this.beginRecovery();
+        }
       }
     }
     const speed = this.angularVelocity.length();

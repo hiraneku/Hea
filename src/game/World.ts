@@ -32,7 +32,7 @@ function gridTexture(): THREE.CanvasTexture {
   c.strokeRect(0.5, 0.5, 256, 256);
   const texture = new THREE.CanvasTexture(canvas);
   texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(100, 100);
+  texture.repeat.set(162, 162);
   texture.anisotropy = 4;
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
@@ -121,14 +121,15 @@ export class World {
   private contactShadows: THREE.InstancedMesh;
   private intactBatches: { mesh: THREE.InstancedMesh; ids: number[] }[] = [];
   private wallLabel: THREE.Mesh;
+  private labelBuilding = 0;
   constructor(
     private scene: THREE.Scene,
     private fx: Effects,
   ) {
     scene.background = new THREE.Color('#b4cbd6');
-    scene.fog = new THREE.Fog('#b6c5cf', 105, 285);
+    scene.fog = new THREE.Fog('#b6c5cf', 125, 370);
     this.sky = new THREE.Mesh(
-      new THREE.SphereGeometry(360, 32, 20),
+      new THREE.SphereGeometry(540, 32, 20),
       new THREE.MeshBasicMaterial({
         map: skyTexture(),
         side: THREE.BackSide,
@@ -142,10 +143,11 @@ export class World {
     this.sun.position.set(56, 100, 35);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = this.sun.shadow.camera.bottom = -115;
-    this.sun.shadow.camera.right = this.sun.shadow.camera.top = 115;
+    const shadowSpan = ARENA.halfSize + 26;
+    this.sun.shadow.camera.left = this.sun.shadow.camera.bottom = -shadowSpan;
+    this.sun.shadow.camera.right = this.sun.shadow.camera.top = shadowSpan;
     this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 250;
+    this.sun.shadow.camera.far = 360;
     this.sun.shadow.normalBias = 0.035;
     this.sun.shadow.bias = -0.00015;
     this.sun.shadow.radius = 3;
@@ -155,11 +157,12 @@ export class World {
       roughness: 1,
       metalness: 0,
     });
-    const outer = new THREE.Shape();
-    outer.moveTo(-400, -400);
-    outer.lineTo(400, -400);
-    outer.lineTo(400, 400);
-    outer.lineTo(-400, 400);
+    const outer = new THREE.Shape(),
+      span = 650;
+    outer.moveTo(-span, -span);
+    outer.lineTo(span, -span);
+    outer.lineTo(span, span);
+    outer.lineTo(-span, span);
     outer.closePath();
     const hole = new THREE.Path();
     hole.moveTo(-ARENA.terrainHalf, -ARENA.terrainHalf);
@@ -172,7 +175,11 @@ export class World {
     const outerPositions = outerGeometry.attributes.position,
       outerUV = outerGeometry.attributes.uv;
     for (let i = 0; i < outerPositions.count; i++)
-      outerUV.setXY(i, (outerPositions.getX(i) + 400) / 800, (outerPositions.getY(i) + 400) / 800);
+      outerUV.setXY(
+        i,
+        (outerPositions.getX(i) + span) / (span * 2),
+        (outerPositions.getY(i) + span) / (span * 2),
+      );
     const outerGround = new THREE.Mesh(outerGeometry, floor);
     outerGround.rotation.x = -Math.PI / 2;
     outerGround.receiveShadow = true;
@@ -228,39 +235,40 @@ export class World {
         top: box.max.y,
         owner: this.buildings.length,
       };
-      const volume = new DestructibleVolume(bounds, this.buildings.length, 1.6);
+      // Bigger monoliths use slightly larger voxels so a single block stays near 2k cells.
+      const cell = Math.max(1.6, Math.min(2.4, Math.cbrt((w * h * d) / 1800)));
+      const volume = new DestructibleVolume(bounds, this.buildings.length, cell);
       this.buildings.push({ mesh, volume });
       this.obstacles.push(bounds);
       return mesh;
     };
-    // Broad monoliths and thin slabs: deliberately different material depths for solar piercing.
+    // Fewer, broader and much thicker monoliths; a handful of thin slabs stay for solar piercing.
     block(-2, -10, 11, 19, 2.4, dark);
     block(-2, -10, 12, 0.3, 5, light);
-    block(-12, -24, 12, 34, 9, light);
-    block(16, -25, 12, 31, 8, dark, -0.1);
-    block(-27, -5, 15, 22, 11, material);
-    block(29, 6, 14, 29, 10, material);
-    block(-14, 12, 12, 12, 10, dark);
-    block(12, -3.7, 10, 10, 5, dark);
-    block(3, -38, 17, 15, 11, material);
-    block(-38, -30, 13, 36, 11, dark);
-    block(40, -16, 14, 23, 12, material);
-    block(31, 32, 18, 15, 12, dark);
-    block(-33, 32, 14, 25, 12, light);
-    block(12, 39, 12, 31, 8, material);
-    block(-30, -48, 17, 15, 9, dark);
-    // Two staggered rings of large, destructible blocks, with generous aerial/ground corridors.
+    block(-12, -24, 16, 40, 12, light);
+    block(16, -25, 16, 36, 11, dark, -0.1);
+    this.labelBuilding = this.buildings.length;
+    block(-27, -5, 15, 24, 13, material);
+    block(29, 6, 18, 34, 14, material);
+    block(-14, 12, 12, 16, 12, dark);
+    block(3, -38, 22, 20, 14, material);
+    block(-38, -30, 18, 42, 14, dark);
+    block(40, -16, 18, 28, 15, material);
+    block(31, 32, 22, 20, 15, dark);
+    block(-33, 32, 18, 30, 15, light);
+    block(10, 39, 16, 36, 11, material);
+    // Two sparse rings of massive, destructible blocks with wide aerial/ground corridors.
     const layout = seededRandom(714);
     for (let ring = 0; ring < 2; ring++) {
-      const count = ring === 0 ? 16 : 24,
-        radius = ring === 0 ? 57 : 85;
+      const count = ring === 0 ? 8 : 10,
+        radius = ring === 0 ? 70 : 105;
       for (let i = 0; i < count; i++) {
-        const angle = ((i + (ring ? 0.4 : 0.15)) / count) * Math.PI * 2;
+        const angle = ((i + (ring ? 0.4 : 0.5)) / count) * Math.PI * 2;
         const x = Math.cos(angle) * radius,
           z = Math.sin(angle) * radius;
-        const width = 12 + layout() * 6.5,
-          height = 16 + layout() * 23,
-          depth = i % 5 === 0 ? 2.4 : 8 + layout() * 4;
+        const width = 20 + layout() * 10,
+          height = 24 + layout() * 22,
+          depth = i % 5 === 0 ? 2.6 : 10 + layout() * 7;
         block(
           x,
           z,
@@ -296,8 +304,8 @@ export class World {
       tower = new THREE.Object3D();
     for (let i = 0; i < 30; i++) {
       const a = (i / 30) * Math.PI * 2,
-        r = 132 + random() * 38,
-        h = 24 + random() * 30;
+        r = ARENA.halfSize + 24 + random() * 46,
+        h = 28 + random() * 34;
       tower.scale.set(12 + random() * 12, h, 10 + random() * 10);
       tower.position.set(Math.cos(a) * r, h * 0.5, Math.sin(a) * r);
       tower.updateMatrix();
@@ -336,7 +344,7 @@ export class World {
         depthWrite: false,
       }),
     );
-    marker.position.set(-22.9, 3.5, this.buildings[4].volume.bounds.maxZ + 0.02);
+    marker.position.set(-22.9, 3.5, this.buildings[this.labelBuilding].volume.bounds.maxZ + 0.02);
     this.wallLabel = marker;
     scene.add(marker);
     const groundMark = new THREE.Mesh(
@@ -503,7 +511,7 @@ export class World {
     ];
     this.updateIntactBatches();
     this.updateContactShadows();
-    this.wallLabel.visible = !this.buildings[4].volume.damaged;
+    this.wallLabel.visible = !this.buildings[this.labelBuilding].volume.damaged;
   }
   get wallBounds() {
     return this.buildings.map((b) => ({ ...b.volume.bounds }));

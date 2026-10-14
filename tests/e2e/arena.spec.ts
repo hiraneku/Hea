@@ -2,6 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import type { Snapshot } from '../../src/game/types';
 import type { Game } from '../../src/game/Game';
 import { ATTACKS, DUEL } from '../../src/game/combat';
+import { ARENA } from '../../src/game/config';
 
 declare global {
   interface Window {
@@ -379,15 +380,15 @@ test('flight holds altitude, descends smoothly, and crosses the old map boundary
   await step(page, 5.5);
   await page.keyboard.up('Space');
   await step(page, 0.8);
-  expect((await state(page)).position.y).toBeLessThan(42.5);
+  expect((await state(page)).position.y).toBeLessThan(ARENA.ceiling + 0.5);
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.face(Math.PI));
   await page.keyboard.down('KeyW');
   await step(page, 4.8);
   await page.keyboard.up('KeyW');
   expect((await state(page)).position.z).toBeGreaterThan(70);
   const arena = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).arena;
-  expect(arena.size).toBe(200);
-  expect(arena.buildings).toBe(55);
+  expect(arena.size).toBe(260);
+  expect(arena.buildings).toBe(31);
 });
 
 test('close spell seeker connects; the solar sphere triggers a larger directional shield', async ({
@@ -442,6 +443,11 @@ test('contact freezes positions BEFORE launch, both for player hits and Nova on 
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition).toEqual(
     before,
   );
+  // Heavy contact now holds for half a second before the release.
+  await step(page, 0.4);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition).toEqual(
+    before,
+  );
   await step(page, 0.35);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.bossPosition[2]).toBeLessThan(before[2] - 6);
@@ -462,6 +468,10 @@ test('a fatal Nova still pauses and launches the boss before the victory result'
   expect((await state(page)).boss.health).toBe(0);
   await step(page, 0.45);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.bossReaction).toBe('contact');
+  expect(d.bossVisible).toBe(true);
+  await step(page, 0.4);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.bossVisible).toBe(true);
   expect(d.bossPosition[2]).toBeLessThan(-6);
   await step(page, 2);
@@ -469,7 +479,7 @@ test('a fatal Nova still pauses and launches the boss before the victory result'
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossVisible).toBe(false);
 });
 
-test('dash speed has a smooth boost tail, and shield patches cover separate nearby trajectories', async ({
+test('dash speed has a smooth boost tail, and shield patches cover separate nearby trajectories, sharing one where lanes overlap', async ({
   page,
 }, info) => {
   test.skip(info.project.name !== 'mobile');
@@ -495,12 +505,60 @@ test('dash speed has a smooth boost tail, and shield patches cover separate near
   await step(page, 0.15);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect((await state(page)).shield.blocked).toBe(3);
-  expect(d.shieldPatches).toHaveLength(3);
+  // Three lanes: the two near each other share a patch, the far-side one is a patch of its own.
+  expect(d.shieldPatches.length).toBeGreaterThanOrEqual(2);
+  expect(d.shieldPatches.length).toBeLessThanOrEqual(3);
+  expect(d.shieldPatches.length + d.patchReuses).toBe(3);
   expect(d.shieldPatches.some((p) => p.offset[0] < -1)).toBe(true);
-  expect(d.shieldPatches.some((p) => p.offset[0] > 1)).toBe(true);
-  expect(d.shieldPatches.some((p) => p.offset[1] > 1)).toBe(true);
+  expect(d.shieldPatches.some((p) => p.offset[1] > 1 || p.offset[0] > 1)).toBe(true);
   for (const p of d.shieldPatches)
     expect(Math.hypot(...p.offset)).toBeLessThanOrEqual(DUEL.shieldReach);
+  expect((await state(page)).health).toBe(100);
+});
+
+test('a standing shield patch keeps blocking later shots on the same lane instead of stacking', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'shield-line');
+  await step(page, 0.6);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect((await state(page)).shield.blocked).toBe(3);
+  expect((await state(page)).health).toBe(100);
+  expect(d.shieldPatches).toHaveLength(1);
+  expect(d.patchReuses).toBe(2);
+  expect(d.shieldPatches[0].hits).toBe(3);
+  expect(d.shieldEchoes).toHaveLength(1);
+  expect(Math.hypot(...d.shieldPatches[0].offset)).toBeGreaterThan(2.9);
+});
+
+test('a body launched into open air rights itself before landing; the boss hunts down a hidden player', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'air-recover');
+  await step(page, 1.2);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.player).toBe(true);
+  expect(d.ragdoll.playerPhase).toBe('air');
+  await step(page, 0.9);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.playerAirRecoveries).toBe(1);
+  expect(d.ragdoll.player).toBe(false);
+  expect((await state(page)).position.y).toBeGreaterThan(28);
+  expect(d.groundReactions.filter((r) => r.actor === 'player')).toHaveLength(0);
+  await scenario(page, 'far-cover');
+  const start = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition;
+  await step(page, 15);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  const p = (await state(page)).position;
+  expect(Math.hypot(d.bossPosition[0] - start[0], d.bossPosition[2] - start[2])).toBeGreaterThan(
+    60,
+  );
+  expect(Math.hypot(d.bossPosition[0] - p.x, d.bossPosition[2] - p.z)).toBeLessThan(40);
+  expect(d.bossLane.mode).not.toBe('blocked');
 });
 
 test('fire comes from warmed satellite gates, seekers double, and boss altitude choices vary', async ({
@@ -542,7 +600,7 @@ test('heavy hit and Nova drive real body tumbling, recover smoothly and cancel i
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.player).toBe(true);
   const orientation = d.ragdoll.playerOrientation;
-  await step(page, 0.36);
+  await step(page, 0.9);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.playerOrientation).not.toEqual(orientation);
   expect(d.ragdoll.player).toBe(true);
@@ -559,7 +617,7 @@ test('heavy hit and Nova drive real body tumbling, recover smoothly and cancel i
   expect(d.pendingFire).toBe(0);
   expect(d.fireGates).toHaveLength(0);
   const pose = d.ragdoll.bossOrientation;
-  await step(page, 0.45);
+  await step(page, 0.85);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.bossOrientation).not.toEqual(pose);
   expect(d.attacksFired.fire).toBe(0);
@@ -668,6 +726,10 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.playerBounces).toBe(0);
   expect(d.groundReactions.some((r) => r.actor === 'player' && r.bounce === 0)).toBe(true);
+  // Being dragged along the ground kicks up a continuous dust-and-grit trail.
+  expect(d.ragdoll.playerPhase).toBe('slide');
+  expect(d.particles.skids).toBeGreaterThan(5);
+  expect(d.particles.dust).toBeGreaterThan(5);
   await step(page, 5);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.playerGroundTravel).toBeGreaterThan(2);
@@ -679,7 +741,11 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   await step(page, 2.3);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.fireGates.some((g) => g.radius >= 1)).toBe(true);
-  expect(d.walls.filter((w) => w.maxX - w.minX >= 10 && w.top >= 15).length).toBeGreaterThan(45);
+  // Fewer, bigger blocks: nearly every remaining monolith is at least 10 m wide and 15 m tall.
+  const monoliths = d.walls.filter((w) => w.maxX - w.minX >= 10 && w.top >= 15).length;
+  expect(monoliths).toBeGreaterThanOrEqual(28);
+  expect(monoliths).toBeLessThanOrEqual(d.walls.length);
+  expect(d.walls.length).toBeLessThan(40);
   await step(page, 9.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.heavyCircleRadius).toBeGreaterThan(3.4);
@@ -733,7 +799,7 @@ test('a warmed fire gate cannot shoot after the player moves behind a wall', asy
   expect(d.attacksFired.fire).toBe(0);
 });
 
-test('heavy contact holds a little longer then instantly launches both actors at high speed', async ({
+test('heavy contact holds for half a second then instantly launches both actors at high speed', async ({
   page,
 }, info) => {
   test.skip(info.project.name !== 'mobile');
@@ -743,7 +809,9 @@ test('heavy contact holds a little longer then instantly launches both actors at
   const p = (await state(page)).position;
   await step(page, 0.09);
   expect((await state(page)).position).toEqual(p);
-  await step(page, 0.1);
+  await step(page, 0.3);
+  expect((await state(page)).position).toEqual(p);
+  await step(page, 0.2);
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(Math.hypot(...d.playerVelocity)).toBeGreaterThan(100);
   expect((await state(page)).position.z).toBeLessThan(p.z - 5);
@@ -751,11 +819,11 @@ test('heavy contact holds a little longer then instantly launches both actors at
   await page.locator('#touch-fire').tap();
   await step(page, 0.008);
   const boss = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition;
-  await step(page, 0.11);
+  await step(page, 0.4);
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition).toEqual(
     boss,
   );
-  await step(page, 0.1);
+  await step(page, 0.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(Math.hypot(...d.bossVelocity)).toBeGreaterThan(100);
   expect(d.bossPosition[2]).toBeLessThan(boss[2] - 5);

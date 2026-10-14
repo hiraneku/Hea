@@ -113,6 +113,12 @@ describe('longer spread salvo and contact timing', () => {
     expect(pause.remaining).toBe(0);
     expect(pause.consume(0.016)).toBeCloseTo(0.016);
   });
+  it('holds heavy contacts for about half a second and light contacts only briefly', () => {
+    expect(PROJECTILES.hammer.pause).toBeCloseTo(0.5);
+    expect(DUEL.novaPause).toBeCloseTo(0.5);
+    expect(PROJECTILES.fire.pause).toBeLessThan(0.15);
+    expect(PROJECTILES.missile.pause).toBeLessThan(0.2);
+  });
   it('does not carry an old contact pause into a restarted duel', () => {
     const pause = new HitPause();
     pause.request(0.12);

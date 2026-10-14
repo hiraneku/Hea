@@ -13,6 +13,9 @@ import {
   ATTACKS,
   DUEL,
   guideMissile,
+  missileAimOffset,
+  patchBlocks,
+  patchRadius,
   shieldCovers,
   shieldScale,
   shieldIntercept,
@@ -22,6 +25,7 @@ import {
   type ProjectileKind,
   type MissileGuidance,
   type AttackId,
+  type ShieldPatch,
 } from './combat';
 import {
   clamp,
@@ -67,6 +71,8 @@ interface Projectile {
   radius: number;
   origin: THREE.Vector3;
   guidance: MissileGuidance;
+  /** Seekers chase their own scatter point around the player, not one shared centre. */
+  aimOffset: THREE.Vector3 | null;
 }
 interface TraceHit {
   t: number;
@@ -81,7 +87,7 @@ const direction = new THREE.Vector3();
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(64, 1, 0.065, 480);
+  readonly camera = new THREE.PerspectiveCamera(64, 1, 0.065, 640);
   readonly controls: Controls;
   readonly audio: AudioEngine;
   private world: World;
@@ -120,9 +126,17 @@ export class Game {
   private seekClock = 0;
   private breachClock = 0;
   private blockedCasts = 0;
+  /** Continuous seconds without a firing lane; long blockades make the boss close in/climb. */
+  private blockedTime = 0;
+  private bossDetour: { motion: THREE.Vector3; until: number } | null = null;
+  private bossVantage: { point: THREE.Vector3; until: number } | null = null;
+  private lastDetourSide = 0;
   private firePacket: { packet: number; pattern: number; origin: THREE.Vector3 } | null = null;
   private pendingFire: { origin: THREE.Vector3; delay: number; index: number }[] = [];
-  private shieldPatches: { offset: number[]; position: number[]; normal: number[] }[] = [];
+  private shieldPatches: ShieldPatch[] = [];
+  private patchReuses = 0;
+  private playerWasPhysical = false;
+  private bossSkidTimer = 0;
   private avatar: THREE.Mesh;
   private playerTrail = new Ribbon(150, 0.085);
   private shadows: THREE.InstancedMesh;
@@ -418,7 +432,9 @@ export class Game {
           : 'idle',
       lastBlock: this.lastBlock,
       shieldPatches: this.shieldPatches,
+      patchReuses: this.patchReuses,
       shieldEchoes: this.fx.shieldEchoes,
+      particles: this.fx.activity,
       heavyPenetrations: this.heavyPenetrations,
       groundReactions: this.groundReactions,
       groundJumps: this.groundJumps,
@@ -442,12 +458,18 @@ export class Game {
         bossBounces: this.boss.tumble.bounces,
         playerGroundTravel: this.playerTumble.groundTravel,
         bossGroundTravel: this.boss.tumble.groundTravel,
+        playerAirTime: this.playerTumble.airTime,
+        bossAirTime: this.boss.tumble.airTime,
+        playerAirRecoveries: this.playerTumble.airRecoveries,
+        bossAirRecoveries: this.boss.tumble.airRecoveries,
         bossWeight: this.boss.tumble.weight,
         playerOrientation: this.avatar.quaternion.toArray(),
         bossOrientation: this.boss.group.quaternion.toArray(),
       },
       bossTactic: this.boss.tactics.maneuver,
       bossLane: this.bossLane,
+      bossBlockedTime: this.blockedTime,
+      bossDetour: this.bossDetour ? this.bossDetour.motion.toArray() : null,
       blockedCasts: this.blockedCasts,
       bossVelocity: this.boss.velocity.clone().add(this.boss.impulse).toArray(),
       bossGoal: this.boss.tactics.goal.toArray(),
@@ -470,6 +492,7 @@ export class Game {
           radius: p.radius,
           origin: p.origin.toArray(),
           committed: p.guidance.committed,
+          aimOffset: p.aimOffset ? p.aimOffset.toArray() : null,
         })),
       shots: this.projectiles.map((p) => ({
         kind: p.kind,
@@ -506,7 +529,14 @@ export class Game {
     this.firePacket = null;
     this.bossLane = { mode: 'clear', walls: [], thickness: 0 };
     this.sightClock = this.seekClock = this.breachClock = this.blockedCasts = 0;
+    this.blockedTime = 0;
+    this.bossDetour = null;
+    this.bossVantage = null;
+    this.lastDetourSide = 0;
     this.shieldPatches = [];
+    this.patchReuses = 0;
+    this.playerWasPhysical = false;
+    this.bossSkidTimer = 0;
     this.health = this.energy = 100;
     this.dashCooldown = this.dashTime = this.knockTime = 0;
     this.spell = 0;
@@ -680,6 +710,7 @@ export class Game {
       this.modeTime += dt;
       if (this.mode === 'playing' && !this.outcome) this.elapsed += dt;
       this.aegis.update(dt);
+      this.agePatches(dt);
       this.damageTimer += dt;
       this.impactGate.player = Math.max(0, this.impactGate.player - dt);
       this.impactGate.boss = Math.max(0, this.impactGate.boss - dt);
@@ -754,6 +785,13 @@ export class Game {
     );
     const grounded = this.player.y <= floor + 0.045;
     const physical = this.playerTumble.physical;
+    if (this.playerWasPhysical && !physical && !grounded && !this.flightEnabled) {
+      // Mid-air recovery in walk mode hands the remaining fall to the ordinary gravity model.
+      this.verticalVelocity = Math.min(0, this.impulse.y);
+      this.impulse.y = 0;
+      this.groundJumps = Math.max(this.groundJumps, 1);
+    }
+    this.playerWasPhysical = physical;
     const recovery = physical ? 0 : recoveryBlend(this.knockTime) * (1 - this.playerTumble.weight);
     if (grounded && this.verticalVelocity <= 0 && !physical) this.groundJumps = 0;
     if (this.controls.jumpRequested) {
@@ -830,15 +868,13 @@ export class Game {
       this.impulse.z *= drag;
     }
     this.skidTimer -= dt;
-    if (
-      (this.knockTime > 0 || physical) &&
-      this.impulse.length() > 4 &&
-      this.player.y < floor + 0.35 &&
-      this.skidTimer <= 0
-    ) {
-      this.skidTimer = 0.055;
-      this.fx.debris(this.player, 3, 2.3, 1.6, this.impulse);
-      this.fx.dust(this.player, 2, 0.8, this.impulse);
+    const dragging =
+      (physical && this.playerTumble.grounded) ||
+      (this.knockTime > 0 && this.impulse.length() > 4 && this.player.y < floor + 0.35);
+    if (dragging && this.skidTimer <= 0) {
+      // A continuous friction trail while the body is dragged, as in the reference footage.
+      this.skidTimer = 0.045;
+      this.fx.skid(this.player, this.impulse.clone().add(motor), 1);
     }
     this.roll = damp(
       this.roll,
@@ -1152,6 +1188,7 @@ export class Game {
       this.sightClock = 0.1;
       this.updateBossSight();
     }
+    this.blockedTime = this.bossLane.mode === 'blocked' ? this.blockedTime + dt : 0;
     const recovery = b.tumble.physical ? 0 : recoveryBlend(b.knockTime) * (1 - b.tumble.weight);
     const motor = b.tactics.step(
       dt,
@@ -1161,25 +1198,7 @@ export class Game {
       b.director.stage,
       b.director.pattern,
     );
-    const blocked = this.trace(
-      b.position,
-      b.position.clone().addScaledVector(motor, 0.65),
-      false,
-      0.55,
-    );
-    if (blocked?.obstacle && b.knockTime === 0) {
-      const side = new THREE.Vector3(-motor.z, 0, motor.x).normalize();
-      for (const sign of [1, -1]) {
-        const escape = side.clone().multiplyScalar(sign * 7);
-        if (!this.trace(b.position, b.position.clone().add(escape), false, 0.4)) {
-          motor.x = escape.x * 1.5;
-          motor.z = escape.z * 1.5;
-          break;
-        }
-      }
-      if (this.trace(b.position, b.position.clone().addScaledVector(motor, 0.5), false, 0.4))
-        motor.y = Math.max(motor.y, 8);
-    }
+    if (b.knockTime === 0) this.steerAroundCover(motor);
     // Obstacle avoidance must never override the duel's minimum standoff.
     const away = b.position.clone().sub(this.player);
     away.y = 0;
@@ -1210,6 +1229,11 @@ export class Game {
       extent * 2,
     );
     b.position.copy(feet).addScaledVector(UP, extent);
+    this.bossSkidTimer -= dt;
+    if (b.tumble.physical && b.tumble.grounded && this.bossSkidTimer <= 0) {
+      this.bossSkidTimer = 0.045;
+      this.fx.skid(feet, b.impulse.clone().add(b.velocity), 1.8);
+    }
     if (b.tumble.physical && b.tumble.grounded) groundFriction(b.impulse, dt);
     else {
       const drag = Math.exp(-dt * (b.tumble.physical ? 0.28 : 0.55 + recovery * 4.45));
@@ -1271,41 +1295,217 @@ export class Game {
       }
     }
     if (this.seekClock > 0 || this.testIdleBoss) return;
-    this.seekClock = 0.55;
-    const delta = b.position.clone().sub(this.player),
-      angle = Math.atan2(delta.z, delta.x);
-    const obstruction = this.trace(b.position, target, false)?.obstacle;
+    this.seekClock = 0.4;
+    // Keep one vantage until it is reached, stale, or no longer sees the player: a stable
+    // destination routes cleanly, whereas a destination that changes every tick dithers.
+    let vantage = this.bossVantage;
+    if (
+      !vantage ||
+      this.time > vantage.until ||
+      vantage.point.distanceTo(b.position) < 3 ||
+      this.world.firingLane(vantage.point, target, 'fire').mode !== 'clear'
+    )
+      vantage = this.bossVantage = { point: this.findVantage(target), until: this.time + 4 };
+    b.tactics.seekSight(this.routeAround(b.position, vantage.point), b.director.pattern);
+  }
+  /**
+   * One-corner routing: when the straight flight to `to` is blocked, head for a corner of the
+   * blocking building (or a point above it) from which `to` is reachable in a straight line.
+   * A corner that only makes partial progress is still better than pressing into the wall.
+   */
+  private routeAround(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3 {
+    const hit = this.trace(from, to, false, 1.4);
+    if (!hit?.obstacle) return to;
+    const o = hit.obstacle,
+      bounds = (o.owner !== undefined && this.world.wallBounds[o.owner]) || o,
+      margin = 4.5,
+      points: THREE.Vector3[] = [];
+    for (const y of new Set([from.y, to.y]))
+      for (const [x, z] of [
+        [bounds.minX - margin, bounds.minZ - margin],
+        [bounds.maxX + margin, bounds.minZ - margin],
+        [bounds.minX - margin, bounds.maxZ + margin],
+        [bounds.maxX + margin, bounds.maxZ + margin],
+      ])
+        points.push(new THREE.Vector3(x, y, z));
+    const over = bounds.top + 4.5;
+    if (over <= ARENA.ceiling) {
+      points.push(new THREE.Vector3(from.x, over, from.z));
+      points.push(
+        new THREE.Vector3((bounds.minX + bounds.maxX) / 2, over, (bounds.minZ + bounds.maxZ) / 2),
+      );
+    }
     let best: THREE.Vector3 | null = null,
-      cost = Infinity;
+      cost = Infinity,
+      partial: THREE.Vector3 | null = null,
+      partialCost = Infinity;
+    for (const point of points) {
+      if (
+        Math.abs(point.x) > ARENA.halfSize - 4 ||
+        Math.abs(point.z) > ARENA.halfSize - 4 ||
+        point.y < 2.5 ||
+        point.y > ARENA.ceiling ||
+        this.trace(point, point, false, 1.6) ||
+        this.trace(from, point, false, 1.4)
+      )
+        continue;
+      const leg = from.distanceTo(point),
+        rest = point.distanceTo(to);
+      if (!this.trace(point, to, false, 1.4)) {
+        if (leg + rest < cost) {
+          cost = leg + rest;
+          best = point;
+        }
+      } else if (rest + leg * 0.5 < partialCost) {
+        partialCost = rest + leg * 0.5;
+        partial = point;
+      }
+    }
+    return best ?? partial ?? to;
+  }
+  /**
+   * Searches several rings around the player, in every direction and at several heights, for a
+   * spot with a clear lane; reachable spots score better. Long blockades bias towards closing
+   * in. When nothing qualifies the boss climbs above the obstruction while approaching, so it
+   * never hovers idle behind cover or at the far side of the arena.
+   */
+  private findVantage(target: THREE.Vector3): THREE.Vector3 {
+    const b = this.boss,
+      delta = b.position.clone().sub(this.player),
+      angle = Math.atan2(delta.z, delta.x),
+      obstruction = this.trace(b.position, target, false)?.obstacle,
+      pressing = this.blockedTime > 3;
+    const ranges = pressing
+      ? [DUEL.nearRange + 1, DUEL.preferredRange]
+      : [DUEL.preferredRange, DUEL.nearRange + 2, DUEL.farRange];
     const heights = [
       b.position.y,
       Math.max(2.5, this.player.y + 0.9),
-      Math.min(ARENA.ceiling, (obstruction?.top ?? b.position.y) + 3),
+      Math.min(ARENA.ceiling, (obstruction?.top ?? b.position.y) + 4),
+      Math.min(ARENA.ceiling, this.player.y + 14),
     ];
-    for (const height of heights)
-      for (const turn of [-0.45, 0.45, -0.9, 0.9, -1.4, 1.4]) {
-        const candidate = new THREE.Vector3(
-          this.player.x + Math.cos(angle + turn) * DUEL.preferredRange,
-          height,
-          this.player.z + Math.sin(angle + turn) * DUEL.preferredRange,
-        );
-        if (
-          Math.abs(candidate.x) > ARENA.halfSize - 5 ||
-          Math.abs(candidate.z) > ARENA.halfSize - 5
-        )
-          continue;
-        if (
-          this.trace(candidate, candidate, false, 1.3) ||
-          this.world.firingLane(candidate, target, 'fire').mode !== 'clear'
-        )
-          continue;
-        const score = candidate.distanceTo(b.position) + Math.abs(height - b.position.y) * 1.4;
-        if (score < cost) {
-          cost = score;
-          best = candidate;
+    const turns = [0, -0.45, 0.45, -0.9, 0.9, -1.4, 1.4, -2, 2, -2.6, 2.6, Math.PI];
+    let best: THREE.Vector3 | null = null,
+      cost = Infinity;
+    for (const range of ranges)
+      for (const height of heights)
+        for (const turn of turns) {
+          const candidate = new THREE.Vector3(
+            this.player.x + Math.cos(angle + turn) * range,
+            height,
+            this.player.z + Math.sin(angle + turn) * range,
+          );
+          if (
+            Math.abs(candidate.x) > ARENA.halfSize - 5 ||
+            Math.abs(candidate.z) > ARENA.halfSize - 5
+          )
+            continue;
+          if (
+            this.trace(candidate, candidate, false, 1.3) ||
+            this.world.firingLane(candidate, target, 'fire').mode !== 'clear'
+          )
+            continue;
+          const reachable = !this.trace(b.position, candidate, false, 1.2);
+          const score =
+            candidate.distanceTo(b.position) +
+            Math.abs(height - b.position.y) * 1.2 +
+            Math.abs(turn) * 3 +
+            (reachable ? 0 : 28);
+          if (score < cost) {
+            cost = score;
+            best = candidate;
+          }
         }
+    if (best) return best;
+    const toward = this.player.clone().sub(b.position).setY(0),
+      distance = toward.length();
+    const keep = Math.max(DUEL.nearRange + 1, Math.min(distance, DUEL.preferredRange));
+    const vantage =
+      distance > 0.01
+        ? this.player.clone().addScaledVector(toward.divideScalar(distance), -keep)
+        : b.position.clone();
+    vantage.x = clamp(vantage.x, -ARENA.halfSize + 8, ARENA.halfSize - 8);
+    vantage.z = clamp(vantage.z, -ARENA.halfSize + 8, ARENA.halfSize - 8);
+    vantage.y = clamp(
+      Math.max((obstruction?.top ?? b.position.y) + 5, this.player.y + 6),
+      3,
+      ARENA.ceiling,
+    );
+    return vantage;
+  }
+  /**
+   * Commits to one detour (a side-step or a climb over the blocking slab) for half a second
+   * instead of re-deciding every physics step, so wide monoliths cannot trap the boss.
+   */
+  private steerAroundCover(motor: THREE.Vector3) {
+    const b = this.boss;
+    if (this.bossDetour) {
+      const live = this.time < this.bossDetour.until,
+        clear =
+          live &&
+          !this.trace(
+            b.position,
+            b.position.clone().addScaledVector(this.bossDetour.motion, 0.5),
+            false,
+            0.5,
+          )?.obstacle;
+      if (clear) {
+        motor.copy(this.bossDetour.motion);
+        return;
       }
-    if (best) b.tactics.seekSight(best, b.director.pattern);
+      this.bossDetour = null;
+    }
+    const blocked = this.trace(
+      b.position,
+      b.position.clone().addScaledVector(motor, 0.65),
+      false,
+      0.55,
+    );
+    if (!blocked?.obstacle) return;
+    const speed = Math.max(9, motor.length()),
+      heading = motor.clone().setY(0);
+    if (heading.lengthSq() < 0.01) heading.copy(this.player).sub(b.position).setY(0);
+    heading.normalize();
+    const side = new THREE.Vector3(-heading.z, 0, heading.x),
+      options: THREE.Vector3[] = [];
+    for (const reach of [8, 14, 22])
+      for (const sign of [1, -1]) options.push(side.clone().multiplyScalar(sign * reach));
+    const over = blocked.obstacle.top + 3.5;
+    if (over < ARENA.ceiling)
+      options.push(
+        new THREE.Vector3(0, Math.max(0, over - b.position.y), 0).addScaledVector(heading, 4),
+      );
+    let best: THREE.Vector3 | null = null,
+      cost = Infinity;
+    for (const option of options) {
+      const point = b.position.clone().add(option);
+      if (
+        Math.abs(point.x) > ARENA.halfSize - 4 ||
+        Math.abs(point.z) > ARENA.halfSize - 4 ||
+        point.y < 2 ||
+        point.y > ARENA.ceiling
+      )
+        continue;
+      if (this.trace(b.position, point, false, 0.5)) continue;
+      const onward = !this.trace(point, b.tactics.goal, false, 0.5),
+        sameSide = this.lastDetourSide !== 0 && Math.sign(option.dot(side)) === this.lastDetourSide;
+      // Favour detours that open a straight line to the goal, and keep the side already chosen
+      // so a wide slab is passed in one sweep rather than by dithering left and right.
+      const score =
+        option.length() +
+        point.distanceTo(b.tactics.goal) * 0.6 +
+        (onward ? 0 : 14) +
+        (sameSide ? -8 : 0);
+      if (score < cost) {
+        cost = score;
+        best = option;
+      }
+    }
+    const chosen = best ?? new THREE.Vector3(0, 10, 0),
+      motion = chosen.clone().normalize().multiplyScalar(speed);
+    this.lastDetourSide = Math.sign(chosen.dot(side));
+    this.bossDetour = { motion, until: this.time + 0.8 };
+    motor.copy(motion);
   }
   private permittedCast(
     attack: AttackId,
@@ -1349,19 +1549,25 @@ export class Game {
     } else if (attack === 'missiles') {
       for (const side of [0, 3]) {
         const port = this.boss.spellPort(index + side),
-          forward = this.player
-            .clone()
-            .add(new THREE.Vector3(0, 0.9, 0))
-            .sub(port)
-            .normalize();
+          center = this.player.clone().add(new THREE.Vector3(0, 0.9, 0)),
+          approach = center.clone().sub(port).normalize(),
+          right = new THREE.Vector3().crossVectors(approach, UP);
+        if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+        right.normalize();
+        // Every orb gets its own scatter point, so a salvo fans out instead of forming one stream.
+        const scatter = missileAimOffset(
+            this.boss.director.pattern * 131 + index * 2 + (side ? 1 : 0),
+          ),
+          aimOffset = right.multiplyScalar(scatter.side).addScaledVector(UP, scatter.up),
+          forward = center.add(aimOffset).sub(port).normalize();
         const radial = port.clone().sub(this.boss.muzzle()).normalize();
         const launch = forward
-          .multiplyScalar(0.88)
-          .addScaledVector(radial, 0.3 * Math.min(1, port.distanceTo(this.player) / 12))
+          .multiplyScalar(0.8)
+          .addScaledVector(radial, 0.45 * Math.min(1, port.distanceTo(this.player) / 12))
           .normalize()
           .multiplyScalar(15);
         if (!this.permittedCast('missiles', port)) continue;
-        this.spawn(port, launch, 'missile', 16);
+        this.spawn(port, launch, 'missile', 16, false, aimOffset);
         this.fx.glyph(port, forward, '#ffbc80', 0.32, 0.32);
       }
       if (this.mode !== 'menu') this.audio.cast(0);
@@ -1486,6 +1692,7 @@ export class Game {
     kind: ProjectileKind,
     damage: number,
     homing = false,
+    aimOffset: THREE.Vector3 | null = null,
   ) {
     if (this.projectiles.length >= 72) this.removeProjectile(0);
     const mesh = new THREE.Mesh(
@@ -1529,6 +1736,7 @@ export class Game {
       radius,
       origin: at.clone(),
       guidance: { committed: false },
+      aimOffset,
       age: 0,
     });
     if (kind !== 'player') this.attacksFired[kind]++;
@@ -1547,8 +1755,9 @@ export class Game {
         continue;
       }
       if (p.kind === 'missile') {
+        const aim = p.aimOffset ? previousCenter.clone().add(p.aimOffset) : previousCenter;
         p.velocity.copy(
-          guideMissile(p.mesh.position, p.velocity, previousCenter, motion, p.age, dt, p.guidance),
+          guideMissile(p.mesh.position, p.velocity, aim, motion, p.age, dt, p.guidance),
         );
       } else if (p.kind === 'player' && p.homing && this.boss.alive)
         p.velocity.lerp(
@@ -1589,6 +1798,24 @@ export class Game {
           ? new THREE.Vector3(0, 0, -1).applyQuaternion(this.playerTumble.orientation)
           : this.facing;
         const covered = shieldCovers(shieldFacing, p.last.clone().sub(previousCenter));
+        // 1. Patches still standing in the world stop any shot that sweeps through them.
+        if (this.aegis.enabled) {
+          let standing: ShieldPatch | null = null,
+            at: THREE.Vector3 | null = null;
+          for (const patch of this.shieldPatches) {
+            const t = patchBlocks(patch, p.last, p.mesh.position, p.velocity, p.radius);
+            if (t === null) continue;
+            standing = patch;
+            at = p.last.clone().lerp(p.mesh.position, t);
+            break;
+          }
+          if (standing && at && this.aegis.intercept()) {
+            this.reusePatch(standing, at, p);
+            this.removeProjectile(i);
+            continue;
+          }
+        }
+        // 2. Otherwise predict the crossing of the shield shell and raise a patch there.
         const guard = this.aegis.enabled
           ? shieldIntercept(
               p.last,
@@ -1603,27 +1830,49 @@ export class Game {
         if (guard) {
           const futureEnd = p.last.clone().addScaledVector(p.velocity, horizon),
             cover = this.trace(p.last, futureEnd, false, p.radius);
-          const intercept = center.clone().add(guard.offset);
+          let intercept = center.clone().add(guard.offset),
+            offset = guard.offset.clone();
+          if (!this.clearSight(center, intercept)) {
+            // Close to a wall the patch is raised nearer the body instead of inside the wall.
+            offset = guard.offset.clone().setLength(DUEL.shieldNear);
+            intercept = center.clone().add(offset);
+          }
           if (
             (!cover || cover.t * horizon > guard.time + 0.001) &&
             this.clearSight(center, intercept) &&
             this.aegis.intercept()
           ) {
-            const incoming = guard.normal.clone().negate(),
-              scale = shieldScale(p.radius);
-            this.lastBlock = { scale, radius: p.radius, direction: guard.normal.toArray() };
-            this.shieldPatches.push({
-              position: intercept.toArray(),
-              offset: guard.offset.toArray(),
-              normal: guard.normal.toArray(),
-            });
-            if (this.shieldPatches.length > 20) this.shieldPatches.shift();
-            this.fx.block(intercept, incoming, scale);
-            if (this.mode !== 'menu') this.audio.block();
-            this.emit({
-              type: 'block',
-              direction: { x: guard.normal.x, y: guard.normal.y, z: guard.normal.z },
-            });
+            const scale = shieldScale(p.radius),
+              radius = patchRadius(scale);
+            // A new patch inside an existing footprint on the same lane re-uses it; no stacking.
+            const existing = this.shieldPatches.find(
+              (q) =>
+                intercept.distanceTo(new THREE.Vector3().fromArray(q.position)) <
+                  Math.max(q.radius, radius) * 0.95 &&
+                guard.normal.dot(new THREE.Vector3().fromArray(q.normal)) > 0.55,
+            );
+            if (existing) this.reusePatch(existing, intercept, p);
+            else {
+              const incoming = guard.normal.clone().negate(),
+                life = scale > 2 ? DUEL.shieldPatchLifeLarge : DUEL.shieldPatchLife;
+              const echo = this.fx.block(intercept, incoming, scale, life);
+              this.lastBlock = { scale, radius: p.radius, direction: guard.normal.toArray() };
+              this.shieldPatches.push({
+                position: intercept.toArray(),
+                offset: offset.toArray(),
+                normal: guard.normal.toArray(),
+                radius,
+                life,
+                serial: echo.serial,
+                hits: 1,
+              });
+              if (this.shieldPatches.length > 24) this.shieldPatches.shift();
+              if (this.mode !== 'menu') this.audio.block();
+              this.emit({
+                type: 'block',
+                direction: { x: guard.normal.x, y: guard.normal.y, z: guard.normal.z },
+              });
+            }
             this.removeProjectile(i);
             continue;
           }
@@ -1680,6 +1929,26 @@ export class Game {
   }
   private clearProjectiles() {
     while (this.projectiles.length) this.removeProjectile(this.projectiles.length - 1);
+  }
+  /** A standing patch absorbs another shot on its lane: renew it rather than stack a new one. */
+  private reusePatch(patch: ShieldPatch, at: THREE.Vector3, p: Projectile) {
+    const scale = shieldScale(p.radius);
+    patch.life = Math.max(patch.life, scale > 2 ? DUEL.shieldPatchLifeLarge : DUEL.shieldPatchLife);
+    patch.radius = Math.max(patch.radius, patchRadius(scale));
+    patch.hits++;
+    this.patchReuses++;
+    const normal = new THREE.Vector3().fromArray(patch.normal);
+    this.lastBlock = { scale, radius: p.radius, direction: normal.toArray() };
+    if (!this.fx.refreshEcho(patch.serial, at, scale))
+      this.fx.burst(at, '#9cf6ff', 10, 2.6, 0.2 * Math.sqrt(scale), 0.5);
+    if (this.mode !== 'menu') this.audio.block();
+    this.emit({ type: 'block', direction: { x: normal.x, y: normal.y, z: normal.z } });
+  }
+  private agePatches(dt: number) {
+    for (let i = this.shieldPatches.length - 1; i >= 0; i--) {
+      this.shieldPatches[i].life -= dt;
+      if (this.shieldPatches[i].life <= 0) this.shieldPatches.splice(i, 1);
+    }
   }
   private contactPause(
     actor: 'player' | 'boss',
@@ -1967,6 +2236,17 @@ export class Game {
           this.boss.position.set(0, 39, 1.5);
           this.testIdleBoss = false;
           this.testInvulnerable = true;
+        } else if (name === 'far-cover') {
+          // Boss far away behind the thick south-west monoliths; it must work its way back.
+          this.player.set(-6.5, 1.8, 12);
+          this.boss.position.set(-96, 5, -96);
+          this.testIdleBoss = false;
+          this.testInvulnerable = true;
+        } else if (name === 'air-recover') {
+          // Struck from below in open sky: the body must right itself before it ever lands.
+          this.aegis.setEnabled(false);
+          this.player.set(0, 30, 60);
+          this.spawn(new THREE.Vector3(0, 21, 60), new THREE.Vector3(0, 31, 0), 'hammer', 29);
         }
         this.previousPlayer.copy(this.player);
         this.boss.lockedTarget.copy(this.player).addScaledVector(UP, 0.9);
@@ -1980,6 +2260,18 @@ export class Game {
         }
         if (name === 'shield-large') incoming('front', 'hammer');
         if (name === 'flight' || name === 'walk') orient(0, 0);
+        if (name === 'shield-line') {
+          // Three bolts on one lane, 2.6 m apart: the first patch must stop all of them.
+          orient(0, 0);
+          const center = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
+          for (const z of [-3, -5.6, -8.2])
+            this.spawn(
+              center.clone().add(new THREE.Vector3(0.4, 0.2, z)),
+              new THREE.Vector3(0, 0, 30),
+              'fire',
+              9,
+            );
+        }
         if (name === 'shield-scatter') {
           orient(0, 0);
           const center = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));

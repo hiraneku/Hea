@@ -78,9 +78,9 @@ export class Boss {
     this.group.add(this.light);
     scene.add(this.group, this.ribbon.mesh);
     for (let i = 0; i < 8; i++) {
-      const object = makeSigil(fx.sigilMap, 1.12, '#ffb94e');
+      const object = makeSigil(fx.sigilMap, 1.3, '#ffb94e');
       const backing = new THREE.Mesh(
-        new THREE.CircleGeometry(1.02, 48),
+        new THREE.CircleGeometry(1.18, 48),
         new THREE.MeshBasicMaterial({
           color: '#4d230e',
           transparent: true,
@@ -93,7 +93,7 @@ export class Boss {
       );
       backing.position.z = -0.018;
       const rim = new THREE.Mesh(
-        new THREE.TorusGeometry(1.03, 0.028, 4, 56),
+        new THREE.TorusGeometry(1.2, 0.03, 4, 56),
         new THREE.MeshBasicMaterial({
           color: '#ffbf60',
           transparent: true,
@@ -171,7 +171,7 @@ export class Boss {
       .map((g) => ({
         position: g.object.position.toArray(),
         age: g.age,
-        radius: 1.12 * g.object.scale.x,
+        radius: 1.3 * g.object.scale.x,
       }));
   }
   fireGate(index: number, target: THREE.Vector3, floor: (x: number, z: number) => number) {

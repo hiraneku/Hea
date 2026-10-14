@@ -291,8 +291,18 @@ export class Effects {
         cells: e.object.userData.count as number,
         position: e.object.position.toArray(),
         remaining: e.life,
+        hits: (e.object.userData.hits ?? 0) as number,
       }));
   }
+  /** Live particle counts for diagnostics (skid trails, bursts, dust plumes). */
+  get activity() {
+    return {
+      sparks: this.sparks.filter((p) => p.life > 0).length,
+      dust: this.dustClouds.filter((p) => p.life > 0).length,
+      skids: this.skidCalls,
+    };
+  }
+  private skidCalls = 0;
   private sparkMesh: THREE.Points;
   private rockMesh: THREE.InstancedMesh;
   private position: Float32Array;
@@ -432,7 +442,7 @@ export class Effects {
       p.life = p.max = 1.1 + Math.random();
     }
   }
-  block(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1) {
+  block(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1, life = 1.5) {
     const serial = this.shieldSerial++,
       patch = makeShieldPatch(serial);
     patch.position.copy(at);
@@ -440,9 +450,52 @@ export class Effects {
     patch.rotateZ(((serial % 6) * Math.PI) / 3);
     patch.scale.setScalar(scale);
     // This remains in WORLD space. It is a visual afterimage, never a moving player attachment.
-    this.add(patch, scale > 2 ? 1.45 : 1.25, 0, 0);
+    this.add(patch, life, 0, 0);
     this.burst(at, '#7af1ff', scale > 2 ? 26 : 12, 3, 0.24 * Math.sqrt(scale), 0.5);
-    return { serial, pattern: shieldPattern(serial) };
+    return { serial, pattern: shieldPattern(serial), life };
+  }
+  /** A standing patch that stops another shot lights up again and restarts its fade. */
+  refreshEcho(serial: number, at: THREE.Vector3, scale = 1): boolean {
+    const echo = this.timed.find(
+      (e) => e.object.userData.kind === 'shield-echo' && e.object.userData.serial === serial,
+    );
+    if (!echo) return false;
+    echo.life = echo.max;
+    echo.object.userData.hits = (echo.object.userData.hits ?? 0) + 1;
+    this.burst(at, '#9cf6ff', 10, 2.6, 0.2 * Math.sqrt(scale), 0.5);
+    return true;
+  }
+  /** Friction trail for a body dragged across the ground: sparks, dust and chipped stone. */
+  skid(at: THREE.Vector3, velocity: THREE.Vector3, scale = 1) {
+    const speed = Math.hypot(velocity.x, velocity.z);
+    if (speed < 0.6) return;
+    this.skidCalls++;
+    const back = v1.set(-velocity.x, 0, -velocity.z).normalize(),
+      side = v2.set(-back.z, 0, back.x);
+    const base = new THREE.Vector3(at.x, this.groundAt(at.x, at.z) + 0.06 * scale, at.z);
+    const intensity = Math.min(1, speed / 22);
+    // A grey plume kicked up behind the body (one puff per call, so a long drag reads as a
+    // continuous trail without starving other dust effects), plus a little dark grit that
+    // tumbles low along the ground — never a bright additive streak.
+    this.dust(base.clone().addScaledVector(back, 0.6 * scale), 1, 1.1 * scale, velocity);
+    const sparks = Math.round(
+      (1 + intensity * 3) * (this.particleBudget < this.capacity ? 0.6 : 1),
+    );
+    for (let i = 0; i < sparks; i++) {
+      const p = this.sparks[this.cursor++ % this.particleBudget];
+      p.p.copy(base).addScaledVector(side, (Math.random() - 0.5) * 0.9 * scale);
+      p.v
+        .copy(back)
+        .multiplyScalar(speed * (0.1 + Math.random() * 0.25))
+        .addScaledVector(side, (Math.random() - 0.5) * 3)
+        .add(new THREE.Vector3(0, 0.8 + Math.random() * 2.6 * (0.5 + intensity), 0));
+      p.color.set(Math.random() < 0.4 ? '#8c6238' : '#5c5955');
+      p.life = p.max = 0.16 + Math.random() * 0.34;
+      p.size = (0.06 + Math.random() * 0.08) * scale;
+      p.gravity = 12;
+    }
+    if (Math.random() < 0.2 + intensity * 0.35)
+      this.debris(base, 1 + Math.round(intensity), 2.4, 1 * scale, velocity);
   }
   contact(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1) {
     const points: number[] = [];
@@ -700,6 +753,7 @@ export class Effects {
   }
   clear() {
     this.shieldSerial = 0;
+    this.skidCalls = 0;
     this.dustClouds.forEach((p) => {
       p.life = 0;
     });

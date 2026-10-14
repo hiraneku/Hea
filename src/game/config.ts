@@ -1,9 +1,9 @@
-/** A 200 × 200 m playable square, with margin for the camera and crater geometry. */
+/** A 260 × 260 m playable square, with margin for the camera and crater geometry. */
 export const ARENA = {
-  halfSize: 100,
-  terrainHalf: 112,
-  terrainSegments: 160,
-  ceiling: 42,
+  halfSize: 130,
+  terrainHalf: 142,
+  terrainSegments: 190,
+  ceiling: 56,
 } as const;
 export const FLIGHT = {
   speed: 14.5,

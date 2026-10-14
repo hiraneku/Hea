@@ -13,6 +13,8 @@ export class BossTactics {
   private remaining = 0;
   private lastPattern = -1;
   private direction = 1;
+  /** True while the goal is a routed waypoint; range control must not drag the boss off it. */
+  routing = false;
   reset(seed = 7391) {
     this.random = seededRandom(seed);
     this.remaining = 0;
@@ -21,12 +23,14 @@ export class BossTactics {
     this.goal.set(0, 6, 0);
     this.direction = 1;
     this.maneuver = 'strafe';
+    this.routing = false;
   }
   seekSight(goal: Vector3, pattern: number) {
     this.goal.copy(goal);
     this.maneuver = 'flank';
     this.remaining = 1.4;
     this.lastPattern = pattern;
+    this.routing = true;
     this.decisions++;
   }
   displaced(position: Vector3, player: Vector3) {
@@ -64,18 +68,22 @@ export class BossTactics {
     const delta = this.goal.clone().sub(position);
     const motor = delta
       .multiplyScalar(stage === 'recover' ? 1.5 : 1.1)
-      .clampLength(0, stage === 'recover' ? 15 : 12);
+      .clampLength(0, stage === 'recover' ? 15 : this.routing ? 16 : 12);
     const away = position.clone().sub(player);
     away.y = 0;
     const distance = away.length();
     if (distance < 10) motor.addScaledVector(away.normalize(), (10 - distance) * 2);
-    if (distance > 37) motor.addScaledVector(away.normalize(), -(distance - 37) * 0.8);
+    // A boss thrown across the larger arena closes back in decisively rather than drifting —
+    // unless it is following a routed waypoint around cover, which may lead away first.
+    if (distance > 33 && !this.routing)
+      motor.addScaledVector(away.normalize(), -(distance - 33) * 1.1);
     if (attack === 'hammer' && stage === 'telegraph' && position.y < 6)
       motor.y = Math.max(motor.y, (6 - position.y) * 2);
     return motor.clampLength(0, 19);
   }
   private choose(position: Vector3, player: Vector3, kind: Maneuver) {
     this.maneuver = kind;
+    this.routing = false;
     this.decisions++;
     if (this.random() < 0.42) this.direction *= -1;
     const from = position.clone().sub(player),
@@ -104,7 +112,9 @@ export class BossTactics {
   }
 }
 
-/** Successive packets sweep a tight arc around the frontal glyph, as in reference2. */
+/** Satellite circles orbit well outside the boss body (about 3 m out), ahead of its glyph. */
+export const FIRE_GATE_RADIUS = 2.95;
+/** Successive packets sweep a wide arc around the frontal glyph, as in reference2. */
 export function fireGateOffset(index: number, pattern: number): { local: Vector3; side: number } {
   const angles = [
     Math.PI * 0.72,
@@ -117,9 +127,9 @@ export function fireGateOffset(index: number, pattern: number): { local: Vector3
     Math.PI,
   ];
   const angle = angles[(index + pattern) % angles.length],
-    radius = 1.75 + (index % 3) * 0.12;
+    radius = FIRE_GATE_RADIUS + (index % 3) * 0.22;
   return {
-    local: new Vector3(Math.cos(angle) * radius, 0.1 + Math.sin(angle) * radius, 1.2),
+    local: new Vector3(Math.cos(angle) * radius, 0.1 + Math.sin(angle) * radius, 1.45),
     side: index % 4,
   };
 }

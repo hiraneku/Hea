@@ -69,9 +69,9 @@ describe('reference2 polyhex pieces', () => {
 });
 
 describe('brief hold, explosive release, immediate get-up', () => {
-  it('adds thirty milliseconds of contact hold and reaches heavy launch speed in one physics tick', () => {
-    expect(DUEL.novaPause).toBeCloseTo(0.135);
-    expect(PROJECTILES.hammer.pause).toBeCloseTo(0.135);
+  it('holds heavy contact for half a second and reaches heavy launch speed in one physics tick', () => {
+    expect(DUEL.novaPause).toBeCloseTo(0.5);
+    expect(PROJECTILES.hammer.pause).toBeCloseTo(0.5);
     const release = new LaunchRelease(),
       velocity = new Vector3();
     release.start(new Vector3(DUEL.novaLaunch, 0, 0));

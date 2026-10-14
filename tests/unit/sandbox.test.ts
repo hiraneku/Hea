@@ -68,15 +68,23 @@ describe('material-thickness penetration', () => {
 });
 
 describe('ground ragdoll', () => {
-  it('does not wake up in mid-air just because an animation timer expired', () => {
+  it('stays a ragdoll through the first part of free flight, then rights itself without landing', () => {
     const body = new BodyTumble();
     body.kick(new Quaternion(), new Vector3(0, -40, 35));
-    for (let i = 0; i < 480; i++) {
+    const early = Math.floor((BodyTumble.airRecovery * 120) / 2);
+    for (let i = 0; i < early; i++) {
       body.beginStep();
       body.step(1 / 120, new Quaternion());
     }
     expect(body.physical).toBe(true);
     expect(body.phase).toBe('air');
+    for (let i = 0; i < 480; i++) {
+      body.beginStep();
+      body.step(1 / 120, new Quaternion());
+    }
+    expect(body.physical).toBe(false);
+    expect(body.active).toBe(false);
+    expect(body.airRecoveries).toBe(1);
   });
   it('absorbs vertical pressure into a ground skim with no upward rebound', () => {
     for (const speed of [8, 45, 100]) {

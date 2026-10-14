@@ -10,11 +10,15 @@ export const DUEL = {
   bossSpeed: 12,
   shieldPrediction: 0.15,
   bodyRadius: 0.72,
-  shieldArcDegrees: 210,
-  shieldShell: 2.35,
-  shieldReach: 4.15,
+  shieldArcDegrees: 240,
+  shieldShell: 3.1,
+  shieldNear: 2.4,
+  shieldReach: 5.2,
+  /** A patch keeps blocking shots on its line for this long; each block renews it. */
+  shieldPatchLife: 1.5,
+  shieldPatchLifeLarge: 1.7,
   novaLaunch: 112,
-  novaPause: 0.135,
+  novaPause: 0.5,
   wallBreakSpeed: 12,
   groundBreakSpeed: 10,
   impactInterval: 0.65,
@@ -76,10 +80,10 @@ export const ATTACKS = {
     label: 'RENTETAN API',
     warning: 'SALVO API',
     tell: 0.9,
-    duration: 3.3,
+    duration: 4.2,
     recovery: 0.95,
-    shots: 32,
-    interval: 0.095,
+    shots: 40,
+    interval: 0.1,
   },
   missiles: {
     label: 'MANTRA PEMBURU',
@@ -221,9 +225,9 @@ export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer';
 /** The same radius drives the visible core, shield size and swept collision. */
 export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, stagger: 0 },
-  fire: { radius: 0.32, speed: 30, life: 4, launch: 36, pause: 0.065, stagger: 0.85 },
-  missile: { radius: 0.34, speed: 25, life: 4.5, launch: 60, pause: 0.08, stagger: 1.2 },
-  hammer: { radius: 1.25, speed: 31, life: 5, launch: 122, pause: 0.135, stagger: 1.5 },
+  fire: { radius: 0.32, speed: 30, life: 4, launch: 36, pause: 0.09, stagger: 0.85 },
+  missile: { radius: 0.34, speed: 25, life: 4.5, launch: 60, pause: 0.12, stagger: 1.2 },
+  hammer: { radius: 1.25, speed: 31, life: 5, launch: 122, pause: 0.5, stagger: 1.5 },
 } as const;
 
 /** Front and peripheral vision in 3D; the rear cone is a genuine blind spot, even while active. */
@@ -236,6 +240,52 @@ export function shieldCovers(facing: Vector3, toProjectile: Vector3): boolean {
 }
 export function shieldScale(projectileRadius: number): number {
   return clamp(0.9 + projectileRadius * 1.35, 1, 2.8);
+}
+/** Blocking radius of a standing polyhex patch; slightly inside its visible outline. */
+export function patchRadius(scale: number): number {
+  return 0.85 * scale;
+}
+
+export interface ShieldPatch {
+  position: number[];
+  offset: number[];
+  normal: number[];
+  radius: number;
+  life: number;
+  serial: number;
+  hits: number;
+}
+/**
+ * A patch that is still standing stops later shots travelling the same lane: the swept
+ * projectile crosses the patch AND approaches from its front face. Rear/edge passes ignore it.
+ */
+export function patchBlocks(
+  patch: Pick<ShieldPatch, 'position' | 'normal' | 'radius'>,
+  start: Point3,
+  end: Point3,
+  velocity: Point3,
+  projectileRadius: number,
+): number | null {
+  const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
+  if (speed < 1e-6) return null;
+  const approach =
+    (velocity.x * patch.normal[0] + velocity.y * patch.normal[1] + velocity.z * patch.normal[2]) /
+    speed;
+  if (approach > -0.25) return null;
+  return segmentSphere(
+    start,
+    end,
+    { x: patch.position[0], y: patch.position[1], z: patch.position[2] },
+    patch.radius + projectileRadius,
+  );
+}
+
+/** Deterministic per-orb aim scatter: each seeker chases its own point around the player. */
+export function missileAimOffset(seed: number): { side: number; up: number } {
+  const random = seededRandom(seed * 7919 + 13);
+  const angle = random() * Math.PI * 2,
+    radius = 0.7 + random() * 1.9;
+  return { side: Math.cos(angle) * radius, up: Math.sin(angle) * radius * 0.75 };
 }
 
 /** Stops simulation at contact; consumes only the pause portion of a long render frame. */
@@ -312,6 +362,6 @@ export function shieldIntercept(
   if (time === null) return null;
   const offset = relative.addScaledVector(velocity, time);
   if (offset.lengthSq() < 1e-6) offset.copy(projectileVelocity).negate().normalize();
-  offset.clampLength(1.8, DUEL.shieldReach);
+  offset.clampLength(DUEL.shieldNear, DUEL.shieldReach);
   return { time, offset, normal: projectileVelocity.clone().negate().normalize() };
 }
