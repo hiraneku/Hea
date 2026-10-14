@@ -89,6 +89,12 @@ export class LaunchRelease {
  */
 export class BodyTumble {
   static readonly airRecovery = 0.85;
+  /** Recovery blend: a short rise from the ground, a longer deliberate flip in the air. */
+  static readonly riseBlend = 0.22;
+  static readonly flipBlend = 0.46;
+  /** True while the current recovery is the mid-air somersault. */
+  flipping = false;
+  private flipSign = 1;
   readonly orientation = new Quaternion();
   readonly angularVelocity = new Vector3();
   active = false;
@@ -125,6 +131,7 @@ export class BodyTumble {
       this.airRecoveries =
         0;
     this.groundRoll = 0;
+    this.flipping = false;
     this.angularVelocity.set(0, 0, 0);
     this.orientation.identity();
     this.roll.set(0, 0, 0);
@@ -179,10 +186,18 @@ export class BodyTumble {
       .clampLength(0, 5);
     this.angularVelocity.multiplyScalar(0.6).add(torque).clampLength(0, 12);
   }
-  private beginRecovery() {
+  private beginRecovery(flip = false) {
     this.phase = 'recover';
     this.recoveryTime = 0;
     this.riseStart.copy(this.orientation);
+    if (flip) {
+      // Keep turning the way the body was already spinning about its side axis.
+      const sideSpin = this.angularVelocity.dot(
+        new Vector3(1, 0, 0).applyQuaternion(this.orientation),
+      );
+      this.flipSign = sideSpin < 0 ? -1 : 1;
+    }
+    this.flipping = flip;
     this.angularVelocity.set(0, 0, 0);
   }
   step(dt: number, desired: Quaternion): Quaternion {
@@ -209,7 +224,7 @@ export class BodyTumble {
         this.angularVelocity.multiplyScalar(Math.exp(-dt * 0.7));
         if (this.airTime >= BodyTumble.airRecovery) {
           this.airRecoveries++;
-          this.beginRecovery();
+          this.beginRecovery(true);
         }
       }
     }
@@ -225,10 +240,19 @@ export class BodyTumble {
         .normalize();
     if (this.phase === 'recover') {
       this.recoveryTime += dt;
-      this.orientation.slerpQuaternions(this.riseStart, desired, ease(this.recoveryTime / 0.22));
-      this.weight = 1 - ease(this.recoveryTime / 0.22);
-      if (this.recoveryTime >= 0.22) {
+      const blend = this.flipping ? BodyTumble.flipBlend : BodyTumble.riseBlend,
+        k = ease(this.recoveryTime / blend);
+      this.orientation.slerpQuaternions(this.riseStart, desired, k);
+      if (this.flipping) {
+        // One controlled somersault about the body's own side axis, continuing the spin it
+        // already had; a full turn at k = 1 lands exactly on the upright pose.
+        const turn = Math.PI * 2 * ease(k) * this.flipSign;
+        this.orientation.multiply(new Quaternion().setFromAxisAngle(new Vector3(1, 0, 0), turn));
+      }
+      this.weight = 1 - k;
+      if (this.recoveryTime >= blend) {
         this.active = false;
+        this.flipping = false;
         this.phase = 'idle';
         this.weight = 0;
       }

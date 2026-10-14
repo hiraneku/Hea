@@ -5,6 +5,7 @@ import { assessFiringLane, type FiringLane } from './AttackSight';
 import { PROJECTILES, type AttackId } from './combat';
 import { DestructibleVolume, TerrainDeformation, type Cell } from './destruction';
 import { seededRandom, firstSolidSpan, type Obstacle } from './math';
+import { gridCell, warpAxis } from './terrainGrid';
 
 function gridTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -140,18 +141,21 @@ export class World {
     scene.add(this.sky);
     scene.add(new THREE.HemisphereLight('#d5ebff', '#646365', 2.1));
     this.sun = new THREE.DirectionalLight('#fff3d8', 2.8);
-    this.sun.position.set(56, 100, 35);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    const shadowSpan = ARENA.halfSize + 26;
+    // The shadow frustum follows the player (see focusShadow) instead of covering the whole
+    // 284 m arena: ~8 cm per texel around the action instead of ~15 cm, so the ground contact
+    // of walls no longer breaks into a jagged dark staircase.
+    const shadowSpan = ARENA.shadowSpan;
     this.sun.shadow.camera.left = this.sun.shadow.camera.bottom = -shadowSpan;
     this.sun.shadow.camera.right = this.sun.shadow.camera.top = shadowSpan;
     this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 360;
-    this.sun.shadow.normalBias = 0.035;
-    this.sun.shadow.bias = -0.00015;
-    this.sun.shadow.radius = 3;
+    this.sun.shadow.camera.far = 300;
+    this.sun.shadow.normalBias = 0.02;
+    this.sun.shadow.bias = -0.0001;
+    this.sun.shadow.radius = 2.5;
     scene.add(this.sun, this.sun.target);
+    this.focusShadow(new THREE.Vector3());
     const floor = new THREE.MeshStandardMaterial({
       map: gridTexture(),
       roughness: 1,
@@ -186,13 +190,27 @@ export class World {
     scene.add(outerGround);
     const innerMap = gridTexture();
     innerMap.repeat.set(ARENA.terrainHalf / 4, ARENA.terrainHalf / 4);
+    const terrainGeometry = new THREE.PlaneGeometry(
+      ARENA.terrainHalf * 2,
+      ARENA.terrainHalf * 2,
+      ARENA.terrainSegments,
+      ARENA.terrainSegments,
+    );
+    // Adaptive tessellation: dense where craters and skids happen, coarse towards the rim.
+    {
+      const position = terrainGeometry.attributes.position,
+        uv = terrainGeometry.attributes.uv,
+        half = ARENA.terrainHalf;
+      for (let i = 0; i < position.count; i++) {
+        const x = warpAxis(position.getX(i) / half) * half,
+          y = warpAxis(position.getY(i) / half) * half;
+        position.setXY(i, x, y);
+        uv.setXY(i, (x + half) / (half * 2), (y + half) / (half * 2));
+      }
+      position.needsUpdate = uv.needsUpdate = true;
+    }
     this.ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(
-        ARENA.terrainHalf * 2,
-        ARENA.terrainHalf * 2,
-        ARENA.terrainSegments,
-        ARENA.terrainSegments,
-      ),
+      terrainGeometry,
       new THREE.MeshStandardMaterial({ map: innerMap, roughness: 1, vertexColors: true }),
     );
     const colors = new Float32Array(this.ground.geometry.attributes.position.count * 3).fill(1);
@@ -280,6 +298,34 @@ export class World {
         );
       }
     }
+    // Low cover in the empty bands between the central cluster and the rings (r ≈ 57 m and
+    // 88 m): 1.5–2.6 m walls to duck behind on foot, low enough for every flight route to
+    // pass over, each nudged inwards until it sits clear of the monoliths and the main lanes.
+    const coverLayout = seededRandom(2201);
+    const lowCover = (angle: number, radius: number, index: number) => {
+      const long = 6 + coverLayout() * 4,
+        height = 1.5 + coverLayout() * 1.1,
+        thin = 1.2 + coverLayout() * 0.6,
+        eastWest = Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle)),
+        [w, d] = eastWest ? [thin, long] : [long, thin];
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const r = radius - attempt * 3,
+          x = Math.cos(angle) * r,
+          z = Math.sin(angle) * r;
+        const clear = this.obstacles.every(
+          (o) =>
+            x + w / 2 + 2 < o.minX ||
+            x - w / 2 - 2 > o.maxX ||
+            z + d / 2 + 2 < o.minZ ||
+            z - d / 2 - 2 > o.maxZ,
+        );
+        if (!clear || Math.abs(x) < 8 || Math.abs(z) < 8) continue;
+        block(x, z, w, height, d, index % 2 ? light : material);
+        return;
+      }
+    };
+    for (let i = 0; i < 8; i++) lowCover((i / 8) * Math.PI * 2 + 0.21, 57, i);
+    for (let i = 0; i < 6; i++) lowCover((i / 6) * Math.PI * 2 + 0.7, 88, i);
     for (const m of [material, dark, light]) {
       const ids = this.buildings.flatMap((b, i) => (b.mesh.material === m ? [i] : []));
       const mesh = new THREE.InstancedMesh(geometry, m, ids.length);
@@ -449,9 +495,11 @@ export class World {
       mesh.position.set(x, 0.026, z);
       this.scene.add(mesh);
     }
+    // Decorative rubble strip across the centre. Kept close to the ground tone: from a
+    // distance the old darker pieces merged into what read as a jagged shadow artefact.
     const rubble = new THREE.InstancedMesh(
       new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshStandardMaterial({ color: '#646b70', roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: '#868d91', roughness: 1 }),
       130,
     );
     const obj = new THREE.Object3D();
@@ -473,16 +521,36 @@ export class World {
   get wallsBroken() {
     return this.buildings.filter((b) => b.volume.damaged).length;
   }
+  /** Where the sun's shadow map is centred; call with the player every frame. */
+  focusShadow(focus: THREE.Vector3) {
+    const direction = new THREE.Vector3(56, 100, 35).normalize(),
+      texel = (ARENA.shadowSpan * 2) / this.sun.shadow.mapSize.x;
+    // Snap the focus to shadow-map texels in light space so edges do not swim as it moves.
+    const up =
+        Math.abs(direction.y) > 0.99 ? new THREE.Vector3(0, 0, 1) : new THREE.Vector3(0, 1, 0),
+      right = new THREE.Vector3().crossVectors(up, direction).normalize(),
+      lightUp = new THREE.Vector3().crossVectors(direction, right).normalize();
+    const flat = new THREE.Vector3(focus.x, 0, focus.z),
+      a = Math.round(flat.dot(right) / texel) * texel,
+      b = Math.round(flat.dot(lightUp) / texel) * texel,
+      c = flat.dot(direction);
+    const snapped = new THREE.Vector3()
+      .addScaledVector(right, a)
+      .addScaledVector(lightUp, b)
+      .addScaledVector(direction, c);
+    this.sun.target.position.copy(snapped);
+    this.sun.position.copy(snapped).addScaledVector(direction, 150);
+    this.sun.target.updateMatrixWorld();
+  }
   surfaceHeight(x: number, z: number) {
     // Sample the rendered triangles, not the ideal crater curve: feet and debris sit on the mesh.
     if (Math.abs(x) >= ARENA.terrainHalf || Math.abs(z) >= ARENA.terrainHalf) return 0;
-    const spacing = (ARENA.terrainHalf * 2) / ARENA.terrainSegments,
-      gx = (x + ARENA.terrainHalf) / spacing,
-      gz = (z + ARENA.terrainHalf) / spacing,
-      ix = Math.floor(gx),
-      iz = Math.floor(gz),
-      u = gx - ix,
-      v = gz - iz;
+    const cx = gridCell(x, ARENA.terrainHalf, ARENA.terrainSegments),
+      cz = gridCell(z, ARENA.terrainHalf, ARENA.terrainSegments),
+      ix = cx.index,
+      iz = cz.index,
+      u = cx.fraction,
+      v = cz.fraction;
     const vertices = this.ground.geometry.attributes.position,
       stride = ARENA.terrainSegments + 1,
       a = iz * stride + ix;

@@ -113,11 +113,39 @@ describe('longer spread salvo and contact timing', () => {
     expect(pause.remaining).toBe(0);
     expect(pause.consume(0.016)).toBeCloseTo(0.016);
   });
-  it('holds heavy contacts for about half a second and light contacts only briefly', () => {
-    expect(PROJECTILES.hammer.pause).toBeCloseTo(0.5);
-    expect(DUEL.novaPause).toBeCloseTo(0.5);
+  it('holds heavy contacts as a short freeze plus a slow-motion tail, light contacts briefly', () => {
+    expect(PROJECTILES.hammer.pause).toBeCloseTo(DUEL.heavyFreeze);
+    expect(PROJECTILES.hammer.slow).toBeCloseTo(DUEL.heavySlow);
+    expect(DUEL.heavyFreeze).toBeCloseTo(0.15);
+    expect(DUEL.heavyFreeze + DUEL.heavySlow).toBeCloseTo(0.5);
     expect(PROJECTILES.fire.pause).toBeLessThan(0.15);
+    expect(PROJECTILES.fire.slow).toBe(0);
     expect(PROJECTILES.missile.pause).toBeLessThan(0.2);
+  });
+  it('slow motion starts near one fifth speed and ramps back to real time', () => {
+    const pause = new HitPause();
+    pause.request(DUEL.heavyFreeze, DUEL.heavySlow);
+    expect(pause.scale).toBe(0);
+    expect(pause.consume(DUEL.heavyFreeze)).toBe(0);
+    expect(pause.scale).toBeCloseTo(HitPause.slowScale);
+    // The first real-time slice of the tail yields far less simulated time than it costs.
+    const early = pause.consume(0.05);
+    expect(early).toBeGreaterThan(0.05 * HitPause.slowScale * 0.9);
+    expect(early).toBeLessThan(0.05 * 0.4);
+    let simulated = early;
+    for (let i = 0; i < 100 && pause.active; i++) simulated += pause.consume(0.01);
+    expect(pause.active).toBe(false);
+    expect(pause.scale).toBe(1);
+    // Integrated: the 0.35 s tail plays out in roughly 0.17 s of simulated time.
+    expect(simulated).toBeGreaterThan(0.14);
+    expect(simulated).toBeLessThan(0.21);
+    expect(pause.consume(0.016)).toBeCloseTo(0.016);
+  });
+  it('a freeze requested mid-frame eats only the remaining frame budget', () => {
+    const pause = new HitPause();
+    pause.request(0.1);
+    expect(pause.hold(0.03)).toBe(0);
+    expect(pause.hold(0.1)).toBeCloseTo(0.03);
   });
   it('does not carry an old contact pause into a restarted duel', () => {
     const pause = new HitPause();

@@ -14,15 +14,15 @@ declare global {
   }
 }
 const state = (page: Page) => page.evaluate(() => window.__HEA_DEBUG__.snapshot());
-async function load(page: Page) {
-  await page.addInitScript(() => {
+async function load(page: Page, reducedEffects = true) {
+  await page.addInitScript((reducedEffects) => {
     localStorage.setItem(
       'hea-settings',
-      JSON.stringify({ quality: 'low', sound: false, reducedEffects: true }),
+      JSON.stringify({ quality: 'low', sound: false, reducedEffects }),
     );
     HTMLCanvasElement.prototype.requestPointerLock = () =>
       Promise.reject(new Error('Test iframe: pointer lock unavailable'));
-  });
+  }, reducedEffects);
   await page.goto('/?test');
   await expect(page.locator('#boot')).toBeHidden({ timeout: 30_000 });
   await expect(page.locator('#start-button')).toBeVisible();
@@ -388,7 +388,8 @@ test('flight holds altitude, descends smoothly, and crosses the old map boundary
   expect((await state(page)).position.z).toBeGreaterThan(70);
   const arena = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).arena;
   expect(arena.size).toBe(260);
-  expect(arena.buildings).toBe(31);
+  // 31 monoliths plus the low cover in the empty bands (13 of the 14 candidates find a clear spot).
+  expect(arena.buildings).toBe(44);
 });
 
 test('close spell seeker connects; the solar sphere triggers a larger directional shield', async ({
@@ -443,14 +444,20 @@ test('contact freezes positions BEFORE launch, both for player hits and Nova on 
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition).toEqual(
     before,
   );
-  // Heavy contact now holds for half a second before the release.
-  await step(page, 0.4);
+  // Heavy contact holds for 0.15 s, then releases in slow motion before full speed returns.
+  await step(page, 0.08);
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition).toEqual(
     before,
   );
-  await step(page, 0.35);
+  await step(page, 0.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  expect(d.bossPosition[2]).toBeLessThan(before[2] - 6);
+  expect(d.timeScale).toBeGreaterThan(0);
+  expect(d.timeScale).toBeLessThan(0.8);
+  expect(d.bossPosition[2]).toBeLessThan(before[2] - 3);
+  await step(page, 0.3);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.timeScale).toBe(1);
+  expect(d.bossPosition[2]).toBeLessThan(before[2] - 15);
   expect((await state(page)).wallsBroken).toBeGreaterThan(0);
 });
 
@@ -466,13 +473,14 @@ test('a fatal Nova still pauses and launches the boss before the victory result'
   expect(d.bossReaction).toBe('contact');
   expect(d.bossVisible).toBe(true);
   expect((await state(page)).boss.health).toBe(0);
-  await step(page, 0.45);
+  await step(page, 0.09);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.bossReaction).toBe('contact');
   expect(d.bossVisible).toBe(true);
   await step(page, 0.4);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.bossVisible).toBe(true);
+  expect(d.bossReaction).toBe('launch');
   expect(d.bossPosition[2]).toBeLessThan(-6);
   await step(page, 2);
   expect((await state(page)).mode).toBe('victory');
@@ -522,15 +530,29 @@ test('a standing shield patch keeps blocking later shots on the same lane instea
   test.skip(info.project.name !== 'mobile');
   await load(page);
   await scenario(page, 'shield-line');
-  await step(page, 0.6);
-  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  await step(page, 0.08);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect((await state(page)).shield.blocked).toBeGreaterThanOrEqual(2);
+  expect(d.shieldPatches.length + d.patchShatters).toBe(1);
+  expect(d.patchReuses).toBeGreaterThanOrEqual(1);
+  await step(page, 0.52);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect((await state(page)).shield.blocked).toBe(3);
   expect((await state(page)).health).toBe(100);
-  expect(d.shieldPatches).toHaveLength(1);
   expect(d.patchReuses).toBe(2);
-  expect(d.shieldPatches[0].hits).toBe(3);
-  expect(d.shieldEchoes).toHaveLength(1);
-  expect(Math.hypot(...d.shieldPatches[0].offset)).toBeGreaterThan(2.9);
+  // The third hit is the last the patch can take: it shatters and leaves a hole for a moment.
+  expect(d.patchShatters).toBe(1);
+  expect(d.shieldPatches).toHaveLength(0);
+  expect(d.patchGaps).toBe(1);
+  expect(d.shieldEchoes).toHaveLength(0);
+  // A longer burst on the same lane gets one bolt through the hole before a new patch forms.
+  await scenario(page, 'shield-volley');
+  await step(page, 1.2);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.patchShatters).toBe(1);
+  expect((await state(page)).health).toBe(91);
+  expect((await state(page)).shield.blocked).toBeGreaterThanOrEqual(5);
+  expect(d.patchLeaks).toBeGreaterThan(0);
 });
 
 test('a body launched into open air rights itself before landing; the boss hunts down a hidden player', async ({
@@ -543,9 +565,16 @@ test('a body launched into open air rights itself before landing; the boss hunts
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.player).toBe(true);
   expect(d.ragdoll.playerPhase).toBe('air');
-  await step(page, 0.9);
+  await step(page, 0.45);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  // The mid-air recovery is a visible somersault with its own puff, not a snap to upright.
   expect(d.ragdoll.playerAirRecoveries).toBe(1);
+  expect(d.ragdoll.playerFlipping).toBe(true);
+  expect(d.ragdoll.playerPhase).toBe('recover');
+  expect(d.particles.airRecoveries).toBe(1);
+  await step(page, 0.45);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.playerFlipping).toBe(false);
   expect(d.ragdoll.player).toBe(false);
   expect((await state(page)).position.y).toBeGreaterThan(28);
   expect(d.groundReactions.filter((r) => r.actor === 'player')).toHaveLength(0);
@@ -558,6 +587,13 @@ test('a body launched into open air rights itself before landing; the boss hunts
     60,
   );
   expect(Math.hypot(d.bossPosition[0] - p.x, d.bossPosition[2] - p.z)).toBeLessThan(40);
+  expect(d.bossLane.mode).not.toBe('blocked');
+  // The same chase from the opposite corner, through the ring gaps and over the low cover.
+  await scenario(page, 'far-north');
+  await step(page, 12);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  const q = (await state(page)).position;
+  expect(Math.hypot(d.bossPosition[0] - q.x, d.bossPosition[2] - q.z)).toBeLessThan(40);
   expect(d.bossLane.mode).not.toBe('blocked');
 });
 
@@ -573,10 +609,18 @@ test('fire comes from warmed satellite gates, seekers double, and boss altitude 
   expect(d.pendingFire).toBe(1);
   expect(d.fireGates.length).toBeGreaterThan(0);
   expect(d.attacksFired.fire).toBe(0);
+  const gate = d.fireGates[0].position;
   await step(page, 0.12);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.attacksFired.fire).toBe(1);
-  expect(d.shots.find((s) => s.kind === 'fire')!.origin).toEqual(d.fireOrigins[0].origin);
+  // The gate orbits the glyph while open: the bolt leaves from where the gate is now, a little
+  // way along the ring from where it opened.
+  const origin = d.shots.find((s) => s.kind === 'fire')!.origin,
+    away = (a: number[], b: number[]) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
+  // The gates keep orbiting after the shot, so the live gate has drifted a little by now.
+  expect(away(origin, d.fireGates[0].position)).toBeLessThan(0.5);
+  expect(away(origin, d.fireOrigins[0].origin)).toBeLessThan(0.8);
+  expect(away(d.fireGates[0].position, gate)).toBeGreaterThan(0.05);
   await scenario(page, 'patterns');
   await step(page, 1 + ATTACKS.fire.tell + ATTACKS.fire.duration + 0.15);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
@@ -730,6 +774,8 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   expect(d.ragdoll.playerPhase).toBe('slide');
   expect(d.particles.skids).toBeGreaterThan(5);
   expect(d.particles.dust).toBeGreaterThan(5);
+  // ...and leaves scorch marks on the ground that outlive the dust.
+  expect(d.particles.marks).toBeGreaterThan(5);
   await step(page, 5);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.playerGroundTravel).toBeGreaterThan(2);
@@ -745,7 +791,9 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   const monoliths = d.walls.filter((w) => w.maxX - w.minX >= 10 && w.top >= 15).length;
   expect(monoliths).toBeGreaterThanOrEqual(28);
   expect(monoliths).toBeLessThanOrEqual(d.walls.length);
-  expect(d.walls.length).toBeLessThan(40);
+  // Plus the low-cover band (1.5–2.6 m walls) between the cluster and the rings.
+  expect(d.walls.length).toBeLessThan(50);
+  expect(d.walls.filter((w) => w.top < 3).length).toBeGreaterThanOrEqual(10);
   await step(page, 9.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.heavyCircleRadius).toBeGreaterThan(3.4);
@@ -799,31 +847,44 @@ test('a warmed fire gate cannot shoot after the player moves behind a wall', asy
   expect(d.attacksFired.fire).toBe(0);
 });
 
-test('heavy contact holds for half a second then instantly launches both actors at high speed', async ({
+test('heavy contact freezes briefly, releases in slow motion with a camera punch, then launches', async ({
   page,
 }, info) => {
   test.skip(info.project.name !== 'mobile');
-  await load(page);
+  await load(page, false);
   await scenario(page, 'player-air');
   await step(page, 0.02);
   const p = (await state(page)).position;
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.hitPause).toBeGreaterThan(0.1);
+  expect(d.timeScale).toBe(0);
+  expect(d.fov).toBeLessThan(70);
   await step(page, 0.09);
   expect((await state(page)).position).toEqual(p);
-  await step(page, 0.3);
-  expect((await state(page)).position).toEqual(p);
-  await step(page, 0.2);
-  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  // After the 0.15 s freeze the world moves again, but in slow motion that ramps back up.
+  await step(page, 0.1);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.hitPause).toBe(0);
+  expect(d.timeScale).toBeGreaterThan(0);
+  expect(d.timeScale).toBeLessThan(0.6);
   expect(Math.hypot(...d.playerVelocity)).toBeGreaterThan(100);
+  const slow = (await state(page)).position;
+  expect(slow.z).toBeLessThan(p.z);
+  expect(slow.z).toBeGreaterThan(p.z - 3);
+  await step(page, 0.4);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.timeScale).toBe(1);
+  expect(d.fov).toBeGreaterThan(71);
   expect((await state(page)).position.z).toBeLessThan(p.z - 5);
   await scenario(page, 'nova-air');
   await page.locator('#touch-fire').tap();
   await step(page, 0.008);
   const boss = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition;
-  await step(page, 0.4);
+  await step(page, 0.1);
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition).toEqual(
     boss,
   );
-  await step(page, 0.2);
+  await step(page, 0.5);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(Math.hypot(...d.bossVelocity)).toBeGreaterThan(100);
   expect(d.bossPosition[2]).toBeLessThan(boss[2] - 5);

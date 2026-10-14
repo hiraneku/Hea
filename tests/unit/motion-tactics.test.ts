@@ -131,6 +131,39 @@ describe('torque-driven blockout ragdoll', () => {
     expect(body.active).toBe(false);
     expect(body.orientation.angleTo(base)).toBeLessThan(0.001);
   });
+  it('rights itself in the air with one deliberate somersault that ends exactly upright', () => {
+    const body = new BodyTumble(),
+      base = new Quaternion();
+    body.kick(base, new Vector3(0, 90, 0));
+    const steps = Math.ceil(BodyTumble.airRecovery * 120) + 1;
+    for (let i = 0; i < steps; i++) {
+      body.beginStep();
+      body.step(1 / 120, base);
+    }
+    expect(body.phase).toBe('recover');
+    expect(body.flipping).toBe(true);
+    const sideAxis = new Vector3(1, 0, 0),
+      angles: number[] = [];
+    for (let i = 0; i < Math.round(BodyTumble.flipBlend * 120) - 2; i++) {
+      body.beginStep();
+      body.step(1 / 120, base);
+      // The flip spins about the body's own side axis: that axis stays put while the rest turns.
+      expect(sideAxis.clone().applyQuaternion(body.orientation).angleTo(sideAxis)).toBeLessThan(
+        0.6,
+      );
+      angles.push(body.orientation.angleTo(base));
+    }
+    // Mid-flip the body is far from upright (a full turn passes through upside down).
+    expect(Math.max(...angles)).toBeGreaterThan(2.5);
+    for (let i = 0; i < 10; i++) {
+      body.beginStep();
+      body.step(1 / 120, base);
+    }
+    expect(body.active).toBe(false);
+    expect(body.flipping).toBe(false);
+    expect(body.orientation.angleTo(base)).toBeLessThan(0.001);
+    expect(BodyTumble.flipBlend).toBeGreaterThan(BodyTumble.riseBlend);
+  });
   it('keeps tumbling while it is still hitting walls; only free flight starts the recovery clock', () => {
     const body = new BodyTumble(),
       base = new Quaternion();

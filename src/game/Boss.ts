@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { BossDirector, DUEL } from './combat';
 import { Effects, makeSigil, Ribbon } from './Effects';
 import { BodyTumble, LaunchRelease, ease } from './motion';
-import { BossTactics, fireGateOffset } from './BossTactics';
+import { BossTactics, fireGateLocal, fireGateOffset } from './BossTactics';
 
 /** A single floating spellcaster: dark blockout body and an animated, front-facing solar sigil. */
 export class Boss {
@@ -15,8 +15,17 @@ export class Boss {
   readonly tactics = new BossTactics();
   readonly tumble = new BodyTumble();
   readonly release = new LaunchRelease();
-  private gates: { object: THREE.Group; age: number }[] = [];
+  private gates: {
+    object: THREE.Group;
+    age: number;
+    packet: number;
+    angle: number;
+    radius: number;
+    spin: number;
+    roll: number;
+  }[] = [];
   private gateCursor = 0;
+  private floor = (_x: number, _z: number) => 0;
   readonly gateHistory: { side: number; origin: number[]; boss: number[]; local: number[] }[] = [];
   readonly ribbon = new Ribbon(70, 0.034, '#ffd1a0');
   health: number = DUEL.bossHealth;
@@ -113,7 +122,7 @@ export class Boss {
       });
       object.visible = false;
       scene.add(object);
-      this.gates.push({ object, age: 10 });
+      this.gates.push({ object, age: 10, packet: -1, angle: 0, radius: 0, spin: 0, roll: 0 });
     }
     this.reset();
   }
@@ -175,7 +184,8 @@ export class Boss {
       }));
   }
   fireGate(index: number, target: THREE.Vector3, floor: (x: number, z: number) => number) {
-    const { local, side } = fireGateOffset(index, this.director.pattern);
+    const { local, side, angle, radius, spin } = fireGateOffset(index, this.director.pattern);
+    this.floor = floor;
     this.group.updateMatrixWorld(true);
     const origin = this.group.localToWorld(local.clone());
     origin.y = Math.max(origin.y, floor(origin.x, origin.z) + 1.2);
@@ -185,6 +195,11 @@ export class Boss {
     gate.object.scale.setScalar(0.2);
     gate.object.visible = true;
     gate.age = 0;
+    gate.packet = index;
+    gate.angle = angle;
+    gate.radius = radius;
+    gate.spin = spin;
+    gate.roll = 0;
     this.gateHistory.push({
       side,
       origin: origin.toArray(),
@@ -193,6 +208,11 @@ export class Boss {
     });
     if (this.gateHistory.length > 48) this.gateHistory.shift();
     return origin;
+  }
+  /** Where an open gate is right now: it keeps orbiting the glyph while its packet fires. */
+  gateOrigin(packet: number): THREE.Vector3 | null {
+    const gate = this.gates.find((g) => g.object.visible && g.packet === packet);
+    return gate ? gate.object.position.clone() : null;
   }
   private seedPosition(index: number) {
     const angle = this.castRotation + (index / 6) * Math.PI * 2;
@@ -227,8 +247,16 @@ export class Boss {
       g.age += dt;
       g.object.visible = g.age < 0.66;
       if (!g.object.visible) return;
+      // Satellite gates ride the boss's frame and drift slowly around the ring while open.
+      if (g.radius > 0) {
+        const world = this.group.localToWorld(fireGateLocal(g.angle + g.spin * g.age, g.radius));
+        world.y = Math.max(world.y, this.floor(world.x, world.z) + 1.2);
+        g.object.position.copy(world);
+        g.object.lookAt(target);
+        g.roll += dt * 0.5;
+        g.object.rotateZ(g.roll);
+      } else g.object.rotateZ(dt * 0.5);
       g.object.scale.setScalar(0.45 + ease(g.age / 0.1) * 0.55);
-      g.object.rotateZ(dt * 0.5);
       g.object.children.forEach((o) => {
         if (o instanceof THREE.Mesh)
           (o.material as THREE.Material).opacity =

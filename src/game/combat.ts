@@ -17,8 +17,17 @@ export const DUEL = {
   /** A patch keeps blocking shots on its line for this long; each block renews it. */
   shieldPatchLife: 1.5,
   shieldPatchLifeLarge: 1.7,
+  /**
+   * Hits one patch can take before it shatters, and the hole that leaves in the shell: for
+   * `shieldGap` seconds nothing is intercepted within `shieldGapDegrees` of that direction.
+   */
+  shieldPatchHits: 3,
+  shieldGap: 1,
+  shieldGapDegrees: 30,
   novaLaunch: 112,
-  novaPause: 0.5,
+  /** Heavy contact: a dead freeze, then a slow-motion release that ramps back to real time. */
+  heavyFreeze: 0.15,
+  heavySlow: 0.35,
   wallBreakSpeed: 12,
   groundBreakSpeed: 10,
   impactInterval: 0.65,
@@ -224,10 +233,18 @@ export function rangeCorrection(distance: number): number {
 export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer';
 /** The same radius drives the visible core, shield size and swept collision. */
 export const PROJECTILES = {
-  player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, stagger: 0 },
-  fire: { radius: 0.32, speed: 30, life: 4, launch: 36, pause: 0.09, stagger: 0.85 },
-  missile: { radius: 0.34, speed: 25, life: 4.5, launch: 60, pause: 0.12, stagger: 1.2 },
-  hammer: { radius: 1.25, speed: 31, life: 5, launch: 122, pause: 0.5, stagger: 1.5 },
+  player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, slow: 0, stagger: 0 },
+  fire: { radius: 0.32, speed: 30, life: 4, launch: 36, pause: 0.09, slow: 0, stagger: 0.85 },
+  missile: { radius: 0.34, speed: 25, life: 4.5, launch: 60, pause: 0.12, slow: 0, stagger: 1.2 },
+  hammer: {
+    radius: 1.25,
+    speed: 31,
+    life: 5,
+    launch: 122,
+    pause: DUEL.heavyFreeze,
+    slow: DUEL.heavySlow,
+    stagger: 1.5,
+  },
 } as const;
 
 /** Front and peripheral vision in 3D; the rear cone is a genuine blind spot, even while active. */
@@ -288,19 +305,54 @@ export function missileAimOffset(seed: number): { side: number; up: number } {
   return { side: Math.cos(angle) * radius, up: Math.sin(angle) * radius * 0.75 };
 }
 
-/** Stops simulation at contact; consumes only the pause portion of a long render frame. */
+/**
+ * Contact hold: a dead freeze, then an optional slow-motion tail whose time scale ramps back
+ * to real time. Only the pause portion of a long render frame is consumed.
+ */
 export class HitPause {
   remaining = 0;
-  request(duration: number) {
-    this.remaining = Math.max(this.remaining, duration);
+  slowRemaining = 0;
+  private slowTotal = 0;
+  static readonly slowScale = 0.2;
+  request(freeze: number, slow = 0) {
+    this.remaining = Math.max(this.remaining, freeze);
+    if (slow > this.slowRemaining) {
+      this.slowRemaining = slow;
+      this.slowTotal = slow;
+    }
   }
-  consume(dt: number): number {
+  /** True while anything (freeze or slow-motion) still alters the flow of time. */
+  get active() {
+    return this.remaining > 0 || this.slowRemaining > 0;
+  }
+  /** Current simulation speed: 0 frozen, ramping from slowScale up to 1 through the tail. */
+  get scale() {
+    if (this.remaining > 0) return 0;
+    if (this.slowRemaining <= 0 || this.slowTotal <= 0) return 1;
+    const progress = 1 - this.slowRemaining / this.slowTotal;
+    return HitPause.slowScale + (1 - HitPause.slowScale) * progress * progress;
+  }
+  /** Freeze only: the held portion is removed from `dt`, the rest is returned unchanged. */
+  hold(dt: number): number {
     const held = Math.min(Math.max(0, dt), this.remaining);
     this.remaining = Math.max(0, this.remaining - held);
     return Math.max(0, dt - held);
   }
+  /** Converts a real-time frame into simulated time: freeze, then the slow-motion ramp. */
+  consume(dt: number): number {
+    let real = this.hold(dt),
+      simulated = 0;
+    while (real > 1e-9 && this.slowRemaining > 0) {
+      const slice = Math.min(real, this.slowRemaining, 1 / 240),
+        scale = this.scale;
+      this.slowRemaining = Math.max(0, this.slowRemaining - slice);
+      simulated += slice * (scale + this.scale) * 0.5;
+      real -= slice;
+    }
+    return simulated + real;
+  }
   reset() {
-    this.remaining = 0;
+    this.remaining = this.slowRemaining = this.slowTotal = 0;
   }
 }
 

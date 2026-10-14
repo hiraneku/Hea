@@ -128,6 +128,12 @@ export class AudioEngine {
     this.tone(1200, 500, 0.2, 0.18);
     this.tone(1700, 700, 0.3, 0.1);
   }
+  /** A spent shield patch breaking up: a glassy crack falling into a short hiss. */
+  shatter() {
+    this.tone(1900, 240, 0.28, 0.2, 'triangle');
+    this.tone(2600, 900, 0.14, 0.1);
+    this.air(0.22, 3200, 0.3);
+  }
   damage() {
     this.tone(120, 35, 0.3, 0.5, 'triangle');
     this.air(0.2, 600, 0.35);

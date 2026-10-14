@@ -7,6 +7,48 @@ const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
 const dummy = new THREE.Object3D();
 
+/** Soft, streaky scratch mark (alpha only), long axis along U, for skid decals. */
+export function skidMarkTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 32;
+  const c = canvas.getContext('2d')!;
+  c.clearRect(0, 0, 128, 32);
+  const random = seededRandom(7);
+  for (let i = 0; i < 9; i++) {
+    const y = 4 + random() * 24,
+      start = random() * 30,
+      end = 128 - random() * 30,
+      width = 0.8 + random() * 2.2;
+    const fade = c.createLinearGradient(start, 0, end, 0);
+    fade.addColorStop(0, 'rgba(0,0,0,0)');
+    fade.addColorStop(0.25, `rgba(0,0,0,${0.35 + random() * 0.45})`);
+    fade.addColorStop(0.75, `rgba(0,0,0,${0.35 + random() * 0.45})`);
+    fade.addColorStop(1, 'rgba(0,0,0,0)');
+    c.strokeStyle = fade;
+    c.lineWidth = width;
+    c.lineCap = 'round';
+    c.beginPath();
+    c.moveTo(start, y);
+    c.lineTo(end, y + (random() - 0.5) * 3);
+    c.stroke();
+  }
+  // A faint broad smear under the scratches so the mark reads from a distance too.
+  const smear = c.createRadialGradient(64, 16, 2, 64, 16, 62);
+  smear.addColorStop(0, 'rgba(0,0,0,0.35)');
+  smear.addColorStop(1, 'rgba(0,0,0,0)');
+  c.fillStyle = smear;
+  c.save();
+  c.scale(1, 0.3);
+  c.beginPath();
+  c.arc(64, 16 / 0.3, 62, 0, Math.PI * 2);
+  c.fill();
+  c.restore();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.NoColorSpace;
+  return texture;
+}
+
 export function sigilTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = 512;
@@ -300,9 +342,17 @@ export class Effects {
       sparks: this.sparks.filter((p) => p.life > 0).length,
       dust: this.dustClouds.filter((p) => p.life > 0).length,
       skids: this.skidCalls,
+      marks: this.marks.filter((m) => m.life > 0).length,
+      airRecoveries: this.airRecoveries,
     };
   }
   private skidCalls = 0;
+  private airRecoveries = 0;
+  private markMesh: THREE.InstancedMesh;
+  private markCapacity = 220;
+  private markCursor = 0;
+  private markAlpha: Float32Array;
+  private marks: { life: number; max: number }[] = [];
   private sparkMesh: THREE.Points;
   private rockMesh: THREE.InstancedMesh;
   private position: Float32Array;
@@ -397,6 +447,41 @@ export class Effects {
     this.rockMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.rockMesh.frustumCulled = false;
     scene.add(this.rockMesh);
+    // Skid marks: flat scorch/scratch decals laid along a drag path, fading over several
+    // seconds — the lasting record of a slide once the dust has settled.
+    this.markAlpha = new Float32Array(this.markCapacity);
+    const markGeometry = new THREE.PlaneGeometry(1, 1);
+    markGeometry.setAttribute(
+      'aAlpha',
+      new THREE.InstancedBufferAttribute(this.markAlpha, 1).setUsage(THREE.DynamicDrawUsage),
+    );
+    this.markMesh = new THREE.InstancedMesh(
+      markGeometry,
+      new THREE.ShaderMaterial({
+        uniforms: { map: { value: skidMarkTexture() } },
+        vertexShader:
+          'attribute float aAlpha; varying vec2 vUv; varying float vAlpha; void main(){vUv=uv;vAlpha=aAlpha;gl_Position=projectionMatrix*modelViewMatrix*instanceMatrix*vec4(position,1.0);}',
+        fragmentShader:
+          'uniform sampler2D map; varying vec2 vUv; varying float vAlpha; void main(){float a=texture2D(map,vUv).a*vAlpha;if(a<0.01)discard;gl_FragColor=vec4(vec3(0.075,0.07,0.065),a);}',
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -2,
+        polygonOffsetUnits: -2,
+      }),
+      this.markCapacity,
+    );
+    this.markMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.markMesh.frustumCulled = false;
+    this.markMesh.renderOrder = -1;
+    for (let i = 0; i < this.markCapacity; i++) {
+      this.marks.push({ life: 0, max: 1 });
+      dummy.position.set(0, -1000, 0);
+      dummy.scale.setScalar(0);
+      dummy.updateMatrix();
+      this.markMesh.setMatrixAt(i, dummy.matrix);
+    }
+    scene.add(this.markMesh);
     for (let i = 0; i < this.capacity; i++)
       this.sparks.push({
         p: new THREE.Vector3(0, -1000, 0),
@@ -454,16 +539,86 @@ export class Effects {
     this.burst(at, '#7af1ff', scale > 2 ? 26 : 12, 3, 0.24 * Math.sqrt(scale), 0.5);
     return { serial, pattern: shieldPattern(serial), life };
   }
-  /** A standing patch that stops another shot lights up again and restarts its fade. */
-  refreshEcho(serial: number, at: THREE.Vector3, scale = 1): boolean {
-    const echo = this.timed.find(
+  private findEcho(serial: number) {
+    return this.timed.find(
       (e) => e.object.userData.kind === 'shield-echo' && e.object.userData.serial === serial,
     );
+  }
+  /**
+   * A standing patch that stops another shot: its fade restarts, a ripple runs over the hex
+   * pieces and the glow steps up with every hit it has taken, so a patch under sustained fire
+   * visibly carries that load.
+   */
+  refreshEcho(serial: number, at: THREE.Vector3, scale = 1, hits = 2): boolean {
+    const echo = this.findEcho(serial);
     if (!echo) return false;
     echo.life = echo.max;
-    echo.object.userData.hits = (echo.object.userData.hits ?? 0) + 1;
+    echo.object.userData.hits = hits;
+    echo.object.userData.ripple = 0.32;
+    this.ripple(echo.object, at, scale, '#9cf6ff');
     this.burst(at, '#9cf6ff', 10, 2.6, 0.2 * Math.sqrt(scale), 0.5);
     return true;
+  }
+  /** The last hit a patch could take: a hard flash, a wide ripple and the pieces blowing out. */
+  shatterEcho(serial: number, at: THREE.Vector3, scale = 1) {
+    const echo = this.findEcho(serial);
+    if (echo) {
+      echo.object.userData.shattered = true;
+      echo.object.userData.ripple = 0.3;
+      echo.max = echo.life = 0.3;
+      echo.grow = 1.4 * scale;
+      this.ripple(echo.object, at, scale * 1.6, '#ffffff');
+    }
+    this.burst(at, '#c8fbff', scale > 2 ? 40 : 24, 7, 0.26 * Math.sqrt(scale), 0.55);
+    this.burst(at, '#7af1ff', 14, 3.2, 0.42 * Math.sqrt(scale), 0.25);
+  }
+  /** Thin expanding ring in the plane of a patch, centred on the strike. */
+  private ripple(patch: THREE.Object3D, at: THREE.Vector3, scale: number, color: string) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.72, 0.9, 40),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.85,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    ring.position.copy(at);
+    ring.quaternion.copy(patch.getWorldQuaternion(new THREE.Quaternion()));
+    ring.translateZ(0.02);
+    ring.userData.kind = 'shield-ripple';
+    const base = 0.35 * Math.sqrt(scale),
+      life = 0.34;
+    ring.scale.setScalar(base);
+    this.add(ring, life, (1.9 * Math.sqrt(scale)) / life, 0);
+  }
+  /**
+   * The body righting itself in mid-air: a soft ring of displaced air around the hips and a
+   * few flakes, so the moment reads even against an empty sky.
+   */
+  airRecover(at: THREE.Vector3, scale = 1) {
+    this.airRecoveries++;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.55, 0.78, 36),
+      new THREE.MeshBasicMaterial({
+        color: '#dffbff',
+        transparent: true,
+        opacity: 0.7,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    ring.position.copy(at);
+    ring.rotation.x = -Math.PI / 2;
+    ring.userData.kind = 'air-recover';
+    const life = 0.42;
+    ring.scale.setScalar(0.8 * scale);
+    this.add(ring, life, (2.6 * scale) / life, 0);
+    this.dust(at, 4, 0.9 * scale);
+    this.burst(at, '#bff6ff', 10, 2.2, 0.2 * scale, 0.35);
   }
   /** Friction trail for a body dragged across the ground: sparks, dust and chipped stone. */
   skid(at: THREE.Vector3, velocity: THREE.Vector3, scale = 1) {
@@ -474,6 +629,7 @@ export class Effects {
       side = v2.set(-back.z, 0, back.x);
     const base = new THREE.Vector3(at.x, this.groundAt(at.x, at.z) + 0.06 * scale, at.z);
     const intensity = Math.min(1, speed / 22);
+    this.mark(base, back, scale, intensity);
     // A grey plume kicked up behind the body (one puff per call, so a long drag reads as a
     // continuous trail without starving other dust effects), plus a little dark grit that
     // tumbles low along the ground — never a bright additive streak.
@@ -496,6 +652,23 @@ export class Effects {
     }
     if (Math.random() < 0.2 + intensity * 0.35)
       this.debris(base, 1 + Math.round(intensity), 2.4, 1 * scale, velocity);
+  }
+  /** One decal of the drag path, long axis along the motion, offset randomly across it. */
+  private mark(base: THREE.Vector3, back: THREE.Vector3, scale: number, intensity: number) {
+    const index = this.markCursor++ % this.markCapacity,
+      mark = this.marks[index];
+    mark.max = mark.life = 5.5 + intensity * 3;
+    this.markAlpha[index] = 0.5 + intensity * 0.35;
+    const side = new THREE.Vector3(-back.z, 0, back.x),
+      length = (0.9 + intensity * 0.6) * scale,
+      width = (0.22 + Math.random() * 0.18) * scale;
+    dummy.position.copy(base).addScaledVector(side, (Math.random() - 0.5) * 0.5 * scale);
+    dummy.position.y = this.groundAt(dummy.position.x, dummy.position.z) + 0.03;
+    dummy.rotation.set(-Math.PI / 2, 0, Math.atan2(-back.x, -back.z) + Math.PI / 2);
+    dummy.scale.set(length, width, 1);
+    dummy.updateMatrix();
+    this.markMesh.setMatrixAt(index, dummy.matrix);
+    this.markMesh.instanceMatrix.needsUpdate = true;
   }
   contact(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1) {
     const points: number[] = [];
@@ -728,6 +901,27 @@ export class Effects {
       this.rockMesh.setMatrixAt(i, dummy.matrix);
     }
     this.rockMesh.instanceMatrix.needsUpdate = true;
+    let marksDirty = false;
+    for (let i = 0; i < this.markCapacity; i++) {
+      const m = this.marks[i];
+      if (m.life <= 0) continue;
+      m.life = Math.max(0, m.life - dt);
+      marksDirty = true;
+      // Hold full strength for most of the life, then fade out over the last 40 %.
+      const fade = Math.min(1, m.life / (m.max * 0.4));
+      this.markAlpha[i] = (0.5 + 0.35 * Math.min(1, m.max > 0 ? (m.max - 5.5) / 3 : 0)) * fade;
+      if (m.life === 0) {
+        this.markAlpha[i] = 0;
+        dummy.position.set(0, -1000, 0);
+        dummy.scale.setScalar(0);
+        dummy.rotation.set(0, 0, 0);
+        dummy.updateMatrix();
+        this.markMesh.setMatrixAt(i, dummy.matrix);
+        this.markMesh.instanceMatrix.needsUpdate = true;
+      }
+    }
+    if (marksDirty)
+      (this.markMesh.geometry.getAttribute('aAlpha') as THREE.BufferAttribute).needsUpdate = true;
     for (let i = this.timed.length - 1; i >= 0; i--) {
       const e = this.timed[i];
       e.life -= dt;
@@ -736,17 +930,30 @@ export class Effects {
         this.timed.splice(i, 1);
         continue;
       }
-      const progress = 1 - e.life / e.max;
-      e.object.scale.setScalar(e.baseScale + progress * e.grow * e.max);
+      const progress = 1 - e.life / e.max,
+        data = e.object.userData;
+      let scale = e.baseScale + progress * e.grow * e.max;
+      if (data.kind === 'shield-echo') {
+        // Ripple: a quick swell that settles back, run on every hit the patch absorbs.
+        data.ripple = Math.max(0, (data.ripple ?? 0) - dt);
+        const swell = data.ripple > 0 ? Math.sin((1 - data.ripple / 0.32) * Math.PI) : 0;
+        scale *= 1 + swell * (data.shattered ? 0.3 : 0.12);
+      }
+      e.object.scale.setScalar(scale);
       e.object.rotation.z += e.spin * dt;
+      const load = data.kind === 'shield-echo' ? Math.min(3, Math.max(0, (data.hits ?? 1) - 1)) : 0;
       e.object.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
           const material = o.material as THREE.Material & { opacity: number };
           const fade =
-            e.object.userData.kind === 'shield-echo'
-              ? Math.min(1, e.life / 0.65)
+            data.kind === 'shield-echo'
+              ? data.shattered
+                ? Math.min(1, e.life / 0.3)
+                : Math.min(1, e.life / 0.65)
               : Math.min(1, (e.life / e.max) * 1.6);
-          material.opacity = (o.userData.baseOpacity ?? 1) * fade;
+          // Each absorbed hit brightens the patch: fill and glow step up with the load.
+          const charge = 1 + load * (o.userData.glow ? 0.28 : 0.9) + (data.shattered ? 0.6 : 0);
+          material.opacity = Math.min(1, (o.userData.baseOpacity ?? 1) * charge * fade);
         }
       });
     }
@@ -754,6 +961,17 @@ export class Effects {
   clear() {
     this.shieldSerial = 0;
     this.skidCalls = 0;
+    this.airRecoveries = 0;
+    this.marks.forEach((m, i) => {
+      m.life = 0;
+      this.markAlpha[i] = 0;
+      dummy.position.set(0, -1000, 0);
+      dummy.scale.setScalar(0);
+      dummy.updateMatrix();
+      this.markMesh.setMatrixAt(i, dummy.matrix);
+    });
+    this.markMesh.instanceMatrix.needsUpdate = true;
+    (this.markMesh.geometry.getAttribute('aAlpha') as THREE.BufferAttribute).needsUpdate = true;
     this.dustClouds.forEach((p) => {
       p.life = 0;
     });

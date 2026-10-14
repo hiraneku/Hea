@@ -8,13 +8,15 @@ import { AudioEngine } from './Audio';
 import { Effects, Ribbon } from './Effects';
 import { World, contactShadowTexture } from './World';
 import { Boss } from './Boss';
+import { BossNavigator } from './BossNavigation';
+import { ShieldPatchRegistry } from './ShieldPatches';
+import { SCENARIOS } from './TestScenarios';
 import {
   AutoShield,
   ATTACKS,
   DUEL,
   guideMissile,
   missileAimOffset,
-  patchBlocks,
   patchRadius,
   shieldCovers,
   shieldScale,
@@ -128,13 +130,20 @@ export class Game {
   private blockedCasts = 0;
   /** Continuous seconds without a firing lane; long blockades make the boss close in/climb. */
   private blockedTime = 0;
-  private bossDetour: { motion: THREE.Vector3; until: number } | null = null;
-  private bossVantage: { point: THREE.Vector3; until: number } | null = null;
-  private lastDetourSide = 0;
+  private readonly nav = new BossNavigator({
+    trace: (start, end, radius) => this.trace(start, end, false, radius),
+    lane: (from, target) => this.world.firingLane(from, target, 'fire').mode,
+    bounds: () => this.world.wallBounds,
+  });
   private firePacket: { packet: number; pattern: number; origin: THREE.Vector3 } | null = null;
-  private pendingFire: { origin: THREE.Vector3; delay: number; index: number }[] = [];
-  private shieldPatches: ShieldPatch[] = [];
-  private patchReuses = 0;
+  private pendingFire: { origin: THREE.Vector3; delay: number; index: number; packet: number }[] =
+    [];
+  private readonly patches = new ShieldPatchRegistry();
+  /** 1 right after a heavy contact, decaying in real time: drives the camera zoom punch. */
+  private punch = 0;
+  private punchClock = 0;
+  private fovBase = 74;
+  private seenAirRecoveries = { player: 0, boss: 0 };
   private playerWasPhysical = false;
   private bossSkidTimer = 0;
   private avatar: THREE.Mesh;
@@ -419,7 +428,12 @@ export class Game {
       textures: this.renderer.info.memory.textures,
       camera: { yaw: this.yaw, pitch: this.pitch },
       facing: this.facing.toArray(),
+      health: this.health,
       hitPause: this.hitPause.remaining,
+      slowMotion: this.hitPause.slowRemaining,
+      timeScale: this.hitPause.scale,
+      punch: this.punch,
+      fov: this.camera.fov,
       playerReaction: this.pendingPlayerImpulse
         ? 'contact'
         : this.knockTime > 0
@@ -431,8 +445,11 @@ export class Game {
           ? 'launch'
           : 'idle',
       lastBlock: this.lastBlock,
-      shieldPatches: this.shieldPatches,
-      patchReuses: this.patchReuses,
+      shieldPatches: this.patches.patches,
+      patchReuses: this.patches.reuses,
+      patchShatters: this.patches.shatters,
+      patchGaps: this.patches.openGaps,
+      patchLeaks: this.patches.leaks,
       shieldEchoes: this.fx.shieldEchoes,
       particles: this.fx.activity,
       heavyPenetrations: this.heavyPenetrations,
@@ -462,6 +479,8 @@ export class Game {
         bossAirTime: this.boss.tumble.airTime,
         playerAirRecoveries: this.playerTumble.airRecoveries,
         bossAirRecoveries: this.boss.tumble.airRecoveries,
+        playerFlipping: this.playerTumble.flipping,
+        bossFlipping: this.boss.tumble.flipping,
         bossWeight: this.boss.tumble.weight,
         playerOrientation: this.avatar.quaternion.toArray(),
         bossOrientation: this.boss.group.quaternion.toArray(),
@@ -469,7 +488,10 @@ export class Game {
       bossTactic: this.boss.tactics.maneuver,
       bossLane: this.bossLane,
       bossBlockedTime: this.blockedTime,
-      bossDetour: this.bossDetour ? this.bossDetour.motion.toArray() : null,
+      bossDetour: this.nav.detour ? this.nav.detour.motion.toArray() : null,
+      bossRoute: this.nav.route.map((point) => point.toArray()),
+      bossVantage: this.nav.vantage ? this.nav.vantage.point.toArray() : null,
+      bossOverTop: this.nav.overTop,
       blockedCasts: this.blockedCasts,
       bossVelocity: this.boss.velocity.clone().add(this.boss.impulse).toArray(),
       bossGoal: this.boss.tactics.goal.toArray(),
@@ -530,11 +552,8 @@ export class Game {
     this.bossLane = { mode: 'clear', walls: [], thickness: 0 };
     this.sightClock = this.seekClock = this.breachClock = this.blockedCasts = 0;
     this.blockedTime = 0;
-    this.bossDetour = null;
-    this.bossVantage = null;
-    this.lastDetourSide = 0;
-    this.shieldPatches = [];
-    this.patchReuses = 0;
+    this.nav.reset();
+    this.patches.reset();
     this.playerWasPhysical = false;
     this.bossSkidTimer = 0;
     this.health = this.energy = 100;
@@ -545,7 +564,8 @@ export class Game {
     this.lastBlock = null;
     this.contacts = 0;
     this.lastDamageBlind = false;
-    this.roll = this.shake = 0;
+    this.roll = this.shake = this.punch = 0;
+    this.seenAirRecoveries = { player: 0, boss: 0 };
     this.damageDealt = this.impacts = this.elapsed = 0;
     this.damageTimer = 10;
     this.hitPause.reset();
@@ -689,10 +709,15 @@ export class Game {
       this.setFlight(!this.flightEnabled);
     }
     this.flashTimer = Math.max(0, this.flashTimer - realDt);
-    // Pause uses wall-clock time. Physics still has a cap, so slow renderers cannot tunnel.
+    // The camera punch runs on wall-clock time so it still plays while the world is frozen.
+    this.punch = damp(this.punch, 0, 4.5, realDt);
+    if (this.hitPause.active && this.mode === 'playing') this.updateCamera(0, false, realDt);
+    // Pause uses wall-clock time: a dead freeze, then slow motion ramping back to real time.
+    // Physics still has a cap, so slow renderers cannot tunnel.
     let left = Math.min(0.1, this.hitPause.consume(realDt));
     while (left > 1e-8) {
-      left = this.hitPause.consume(left);
+      // A freeze requested by a hit inside this frame eats the rest of the frame's budget.
+      left = this.hitPause.hold(left);
       if (left <= 1e-8) break;
       if (this.pendingPlayerImpulse) {
         this.playerRelease.start(this.pendingPlayerImpulse);
@@ -710,7 +735,7 @@ export class Game {
       this.modeTime += dt;
       if (this.mode === 'playing' && !this.outcome) this.elapsed += dt;
       this.aegis.update(dt);
-      this.agePatches(dt);
+      this.patches.age(dt);
       this.damageTimer += dt;
       this.impactGate.player = Math.max(0, this.impactGate.player - dt);
       this.impactGate.boss = Math.max(0, this.impactGate.boss - dt);
@@ -724,6 +749,7 @@ export class Game {
       }
       if (this.mode !== 'playing') this.showcaseCamera(dt);
       this.presentActors(this.hitPause.remaining > 0 ? 0 : dt);
+      this.noteAirRecoveries();
       this.fx.update(this.hitPause.remaining > 0 ? 0 : dt);
       if (this.outcome) {
         this.finishTimer -= dt;
@@ -1035,7 +1061,15 @@ export class Game {
     this.yaw += diff * amount;
     this.pitch += (Math.atan2(delta.y, Math.hypot(delta.x, delta.z) + 6.4) - this.pitch) * amount;
   }
-  private updateCamera(dt: number, snap = false) {
+  /**
+   * Chase camera. `realDt` > 0 with `dt` = 0 runs only the wall-clock parts (the heavy-hit
+   * zoom punch and its shake) while the simulation itself is frozen or slowed.
+   */
+  private updateCamera(dt: number, snap = false, realDt = 0) {
+    if (dt <= 0 && !snap) {
+      this.applyPunch(realDt);
+      return;
+    }
     const quaternion = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'),
     );
@@ -1088,13 +1122,13 @@ export class Game {
     if (snap) this.camera.quaternion.copy(targetRotation);
     else this.camera.quaternion.slerp(targetRotation, 1 - Math.exp(-dt * 22));
     const speed = this.velocity.clone().add(this.impulse).add(this.airDash.velocity).length();
-    this.camera.fov = damp(
-      this.camera.fov,
+    this.fovBase = damp(
+      this.fovBase,
       this.settings.reducedEffects ? 74 : 74 + clamp((speed - 14) * 0.25, 0, 11),
       8,
       dt,
     );
-    this.camera.updateProjectionMatrix();
+    this.applyPunch(0);
     this.camera.updateMatrixWorld();
   }
   private showcaseCamera(dt: number) {
@@ -1118,6 +1152,39 @@ export class Game {
     }
     this.camera.updateProjectionMatrix();
     this.camera.updateMatrixWorld();
+  }
+  /**
+   * Zoom punch on heavy contact: the field of view snaps in by a few degrees and eases back
+   * while the slow-motion tail plays, with a short rotational jolt in real time.
+   */
+  private applyPunch(realDt: number) {
+    const punch = this.settings.reducedEffects ? 0 : this.punch;
+    this.camera.fov = this.fovBase - punch * 7.5;
+    if (realDt > 0 && punch > 0.02) {
+      const jolt = punch * punch * 0.012;
+      this.camera.quaternion.multiply(
+        new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(
+            Math.sin(this.punchClock * 61) * jolt,
+            Math.sin(this.punchClock * 47) * jolt,
+            0,
+          ),
+        ),
+      );
+      this.punchClock += realDt;
+    }
+    this.camera.updateProjectionMatrix();
+  }
+  /** The moment a tumbling body rights itself in the air gets its own small flourish. */
+  private noteAirRecoveries() {
+    if (this.playerTumble.airRecoveries > this.seenAirRecoveries.player) {
+      this.seenAirRecoveries.player = this.playerTumble.airRecoveries;
+      this.fx.airRecover(this.player.clone().addScaledVector(UP, 0.7), 1);
+    }
+    if (this.boss.tumble.airRecoveries > this.seenAirRecoveries.boss) {
+      this.seenAirRecoveries.boss = this.boss.tumble.airRecoveries;
+      this.fx.airRecover(this.boss.position.clone(), 2.2);
+    }
   }
   private presentActors(dt: number) {
     this.avatar.position.copy(this.player);
@@ -1149,6 +1216,7 @@ export class Game {
       (supportHeight(this.avatar.quaternion, new THREE.Vector3(0.325, 0.65, 0.325)) + 0.025) *
         this.playerTumble.weight;
     this.playerTrail.push(this.avatar.position, this.camera.position);
+    this.world.focusShadow(this.player);
     this.boss.present(
       this.time,
       dt,
@@ -1198,7 +1266,8 @@ export class Game {
       b.director.stage,
       b.director.pattern,
     );
-    if (b.knockTime === 0) this.steerAroundCover(motor);
+    if (b.knockTime === 0)
+      this.nav.steer(b.position, motor, b.tactics.goal, this.player, this.time);
     // Obstacle avoidance must never override the duel's minimum standoff.
     const away = b.position.clone().sub(this.player);
     away.y = 0;
@@ -1296,216 +1365,10 @@ export class Game {
     }
     if (this.seekClock > 0 || this.testIdleBoss) return;
     this.seekClock = 0.4;
-    // Keep one vantage until it is reached, stale, or no longer sees the player: a stable
-    // destination routes cleanly, whereas a destination that changes every tick dithers.
-    let vantage = this.bossVantage;
-    if (
-      !vantage ||
-      this.time > vantage.until ||
-      vantage.point.distanceTo(b.position) < 3 ||
-      this.world.firingLane(vantage.point, target, 'fire').mode !== 'clear'
-    )
-      vantage = this.bossVantage = { point: this.findVantage(target), until: this.time + 4 };
-    b.tactics.seekSight(this.routeAround(b.position, vantage.point), b.director.pattern);
-  }
-  /**
-   * One-corner routing: when the straight flight to `to` is blocked, head for a corner of the
-   * blocking building (or a point above it) from which `to` is reachable in a straight line.
-   * A corner that only makes partial progress is still better than pressing into the wall.
-   */
-  private routeAround(from: THREE.Vector3, to: THREE.Vector3): THREE.Vector3 {
-    const hit = this.trace(from, to, false, 1.4);
-    if (!hit?.obstacle) return to;
-    const o = hit.obstacle,
-      bounds = (o.owner !== undefined && this.world.wallBounds[o.owner]) || o,
-      margin = 4.5,
-      points: THREE.Vector3[] = [];
-    for (const y of new Set([from.y, to.y]))
-      for (const [x, z] of [
-        [bounds.minX - margin, bounds.minZ - margin],
-        [bounds.maxX + margin, bounds.minZ - margin],
-        [bounds.minX - margin, bounds.maxZ + margin],
-        [bounds.maxX + margin, bounds.maxZ + margin],
-      ])
-        points.push(new THREE.Vector3(x, y, z));
-    const over = bounds.top + 4.5;
-    if (over <= ARENA.ceiling) {
-      points.push(new THREE.Vector3(from.x, over, from.z));
-      points.push(
-        new THREE.Vector3((bounds.minX + bounds.maxX) / 2, over, (bounds.minZ + bounds.maxZ) / 2),
-      );
-    }
-    let best: THREE.Vector3 | null = null,
-      cost = Infinity,
-      partial: THREE.Vector3 | null = null,
-      partialCost = Infinity;
-    for (const point of points) {
-      if (
-        Math.abs(point.x) > ARENA.halfSize - 4 ||
-        Math.abs(point.z) > ARENA.halfSize - 4 ||
-        point.y < 2.5 ||
-        point.y > ARENA.ceiling ||
-        this.trace(point, point, false, 1.6) ||
-        this.trace(from, point, false, 1.4)
-      )
-        continue;
-      const leg = from.distanceTo(point),
-        rest = point.distanceTo(to);
-      if (!this.trace(point, to, false, 1.4)) {
-        if (leg + rest < cost) {
-          cost = leg + rest;
-          best = point;
-        }
-      } else if (rest + leg * 0.5 < partialCost) {
-        partialCost = rest + leg * 0.5;
-        partial = point;
-      }
-    }
-    return best ?? partial ?? to;
-  }
-  /**
-   * Searches several rings around the player, in every direction and at several heights, for a
-   * spot with a clear lane; reachable spots score better. Long blockades bias towards closing
-   * in. When nothing qualifies the boss climbs above the obstruction while approaching, so it
-   * never hovers idle behind cover or at the far side of the arena.
-   */
-  private findVantage(target: THREE.Vector3): THREE.Vector3 {
-    const b = this.boss,
-      delta = b.position.clone().sub(this.player),
-      angle = Math.atan2(delta.z, delta.x),
-      obstruction = this.trace(b.position, target, false)?.obstacle,
-      pressing = this.blockedTime > 3;
-    const ranges = pressing
-      ? [DUEL.nearRange + 1, DUEL.preferredRange]
-      : [DUEL.preferredRange, DUEL.nearRange + 2, DUEL.farRange];
-    const heights = [
-      b.position.y,
-      Math.max(2.5, this.player.y + 0.9),
-      Math.min(ARENA.ceiling, (obstruction?.top ?? b.position.y) + 4),
-      Math.min(ARENA.ceiling, this.player.y + 14),
-    ];
-    const turns = [0, -0.45, 0.45, -0.9, 0.9, -1.4, 1.4, -2, 2, -2.6, 2.6, Math.PI];
-    let best: THREE.Vector3 | null = null,
-      cost = Infinity;
-    for (const range of ranges)
-      for (const height of heights)
-        for (const turn of turns) {
-          const candidate = new THREE.Vector3(
-            this.player.x + Math.cos(angle + turn) * range,
-            height,
-            this.player.z + Math.sin(angle + turn) * range,
-          );
-          if (
-            Math.abs(candidate.x) > ARENA.halfSize - 5 ||
-            Math.abs(candidate.z) > ARENA.halfSize - 5
-          )
-            continue;
-          if (
-            this.trace(candidate, candidate, false, 1.3) ||
-            this.world.firingLane(candidate, target, 'fire').mode !== 'clear'
-          )
-            continue;
-          const reachable = !this.trace(b.position, candidate, false, 1.2);
-          const score =
-            candidate.distanceTo(b.position) +
-            Math.abs(height - b.position.y) * 1.2 +
-            Math.abs(turn) * 3 +
-            (reachable ? 0 : 28);
-          if (score < cost) {
-            cost = score;
-            best = candidate;
-          }
-        }
-    if (best) return best;
-    const toward = this.player.clone().sub(b.position).setY(0),
-      distance = toward.length();
-    const keep = Math.max(DUEL.nearRange + 1, Math.min(distance, DUEL.preferredRange));
-    const vantage =
-      distance > 0.01
-        ? this.player.clone().addScaledVector(toward.divideScalar(distance), -keep)
-        : b.position.clone();
-    vantage.x = clamp(vantage.x, -ARENA.halfSize + 8, ARENA.halfSize - 8);
-    vantage.z = clamp(vantage.z, -ARENA.halfSize + 8, ARENA.halfSize - 8);
-    vantage.y = clamp(
-      Math.max((obstruction?.top ?? b.position.y) + 5, this.player.y + 6),
-      3,
-      ARENA.ceiling,
+    b.tactics.seekSight(
+      this.nav.seek(b.position, this.player, target, this.time, this.blockedTime),
+      b.director.pattern,
     );
-    return vantage;
-  }
-  /**
-   * Commits to one detour (a side-step or a climb over the blocking slab) for half a second
-   * instead of re-deciding every physics step, so wide monoliths cannot trap the boss.
-   */
-  private steerAroundCover(motor: THREE.Vector3) {
-    const b = this.boss;
-    if (this.bossDetour) {
-      const live = this.time < this.bossDetour.until,
-        clear =
-          live &&
-          !this.trace(
-            b.position,
-            b.position.clone().addScaledVector(this.bossDetour.motion, 0.5),
-            false,
-            0.5,
-          )?.obstacle;
-      if (clear) {
-        motor.copy(this.bossDetour.motion);
-        return;
-      }
-      this.bossDetour = null;
-    }
-    const blocked = this.trace(
-      b.position,
-      b.position.clone().addScaledVector(motor, 0.65),
-      false,
-      0.55,
-    );
-    if (!blocked?.obstacle) return;
-    const speed = Math.max(9, motor.length()),
-      heading = motor.clone().setY(0);
-    if (heading.lengthSq() < 0.01) heading.copy(this.player).sub(b.position).setY(0);
-    heading.normalize();
-    const side = new THREE.Vector3(-heading.z, 0, heading.x),
-      options: THREE.Vector3[] = [];
-    for (const reach of [8, 14, 22])
-      for (const sign of [1, -1]) options.push(side.clone().multiplyScalar(sign * reach));
-    const over = blocked.obstacle.top + 3.5;
-    if (over < ARENA.ceiling)
-      options.push(
-        new THREE.Vector3(0, Math.max(0, over - b.position.y), 0).addScaledVector(heading, 4),
-      );
-    let best: THREE.Vector3 | null = null,
-      cost = Infinity;
-    for (const option of options) {
-      const point = b.position.clone().add(option);
-      if (
-        Math.abs(point.x) > ARENA.halfSize - 4 ||
-        Math.abs(point.z) > ARENA.halfSize - 4 ||
-        point.y < 2 ||
-        point.y > ARENA.ceiling
-      )
-        continue;
-      if (this.trace(b.position, point, false, 0.5)) continue;
-      const onward = !this.trace(point, b.tactics.goal, false, 0.5),
-        sameSide = this.lastDetourSide !== 0 && Math.sign(option.dot(side)) === this.lastDetourSide;
-      // Favour detours that open a straight line to the goal, and keep the side already chosen
-      // so a wide slab is passed in one sweep rather than by dithering left and right.
-      const score =
-        option.length() +
-        point.distanceTo(b.tactics.goal) * 0.6 +
-        (onward ? 0 : 14) +
-        (sameSide ? -8 : 0);
-      if (score < cost) {
-        cost = score;
-        best = option;
-      }
-    }
-    const chosen = best ?? new THREE.Vector3(0, 10, 0),
-      motion = chosen.clone().normalize().multiplyScalar(speed);
-    this.lastDetourSide = Math.sign(chosen.dot(side));
-    this.bossDetour = { motion, until: this.time + 0.8 };
-    motor.copy(motion);
   }
   private permittedCast(
     attack: AttackId,
@@ -1545,7 +1408,12 @@ export class Game {
         );
         this.firePacket = { packet, pattern, origin };
       }
-      this.pendingFire.push({ origin: this.firePacket.origin.clone(), delay: 0.12, index });
+      this.pendingFire.push({
+        origin: this.firePacket.origin.clone(),
+        delay: 0.12,
+        index,
+        packet,
+      });
     } else if (attack === 'missiles') {
       for (const side of [0, 3]) {
         const port = this.boss.spellPort(index + side),
@@ -1590,7 +1458,9 @@ export class Game {
       shot.delay -= dt;
       if (shot.delay > 0) continue;
       this.pendingFire.splice(i, 1);
-      if (!this.permittedCast('fire', shot.origin)) continue;
+      // The gate has drifted along its orbit since the packet opened: fire from where it is.
+      const origin = this.boss.gateOrigin(shot.packet) ?? shot.origin;
+      if (!this.permittedCast('fire', origin)) continue;
       const aim = this.player
         .clone()
         .add(
@@ -1600,12 +1470,12 @@ export class Game {
             this.velocity.z * 0.12,
           ),
         )
-        .sub(shot.origin)
+        .sub(origin)
         .normalize();
       const spread = salvoSpread(shot.index),
         right = new THREE.Vector3().crossVectors(aim, UP).normalize();
       aim.applyAxisAngle(UP, spread.yaw).applyAxisAngle(right, spread.pitch);
-      this.spawn(shot.origin, aim.multiplyScalar(PROJECTILES.fire.speed), 'fire', 9);
+      this.spawn(origin, aim.multiplyScalar(PROJECTILES.fire.speed), 'fire', 9);
       if (this.mode !== 'menu' && shot.index % 3 === 0) this.audio.cast(0);
     }
   }
@@ -1800,17 +1670,9 @@ export class Game {
         const covered = shieldCovers(shieldFacing, p.last.clone().sub(previousCenter));
         // 1. Patches still standing in the world stop any shot that sweeps through them.
         if (this.aegis.enabled) {
-          let standing: ShieldPatch | null = null,
-            at: THREE.Vector3 | null = null;
-          for (const patch of this.shieldPatches) {
-            const t = patchBlocks(patch, p.last, p.mesh.position, p.velocity, p.radius);
-            if (t === null) continue;
-            standing = patch;
-            at = p.last.clone().lerp(p.mesh.position, t);
-            break;
-          }
-          if (standing && at && this.aegis.intercept()) {
-            this.reusePatch(standing, at, p);
+          const standing = this.patches.sweep(p.last, p.mesh.position, p.velocity, p.radius);
+          if (standing && this.aegis.intercept()) {
+            this.absorbOnPatch(standing.patch, standing.at, p);
             this.removeProjectile(i);
             continue;
           }
@@ -1840,24 +1702,21 @@ export class Game {
           if (
             (!cover || cover.t * horizon > guard.time + 0.001) &&
             this.clearSight(center, intercept) &&
+            // A hole left by a shattered patch stays open: this shot gets through.
+            !this.patches.gapAt(offset) &&
             this.aegis.intercept()
           ) {
             const scale = shieldScale(p.radius),
               radius = patchRadius(scale);
             // A new patch inside an existing footprint on the same lane re-uses it; no stacking.
-            const existing = this.shieldPatches.find(
-              (q) =>
-                intercept.distanceTo(new THREE.Vector3().fromArray(q.position)) <
-                  Math.max(q.radius, radius) * 0.95 &&
-                guard.normal.dot(new THREE.Vector3().fromArray(q.normal)) > 0.55,
-            );
-            if (existing) this.reusePatch(existing, intercept, p);
+            const existing = this.patches.overlapping(intercept, guard.normal, radius);
+            if (existing) this.absorbOnPatch(existing, intercept, p);
             else {
               const incoming = guard.normal.clone().negate(),
                 life = scale > 2 ? DUEL.shieldPatchLifeLarge : DUEL.shieldPatchLife;
               const echo = this.fx.block(intercept, incoming, scale, life);
               this.lastBlock = { scale, radius: p.radius, direction: guard.normal.toArray() };
-              this.shieldPatches.push({
+              this.patches.add({
                 position: intercept.toArray(),
                 offset: offset.toArray(),
                 normal: guard.normal.toArray(),
@@ -1866,7 +1725,6 @@ export class Game {
                 serial: echo.serial,
                 hits: 1,
               });
-              if (this.shieldPatches.length > 24) this.shieldPatches.shift();
               if (this.mode !== 'menu') this.audio.block();
               this.emit({
                 type: 'block',
@@ -1930,31 +1788,30 @@ export class Game {
   private clearProjectiles() {
     while (this.projectiles.length) this.removeProjectile(this.projectiles.length - 1);
   }
-  /** A standing patch absorbs another shot on its lane: renew it rather than stack a new one. */
-  private reusePatch(patch: ShieldPatch, at: THREE.Vector3, p: Projectile) {
-    const scale = shieldScale(p.radius);
-    patch.life = Math.max(patch.life, scale > 2 ? DUEL.shieldPatchLifeLarge : DUEL.shieldPatchLife);
-    patch.radius = Math.max(patch.radius, patchRadius(scale));
-    patch.hits++;
-    this.patchReuses++;
-    const normal = new THREE.Vector3().fromArray(patch.normal);
+  /**
+   * A standing patch takes another shot: its echo ripples and brightens, until the hit budget
+   * is spent and it shatters — leaving that lane open for a moment.
+   */
+  private absorbOnPatch(patch: ShieldPatch, at: THREE.Vector3, p: Projectile) {
+    const scale = shieldScale(p.radius),
+      normal = new THREE.Vector3().fromArray(patch.normal),
+      result = this.patches.absorb(patch, scale);
     this.lastBlock = { scale, radius: p.radius, direction: normal.toArray() };
-    if (!this.fx.refreshEcho(patch.serial, at, scale))
+    if (result === 'shattered') {
+      this.fx.shatterEcho(patch.serial, at, scale);
+      if (this.mode !== 'menu') this.audio.shatter();
+    } else if (!this.fx.refreshEcho(patch.serial, at, scale, patch.hits)) {
       this.fx.burst(at, '#9cf6ff', 10, 2.6, 0.2 * Math.sqrt(scale), 0.5);
-    if (this.mode !== 'menu') this.audio.block();
-    this.emit({ type: 'block', direction: { x: normal.x, y: normal.y, z: normal.z } });
-  }
-  private agePatches(dt: number) {
-    for (let i = this.shieldPatches.length - 1; i >= 0; i--) {
-      this.shieldPatches[i].life -= dt;
-      if (this.shieldPatches[i].life <= 0) this.shieldPatches.splice(i, 1);
     }
+    if (this.mode !== 'menu' && result === 'held') this.audio.block();
+    this.emit({ type: 'block', direction: { x: normal.x, y: normal.y, z: normal.z } });
   }
   private contactPause(
     actor: 'player' | 'boss',
     incoming: THREE.Vector3,
     duration: number,
     strength: number,
+    slow = 0,
   ) {
     const at =
       actor === 'player'
@@ -1962,7 +1819,9 @@ export class Game {
         : this.boss.position.clone();
     at.addScaledVector(incoming.clone().normalize(), actor === 'player' ? -0.65 : -1.2);
     this.fx.contact(at, incoming, strength > 55 ? 1.4 : 0.8);
-    this.hitPause.request(duration);
+    this.hitPause.request(duration, slow);
+    // Heavy contact: a short zoom punch released through the slow-motion tail.
+    if (slow > 0 && !this.settings.reducedEffects) this.punch = 1;
     this.contacts++;
     this.emit({ type: 'contact', actor });
   }
@@ -1989,7 +1848,7 @@ export class Game {
       this.boss.impulse.set(0, 0, 0);
       this.boss.velocity.set(0, 0, 0);
       this.boss.knockTime = 1.25;
-      this.contactPause('boss', impulse, DUEL.novaPause, impulse.length());
+      this.contactPause('boss', impulse, DUEL.heavyFreeze, impulse.length(), DUEL.heavySlow);
     } else this.boss.impulse.add(impulse).clampLength(0, 9);
     this.emit({ type: 'hit', kill: !this.boss.alive, damage: actual });
     this.audio.hit(!this.boss.alive);
@@ -2039,7 +1898,7 @@ export class Game {
     this.impulse.set(0, 0, 0);
     this.dashTime = 0;
     this.knockTime = tuning.stagger;
-    this.contactPause('player', incoming, tuning.pause, tuning.launch);
+    this.contactPause('player', incoming, tuning.pause, tuning.launch, tuning.slow);
     this.shake = 0.018;
     if (this.mode !== 'menu') this.audio.damage();
     this.emit({ type: 'damage', amount });
@@ -2124,6 +1983,9 @@ export class Game {
         this.boss.position.fromArray(boss);
         this.boss.lockedTarget.copy(this.player).addScaledVector(UP, 0.9);
         this.sightClock = 0;
+        // A teleport must not leave a trail ribbon stretched from the old position.
+        this.playerTrail.reset(this.player.clone().add(new THREE.Vector3(0, 0.8, 0)));
+        this.boss.ribbon.reset(this.boss.position);
         this.presentActors(0);
       },
       lane: (attack: AttackId) =>
@@ -2134,160 +1996,38 @@ export class Game {
         ),
       incoming,
       scenario: (name: string) => {
+        const scenario = SCENARIOS[name] ?? {};
         this.start(false);
-        this.testIdleBoss = true;
-        if (['wall', 'ground', 'contact', 'missile-near', 'defeat', 'ragdoll'].includes(name)) {
-          this.aegis.setEnabled(false);
-        }
-        if (['sight-thick', 'sight-thin', 'sight-live'].includes(name)) {
-          if (name === 'sight-thin') {
-            this.player.set(-2, 7, -18);
-            this.boss.position.set(-2, 7, -3);
-          } else {
-            this.player.set(-4, 6, 12);
-            this.boss.position.set(-27, 6, 12);
-          }
-          if (name === 'sight-live') {
-            this.testIdleBoss = false;
-            this.testInvulnerable = true;
-          }
-        } else if (name === 'nova-air') {
-          this.player.set(0, 34, 15);
-          this.boss.position.set(0, 37, 4);
-          this.spell = 2;
-          this.lockedOn = true;
-        } else if (name === 'player-air') {
-          this.player.set(0, 32, 24);
-          this.aegis.setEnabled(false);
-          this.spawn(
-            this.player.clone().add(new THREE.Vector3(0, 0.9, 2.1)),
-            new THREE.Vector3(0, 0, -31),
-            'hammer',
-            29,
-          );
-        } else if (['pierce-player', 'pierce-ground', 'thick-cover'].includes(name)) {
-          this.aegis.setEnabled(false);
-          if (name === 'pierce-player') {
-            this.player.set(-2, 6, -15);
-            this.spawn(new THREE.Vector3(-2, 6.9, -5), new THREE.Vector3(0, 0, -31), 'hammer', 29);
-          } else if (name === 'pierce-ground') {
-            this.player.set(60, 8, 60);
-            this.spawn(new THREE.Vector3(-2, 3, -5), new THREE.Vector3(0, -8, -31), 'hammer', 29);
-          } else {
-            this.player.set(-24, 2.1, 12);
-            this.spawn(new THREE.Vector3(-3, 3, 12), new THREE.Vector3(-31, 0, 0), 'hammer', 29);
-          }
-        } else if (name === 'ground-skid') {
-          this.aegis.setEnabled(false);
-          this.player.set(0, 5, 65);
-          this.spawn(new THREE.Vector3(0, 12, 70), new THREE.Vector3(0, -28, -20), 'hammer', 29);
-        } else if (name === 'walk') {
-          this.player.set(0, 0, 24);
+        this.testIdleBoss = scenario.idleBoss ?? true;
+        this.testInvulnerable = scenario.invulnerable ?? false;
+        if (scenario.aegis === false) this.aegis.setEnabled(false);
+        if (scenario.player) this.player.fromArray(scenario.player);
+        if (scenario.boss) this.boss.position.fromArray(scenario.boss);
+        if (scenario.flight === false) {
           this.setFlight(false);
           this.groundJumps = 0;
-        } else if (name === 'wall') {
-          this.player.set(-7, 1.5, 12);
-          this.spawn(new THREE.Vector3(-3, 2.4, 12), new THREE.Vector3(-38, 0, 0), 'hammer', 29);
-        } else if (name === 'ground') {
-          this.player.set(0, 8, 24);
-          this.spawn(new THREE.Vector3(0, 13, 24), new THREE.Vector3(0, -34, 0), 'hammer', 29);
-        } else if (name === 'nova' || name === 'nova-finish') {
-          this.player.set(0, 2, 10);
-          this.boss.position.set(0, 5, 0);
-          this.spell = 2;
-          this.lockedOn = true;
-          if (name === 'nova-finish') this.boss.health = 1;
-        } else if (name === 'cover') {
-          this.player.set(-6.5, 0, 12);
-          this.spawn(new THREE.Vector3(-25, 0.95, 12), new THREE.Vector3(30, 0, 0), 'fire', 9);
-        } else if (name === 'contact') {
-          this.player.set(0, 4, 24);
-          this.spawn(
-            this.player.clone().add(new THREE.Vector3(0, 0.9, 1.7)),
-            new THREE.Vector3(0, 0, -30),
-            'fire',
-            9,
-          );
-        } else if (name === 'ragdoll') {
-          this.player.set(0, 12, 24);
-          this.spawn(new THREE.Vector3(0, 12.9, 30), new THREE.Vector3(0, 0, -34), 'hammer', 29);
-        } else if (name === 'missile-near') {
-          this.player.set(0, 5, 24);
-          this.spawn(
-            this.player.clone().add(new THREE.Vector3(2.4, 0.9, 0)),
-            new THREE.Vector3(-15, 0, 0),
-            'missile',
-            16,
-          );
-        } else if (name === 'victory') {
-          this.boss.health = 1;
-          this.lockedOn = true;
-          this.spell = 1;
-        } else if (name === 'defeat') {
-          this.health = 1;
-          this.spawn(
-            this.player.clone().add(new THREE.Vector3(0, 0.95, -3)),
-            new THREE.Vector3(0, 0, 28),
-            'fire',
-            9,
-          );
-        } else if (name === 'patterns') {
-          this.player.set(0, 35, 24);
-          this.boss.position.set(0, 39, 1.5);
-          this.testIdleBoss = false;
-          this.testInvulnerable = true;
-        } else if (name === 'far-cover') {
-          // Boss far away behind the thick south-west monoliths; it must work its way back.
-          this.player.set(-6.5, 1.8, 12);
-          this.boss.position.set(-96, 5, -96);
-          this.testIdleBoss = false;
-          this.testInvulnerable = true;
-        } else if (name === 'air-recover') {
-          // Struck from below in open sky: the body must right itself before it ever lands.
-          this.aegis.setEnabled(false);
-          this.player.set(0, 30, 60);
-          this.spawn(new THREE.Vector3(0, 21, 60), new THREE.Vector3(0, 31, 0), 'hammer', 29);
         }
+        if (scenario.spell !== undefined) this.spell = scenario.spell;
+        if (scenario.lockOn) this.lockedOn = true;
+        if (scenario.bossHealth !== undefined) this.boss.health = scenario.bossHealth;
+        if (scenario.health !== undefined) this.health = scenario.health;
         this.previousPlayer.copy(this.player);
         this.boss.lockedTarget.copy(this.player).addScaledVector(UP, 0.9);
         this.aimAtBoss(1);
         this.facingQuaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
         this.facing.set(0, 0, -1).applyQuaternion(this.facingQuaternion);
-        if (name === 'shield') {
-          incoming('front');
-          incoming('left');
-          incoming('right');
-        }
-        if (name === 'shield-large') incoming('front', 'hammer');
-        if (name === 'flight' || name === 'walk') orient(0, 0);
-        if (name === 'shield-line') {
-          // Three bolts on one lane, 2.6 m apart: the first patch must stop all of them.
-          orient(0, 0);
-          const center = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
-          for (const z of [-3, -5.6, -8.2])
-            this.spawn(
-              center.clone().add(new THREE.Vector3(0.4, 0.2, z)),
-              new THREE.Vector3(0, 0, 30),
-              'fire',
-              9,
-            );
-        }
-        if (name === 'shield-scatter') {
-          orient(0, 0);
-          const center = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
-          for (const [x, y] of [
-            [-1.1, 0],
-            [1.1, 0.5],
-            [0, 1.25],
-            [3.6, 0],
-          ])
-            this.spawn(
-              center.clone().add(new THREE.Vector3(x, y, -3)),
-              new THREE.Vector3(0, 0, 30),
-              'fire',
-              9,
-            );
-        }
+        if (scenario.orient) orient(...scenario.orient);
+        const chest = this.player.clone().addScaledVector(UP, 0.9);
+        for (const shot of scenario.shots ?? [])
+          this.spawn(
+            (shot.relative ? chest.clone() : new THREE.Vector3()).add(
+              new THREE.Vector3().fromArray(shot.at),
+            ),
+            new THREE.Vector3().fromArray(shot.velocity),
+            shot.kind,
+            shot.damage,
+          );
+        for (const [side, kind] of scenario.incoming ?? []) incoming(side, kind);
         this.updateCamera(1, true);
         this.presentActors(0);
         this.renderNeeded = true;

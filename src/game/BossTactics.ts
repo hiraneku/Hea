@@ -115,7 +115,12 @@ export class BossTactics {
 /** Satellite circles orbit well outside the boss body (about 3 m out), ahead of its glyph. */
 export const FIRE_GATE_RADIUS = 2.95;
 /** Successive packets sweep a wide arc around the frontal glyph, as in reference2. */
-export function fireGateOffset(index: number, pattern: number): { local: Vector3; side: number } {
+/** Gates drift along the ring while they are open; alternate patterns orbit the other way. */
+export const FIRE_GATE_ORBIT = 0.7;
+export function fireGateOffset(
+  index: number,
+  pattern: number,
+): { local: Vector3; side: number; angle: number; radius: number; spin: number } {
   const angles = [
     Math.PI * 0.72,
     -Math.PI * 0.22,
@@ -129,7 +134,14 @@ export function fireGateOffset(index: number, pattern: number): { local: Vector3
   const angle = angles[(index + pattern) % angles.length],
     radius = FIRE_GATE_RADIUS + (index % 3) * 0.22;
   return {
-    local: new Vector3(Math.cos(angle) * radius, 0.1 + Math.sin(angle) * radius, 1.45),
+    local: fireGateLocal(angle, radius),
     side: index % 4,
+    angle,
+    radius,
+    spin: (pattern % 2 ? -1 : 1) * FIRE_GATE_ORBIT,
   };
+}
+/** Local gate position on the frontal ring of the glyph for a given polar angle. */
+export function fireGateLocal(angle: number, radius: number): Vector3 {
+  return new Vector3(Math.cos(angle) * radius, 0.1 + Math.sin(angle) * radius, 1.45);
 }

@@ -159,20 +159,20 @@ export function makeShieldPatch(serial: number): THREE.Group {
       }),
     ),
   );
-  group.add(
-    new THREE.Mesh(
-      geometry(glow),
-      new THREE.MeshBasicMaterial({
-        color: '#66efff',
-        transparent: true,
-        opacity: 0.55,
-        side: THREE.DoubleSide,
-        forceSinglePass: true,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    ),
+  const glowMesh = new THREE.Mesh(
+    geometry(glow),
+    new THREE.MeshBasicMaterial({
+      color: '#66efff',
+      transparent: true,
+      opacity: 0.55,
+      side: THREE.DoubleSide,
+      forceSinglePass: true,
+      depthWrite: false,
+      toneMapped: false,
+    }),
   );
+  glowMesh.userData.glow = true;
+  group.add(glowMesh);
   group.add(
     new THREE.LineSegments(
       geometry(wires),
