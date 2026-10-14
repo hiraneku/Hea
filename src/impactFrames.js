@@ -102,30 +102,46 @@ const fragmentShader = /* glsl */ `
     if (mode == 6) col = vec3(0.98);
 
     if (mode == 1 || mode == 3 || mode == 5 || mode == 6) {
-      // --- Radial burst: sharp, uneven speed lines + a jagged star core ---
-      float lines = mode == 1 ? 46.0 : 30.0;
+      // --- Radial burst: clustered speed-lines, giant jagged shards, huge core ---
+      // (Skala mengikuti video referensi: bentuk menutupi 30-60% layar.)
+      float lines = mode == 1 ? 56.0 : 36.0;
       float seg = floor((ang + 3.14159265) / 6.2831853 * lines);
       float segHash = hash(seg * 3.7);
-      float dirBoost = 1.0 + 0.7 * max(0.0, cos(ang - uAngle));
-      float lineLen = (0.25 + segHash * 1.15) * (0.35 + uIntensity * 0.95) * dirBoost;
+      float dirBoost = 1.0 + 0.8 * max(0.0, cos(ang - uAngle));
+      float lineLen = (0.35 + segHash * 1.5) * (0.4 + uIntensity * 1.1) * dirBoost;
       float angFrac = fract((ang + 3.14159265) / 6.2831853 * lines);
-      float lineWidth = 0.10 + 0.16 * hash(seg * 9.1);
+      float lineWidth = 0.16 + 0.22 * hash(seg * 9.1);
       float lineMask = step(abs(angFrac - 0.5), lineWidth)
-        * step(0.05 + 0.10 * hash(seg * 5.3), r)
+        * step(0.04 + 0.08 * hash(seg * 5.3), r)
         * step(r, lineLen)
-        * step(segHash, 0.25 + uIntensity * 0.75); // density follows intensity
-      vec3 lineCol = segHash > 0.45 ? vec3(1.0) : vec3(0.0);
+        * step(segHash, 0.2 + uIntensity * 0.8); // density follows intensity
+      vec3 lineCol = segHash > 0.4 ? vec3(1.0) : vec3(0.0);
       if (mode == 5) lineCol = vec3(1.0);       // alternating p1: white on black
       if (mode == 6) lineCol = vec3(0.0);       // alternating p3: black on white
-      col = mix(col, lineCol, lineMask * clamp(0.55 + 0.45 * fade + uIntensity * 0.3, 0.0, 1.0));
+      col = mix(col, lineCol, lineMask * clamp(0.6 + 0.4 * fade + uIntensity * 0.35, 0.0, 1.0));
+
+      // Giant jagged shards: segitiga-cakar lebar yang meledak dari titik tumbuk.
+      float shardCount = 9.0;
+      float shardSeg = floor((ang + 3.14159265) / 6.2831853 * shardCount);
+      float shardHash = hash(shardSeg * 13.7);
+      float shardFrac = fract((ang + 3.14159265) / 6.2831853 * shardCount);
+      float shardLen = (0.45 + shardHash * 1.15) * (0.35 + uIntensity * 0.95) * dirBoost;
+      float shardWidth = 0.16 + shardHash * 0.42;
+      float shardMask = step(shardFrac, shardWidth)
+        * step(0.03, r) * step(r, shardLen)
+        * step(shardHash, 0.15 + uIntensity * 0.85)
+        * step(0.35, uIntensity + (mode == 3 || mode == 5 || mode == 6 ? 0.35 : 0.0));
+      vec3 shardCol = mode == 6 ? vec3(0.0) : vec3(1.0);
+      if (mode == 3 && shardHash > 0.62) shardCol = vec3(0.0);
+      col = mix(col, shardCol, shardMask * 0.96);
 
       // Jagged star core around the impact point (irregular, never a circle).
       float starSeg = floor((ang + 3.14159265) / 6.2831853 * 14.0);
-      float starR = (0.05 + hash(starSeg * 7.3) * 0.16) * (0.5 + uIntensity) * (0.6 + 0.4 * fade);
+      float starR = (0.10 + hash(starSeg * 7.3) * 0.30) * (0.55 + uIntensity * 0.95) * (0.65 + 0.35 * fade);
       float starMask = step(r, starR);
       vec3 starCol = mode == 6 ? vec3(0.0) : vec3(1.0);
       if (mode == 3 && hash(starSeg * 3.1) > 0.5) starCol = vec3(0.0);
-      col = mix(col, starCol, starMask * 0.92);
+      col = mix(col, starCol, starMask * 0.95);
     }
 
     gl_FragColor = vec4(col, base.a);

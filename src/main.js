@@ -635,9 +635,9 @@ const FORMULAS = {
   perisaiDuri: { name: 'Perisai Berduri', cost: 22, cd: 7, dmg: 0, color: 0xa8f0d8, kind: 'shield' },
 };
 export const KNOCKBACK_CONFIG = {
-  lightImpulse: 1.7, mediumImpulse: 3.4, heavyImpulse: 5.6, launchImpulse: 9.0,
+  lightImpulse: 1.7, mediumImpulse: 3.6, heavyImpulse: 6.2, launchImpulse: 10.5,
   launchVertical: 4.2, maxSpeed: 11,
-  dampingAir: 1.6, dampingGround: 3.0, gravity: 20,
+  dampingAir: 1.4, dampingGround: 2.1, gravity: 20,
   wallImpactSpeed: 4.2,      // kecepatan menabrak minimum agar jadi wall impact
   wallRecoil: 2.4, wallRecoilPerSpeed: 0.18,
   staggerLight: 0.1, staggerMedium: 0.25, staggerHeavy: 0.5, staggerWall: 0.85,
