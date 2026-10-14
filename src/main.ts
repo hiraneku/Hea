@@ -1,0 +1,445 @@
+import '@fontsource/barlow-condensed/latin-600.css';
+import '@fontsource/barlow-condensed/latin-700.css';
+import '@fontsource/inter/latin-400.css';
+import '@fontsource/inter/latin-500.css';
+import '@fontsource/inter/latin-600.css';
+import './style.css';
+import referenceUrl from '../reference.mp4?url';
+import { icons } from './icons';
+import { Game } from './game/Game';
+import {
+  readSettings,
+  saveSettings,
+  SPELLS,
+  type GameEvent,
+  type Mode,
+  type Snapshot,
+} from './game/types';
+
+const app = document.querySelector<HTMLDivElement>('#app')!;
+const settings = readSettings();
+const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
+const spellIcons = [icons.flame, icons.prism, icons.nova];
+
+app.innerHTML = `
+  <div id="experience" data-mode="menu" class="${isTouch ? 'has-touch' : ''}">
+    <canvas id="arena" aria-label="Arena pertarungan sihir tiga dimensi" tabindex="-1"></canvas>
+    <div id="scene-shade" aria-hidden="true"></div>
+    <header class="topbar">
+      <button id="brand" class="brand" aria-label="HEA — menu permainan" title="Menu permainan">
+        <svg class="brand-symbol" viewBox="0 0 36 40" fill="none" aria-hidden="true"><path d="m5 7 8-4v13l10-5V3l8-3v29l-8 5V21l-10 5v10l-8 4V7Z" fill="currentColor"/><path d="m16 7 5-3v7l-5 3V7Z" fill="#ff976b"/></svg>
+        <span class="wordmark">HEA<span class="wordmark-dot">.</span></span>
+        <span class="brand-divider"></span><span class="brand-subtitle">ARCANE<br>ARENA</span>
+      </button>
+      <div class="topbar-right">
+        <span class="live-label"><i></i> LIVE 3D</span>
+        <button id="help-button" class="text-button" title="Panduan bermain" aria-label="Panduan bermain">PANDUAN <span class="help-key">?</span></button>
+        <span class="nav-divider"></span>
+        <button id="sound-button" class="icon-button" aria-label="Matikan suara" title="Suara">${icons.volume}</button>
+        <button id="settings-button" class="icon-button" aria-label="Pengaturan" title="Pengaturan">${icons.settings}</button>
+        <button id="fullscreen-button" class="icon-button" aria-label="Layar penuh" title="Layar penuh">${icons.fullscreen}</button>
+        <button id="pause-button" class="icon-button" aria-label="Jeda permainan" title="Jeda · Esc" hidden>${icons.pause}</button>
+      </div>
+    </header>
+    <main id="menu" class="menu-screen">
+      <div class="menu-copy">
+        <div class="eyebrow"><span class="orange-line"></span> 01 / THE PROVING GROUND</div>
+        <h1>PURE<br><span>MOMENTUM.</span></h1>
+        <p class="intro">Bergerak cepat. Kuasai sihir.<br>Jadikan setiap benturan berarti.</p>
+        <div class="menu-actions">
+          <button id="start-button" class="primary-button"><span>MASUK ARENA</span>${icons.arrow}</button>
+          <button id="demo-button" class="demo-button">${icons.play}<span>LIHAT DEMO</span></button>
+        </div>
+        <div class="input-note">${isTouch ? '<span class="small-cross">✦</span> KONTROL SENTUH · BANTUAN BIDIK AKTIF' : `${icons.mouse}<span>KEYBOARD + MOUSE <b>/</b> KONTROL SENTUH</span>`}</div>
+      </div>
+      <aside class="element-index" aria-label="Tiga jenis sihir">
+        <div class="index-heading">THREE FORCES.<br>ONE INSTINCT.</div>
+        ${SPELLS.map((s, i) => `<div class="element-row" style="--element:${s.color}"><span class="element-number">0${i + 1}</span><span class="element-icon">${spellIcons[i]}</span><span class="element-name">${s.name}<small>${s.subtitle}</small></span><span class="element-dot"></span></div>`).join('')}
+        <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
+      </aside>
+      <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.1</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+    </main>
+    <section id="hud" aria-label="Status permainan" hidden>
+      <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
+      <div class="wave-hud"><span>GELOMBANG</span><strong id="wave-value">01</strong><i></i><span><b id="enemy-value">3</b> TARGET</span></div>
+      <div class="score-hud"><span>SKOR</span><strong id="score-value">000000</strong><small>TERBAIK <b id="best-value">0</b></small></div>
+      <div id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><span></span></div>
+      <div id="hit-marker" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+      <div id="score-pop" aria-live="polite"></div>
+      <div id="wave-announcement"><span>BERSIAPLAH</span><strong>GELOMBANG <b id="wave-announce-value">01</b></strong><small>Gerak adalah pertahanan terbaikmu.</small></div>
+      <div id="pointer-tip">KLIK ARENA UNTUK MEMBIDIK <span>·</span> ESC UNTUK JEDA</div>
+      <div class="desktop-hints"><div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>GERAK</span></div><div><kbd>SPACE</kbd><span>LOMPAT ×2</span><kbd>F</kbd><span>PERISAI</span></div><div class="hints-muted"><kbd>R</kbd><span>ULANGI</span><kbd>Q</kbd><span>GANTI SIHIR</span></div></div>
+      <div class="spell-dock">
+        <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span></div>
+        <div class="spell-slots">${SPELLS.map((s, i) => `<button class="spell-slot ${i === 0 ? 'selected' : ''}" data-spell="${i}" style="--element:${s.color};--cooldown:0" aria-label="Pilih ${s.name} — ${s.subtitle}" aria-pressed="${i === 0}"><span class="slot-key">${i + 1}</span><span class="slot-icon">${spellIcons[i]}</span><span class="slot-name">${s.name}</span><span class="slot-cost">${s.cost}</span><span class="slot-cooldown"></span></button>`).join('')}</div>
+        <div class="energy-row"><span>ENERGI</span><div class="meter energy-meter"><i id="energy-fill"></i></div><b id="energy-value">100</b></div>
+      </div>
+      <div class="dash-hud"><div class="dash-symbol">${icons.dash}</div><div><span>DASH <kbd>SHIFT</kbd></span><strong id="dash-value">SIAP</strong><div class="meter dash-meter"><i id="dash-fill"></i></div></div></div>
+      <div class="session-info"><span id="session-time">00:00</span><i></i><span id="hud-fps">60 FPS</span></div>
+    </section>
+    <div id="touch-controls" aria-label="Kontrol sentuh" hidden>
+      <div id="touch-look" aria-label="Geser untuk menggerakkan kamera"></div>
+      <div id="joystick" aria-label="Joystick gerakan"><span class="stick-ring"></span><span class="stick-axis axis-x"></span><span class="stick-axis axis-y"></span><span id="stick-knob"></span><span class="stick-label">GERAK</span></div>
+      <div class="touch-actions">
+        <button id="touch-fire" aria-label="Tahan untuk menyerang"><span id="touch-fire-icon">${icons.flame}</span><small>SERANG</small></button>
+        <button id="touch-dash" aria-label="Dash">${icons.dash}<small>DASH</small></button>
+        <button id="touch-jump" aria-label="Lompat">${icons.jump}<small>LOMPAT</small></button>
+        <button id="touch-shield" aria-label="Tahan untuk perisai">${icons.shield}<small>PERISAI</small></button>
+      </div>
+      <span class="look-label">GESER LAYAR UNTUK MELIHAT</span>
+    </div>
+    <div id="demo-ui" hidden><div class="demo-tag"><i></i><span>DEMONSTRASI LANGSUNG<small>Kamera otomatis · Efek real-time</small></span></div><button id="demo-play" class="primary-button"><span>GILIRANMU</span>${icons.arrow}</button><button id="demo-exit" class="icon-button" aria-label="Keluar dari demo">${icons.close}</button></div>
+    <div id="damage-vignette" aria-hidden="true"></div><div id="impact-flash" aria-hidden="true"></div><div id="speed-lines" aria-hidden="true"></div>
+    <div id="toast" role="status"></div>
+    <dialog id="panel-dialog" aria-labelledby="panel-title"></dialog>
+    <div id="boot" role="status"><span class="boot-wordmark">HEA.</span><span class="boot-loader"></span><span id="boot-status">MENYIAPKAN ARENA</span></div>
+  </div>`;
+
+const $ = <T extends HTMLElement = HTMLElement>(selector: string) =>
+  document.querySelector<T>(selector)!;
+const experience = $('#experience');
+const dialog = $<HTMLDialogElement>('#panel-dialog');
+let game: Game;
+let panel: 'help' | 'settings' | 'reference' | 'pause' | 'gameover' | null = null;
+let panelBackToPause = false;
+let previousMode: Mode = 'menu';
+let toastTimer: ReturnType<typeof setTimeout>;
+let waveTimer: ReturnType<typeof setTimeout>;
+let hitTimer: ReturnType<typeof setTimeout>;
+let scoreTimer: ReturnType<typeof setTimeout>;
+let damageTimer: ReturnType<typeof setTimeout>;
+let lastSpell = -1;
+
+function toast(text: string) {
+  $('#toast').textContent = text;
+  $('#toast').classList.add('visible');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $('#toast').classList.remove('visible'), 3400);
+}
+function timeLabel(seconds: number) {
+  return `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`;
+}
+function dismissPanel() {
+  panel = null;
+  panelBackToPause = false;
+  if (dialog.open) dialog.close();
+  dialog.innerHTML = '';
+}
+function closePanel() {
+  if (panelBackToPause && panel !== 'pause') {
+    panelBackToPause = false;
+    renderPanel('pause');
+    return;
+  }
+  const old = panel;
+  dismissPanel();
+  if (old === 'gameover') game.menu();
+  else if (game.snapshot.mode === 'paused') game.resume();
+}
+function start() {
+  dismissPanel();
+  game.start();
+}
+function menu() {
+  dismissPanel();
+  game.menu();
+}
+function openPanel(type: Exclude<typeof panel, null>) {
+  if (!game) return;
+  panelBackToPause = panel === 'pause';
+  panel = type;
+  if (game.snapshot.mode === 'playing' || game.snapshot.mode === 'demo') game.pause();
+  renderPanel(type);
+}
+
+function event(event: GameEvent) {
+  if (event.type === 'mode') {
+    experience.dataset.mode = event.mode;
+    $('#menu').hidden = event.mode !== 'menu';
+    $('#hud').hidden =
+      !['playing', 'gameover'].includes(event.mode) &&
+      !(event.mode === 'paused' && previousMode !== 'demo');
+    $('#touch-controls').hidden = !isTouch || event.mode !== 'playing';
+    $('#demo-ui').hidden =
+      event.mode !== 'demo' && !(event.mode === 'paused' && previousMode === 'demo');
+    $('#pause-button').hidden = !['playing', 'demo'].includes(event.mode);
+    if (event.mode === 'paused' && !panel) renderPanel('pause');
+    if (event.mode === 'gameover') renderPanel('gameover');
+    if (event.mode === 'menu') {
+      $('#wave-announcement').classList.remove('visible');
+      $('#pointer-tip').classList.remove('visible');
+    }
+    if (event.mode === 'playing')
+      $('#pointer-tip').classList.toggle('visible', !isTouch && !document.pointerLockElement);
+    if (event.mode !== 'paused') previousMode = event.mode;
+  } else if (event.type === 'toast') toast(event.text);
+  else if (event.type === 'wave') {
+    $('#wave-announce-value').textContent = String(event.wave).padStart(2, '0');
+    $('#wave-announcement').classList.add('visible');
+    clearTimeout(waveTimer);
+    waveTimer = setTimeout(() => $('#wave-announcement').classList.remove('visible'), 2700);
+  } else if (event.type === 'hit') {
+    $('#hit-marker').classList.add('active');
+    $('#hit-marker').classList.toggle('kill', event.kill);
+    clearTimeout(hitTimer);
+    hitTimer = setTimeout(() => $('#hit-marker').classList.remove('active'), 160);
+    if (event.kill) {
+      $('#score-pop').textContent = `+${event.points}  /  TARGET DILUMPUHKAN`;
+      $('#score-pop').classList.add('visible');
+      clearTimeout(scoreTimer);
+      scoreTimer = setTimeout(() => $('#score-pop').classList.remove('visible'), 1400);
+    }
+  } else if (event.type === 'damage') {
+    $('#damage-vignette').classList.add('active');
+    clearTimeout(damageTimer);
+    damageTimer = setTimeout(() => $('#damage-vignette').classList.remove('active'), 300);
+  } else if (event.type === 'impact') {
+    experience.classList.add('impact');
+    setTimeout(() => experience.classList.remove('impact'), 95);
+  } else if (event.type === 'lock')
+    $('#pointer-tip').classList.toggle(
+      'visible',
+      !event.locked && !isTouch && game?.snapshot.mode === 'playing',
+    );
+}
+
+function applySettings() {
+  saveSettings(settings);
+  game?.applySettings(settings);
+  $('#sound-button').innerHTML = settings.sound ? icons.volume : icons.mute;
+  $('#sound-button').setAttribute(
+    'aria-label',
+    settings.sound ? 'Matikan suara' : 'Aktifkan suara',
+  );
+  $('#sound-button').setAttribute('aria-pressed', String(settings.sound));
+  experience.classList.toggle('reduced-effects', settings.reducedEffects);
+}
+
+function renderPanel(type: Exclude<typeof panel, null>) {
+  panel = type;
+  const heading = {
+    help: 'KUASAI ARENA.',
+    settings: 'SESUAIKAN RITMEMU.',
+    reference: 'TITIK AWAL.',
+    pause: 'AMBIL NAPAS.',
+    gameover: 'SATU LAGI?',
+  }[type];
+  const overline = {
+    help: 'FIELD MANUAL / 01',
+    settings: 'PENGATURAN',
+    reference: 'VIDEO REFERENSI',
+    pause: 'SIMULASI DIJEDA',
+    gameover: 'SIMULASI SELESAI',
+  }[type];
+  let content = '';
+  if (type === 'help') {
+    content = `<p class="panel-description">Lumpuhkan semua target merah untuk membuka gelombang berikutnya. Hindari proyektil oranye, jaga energi, dan jangan berhenti bergerak.</p>
+      <div class="control-tabs"><button id="desktop-tab" class="${!isTouch ? 'active' : ''}">KEYBOARD + MOUSE</button><button id="mobile-tab" class="${isTouch ? 'active' : ''}">LAYAR SENTUH</button></div>
+      <div id="desktop-guide" class="control-guide" ${isTouch ? 'hidden' : ''}>
+        <div><span>Bergerak</span><b><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></b></div><div><span>Arahkan kamera / serang</span><b>MOUSE / KLIK KIRI</b></div><div><span>Lompat / lompat kedua</span><b><kbd>SPACE</kbd></b></div><div><span>Dash · kebal saat melesat</span><b><kbd>SHIFT</kbd></b></div><div><span>Tahan perisai</span><b><kbd>F</kbd> / KLIK KANAN</b></div><div><span>Pilih sihir</span><b><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> / <kbd>Q</kbd></b></div><div><span>Jeda / ulangi arena</span><b><kbd>ESC</kbd> / <kbd>R</kbd></b></div>
+      </div>
+      <div id="mobile-guide" class="control-guide" ${!isTouch ? 'hidden' : ''}>
+        <div><span>Bergerak</span><b>JOYSTICK KIRI</b></div><div><span>Arahkan kamera</span><b>GESER AREA KANAN</b></div><div><span>Serang berulang</span><b>TAHAN TOMBOL SERANG</b></div><div><span>Ganti sihir</span><b>SENTUH SLOT SIHIR</b></div><div><span>Lompat dua kali</span><b>TOMBOL LOMPAT ×2</b></div><div><span>Menghindar / bertahan</span><b>DASH / TAHAN PERISAI</b></div><div><span>Bantuan bidik</span><b>OTOMATIS AKTIF</b></div>
+      </div>
+      <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${['Proyektil cepat. Ikuti target dengan crosshair.', 'Sinar instan. Tepat untuk target yang bergerak.', 'Ledakan area. Mengenai beberapa target sekaligus.'][i]}</span></div>`).join('')}</div>
+      <p class="panel-note">Energi pulih otomatis. Perisai menguras energi saat ditahan. Jika penguncian mouse tidak tersedia, seret pada arena untuk melihat.</p>
+      <button class="primary-button full-width" id="panel-done"><span>MENGERTI</span>${icons.arrow}</button>`;
+  } else if (type === 'settings') {
+    content = `<p class="panel-description">Preferensimu tersimpan di perangkat ini.</p>
+      <div class="settings-row"><div><label for="quality">Kualitas visual</label><p>Otomatis mengutamakan performa di mobile.</p></div><select id="quality"><option value="auto" ${settings.quality === 'auto' ? 'selected' : ''}>Otomatis</option><option value="high" ${settings.quality === 'high' ? 'selected' : ''}>Tinggi</option><option value="low" ${settings.quality === 'low' ? 'selected' : ''}>Ringan</option></select></div>
+      <div class="settings-row slider-row"><div><label for="sensitivity">Sensitivitas kamera</label><b id="sensitivity-label">${settings.sensitivity.toFixed(1)}×</b></div><input id="sensitivity" type="range" min="0.3" max="2.5" step="0.1" value="${settings.sensitivity}" /></div>
+      <div class="settings-row"><div><label for="sound-toggle">Audio</label><p>Efek suara sihir dan gerakan.</p></div><label class="switch"><input id="sound-toggle" type="checkbox" ${settings.sound ? 'checked' : ''} aria-label="Audio"/><span></span></label></div>
+      <div class="settings-row slider-row"><div><label for="volume">Volume efek</label><b id="volume-label">${Math.round(settings.volume * 100)}%</b></div><input id="volume" type="range" min="0" max="1" step="0.05" value="${settings.volume}" /></div>
+      <div class="settings-row"><div><label for="comfort">Efek nyaman</label><p>Kurangi kilatan, goyangan kamera,<br>dan perubahan bidang pandang.</p></div><label class="switch"><input id="comfort" type="checkbox" ${settings.reducedEffects ? 'checked' : ''} aria-label="Efek nyaman"/><span></span></label></div>
+      <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render.</p>
+      <button class="primary-button full-width" id="panel-done"><span>SIMPAN & KEMBALI</span>${icons.arrow}</button>`;
+  } else if (type === 'reference') {
+    content = `<video class="reference-video" src="${referenceUrl}" controls playsinline autoplay muted loop preload="metadata" aria-label="Video referensi asli dari repositori"></video><p class="panel-note">Video asli dari repo, sekitar 7 detik. Prototipe ini merekonstruksi gaya gerakan dan efeknya; aturan pertarungan merupakan interpretasi untuk versi yang bisa dimainkan.</p>`;
+  } else if (type === 'pause') {
+    content = `<p class="panel-description">Arena akan menunggu. Lanjutkan saat kamu siap.</p><div class="pause-actions"><button id="resume-button" class="primary-button full-width"><span>LANJUTKAN</span>${icons.play}</button><button id="restart-button" class="secondary-button">${icons.reset}<span>ULANGI ARENA</span></button><button id="pause-settings" class="secondary-button">${icons.settings}<span>PENGATURAN</span></button><button id="menu-button" class="quiet-button">KEMBALI KE MENU ${icons.arrow}</button></div>`;
+  } else {
+    const s = game.snapshot;
+    content = `<p class="panel-description">Setiap percobaan membawa ritme baru.</p><div class="result-stats"><div><span>SKOR</span><strong>${s.score.toLocaleString('id-ID')}</strong></div><div><span>GELOMBANG</span><strong>${String(s.wave).padStart(2, '0')}</strong></div><div><span>WAKTU</span><strong>${timeLabel(s.elapsed)}</strong></div></div><div class="result-best">REKOR PERANGKAT <b>${s.best.toLocaleString('id-ID')}</b></div><div class="pause-actions"><button id="restart-button" class="primary-button full-width"><span>COBA LAGI</span>${icons.reset}</button><button id="menu-button" class="quiet-button">KEMBALI KE MENU ${icons.arrow}</button></div>`;
+  }
+  dialog.className = `panel panel-${type}`;
+  dialog.innerHTML = `<div class="panel-top"><span class="eyebrow">${overline}</span><button id="panel-close" class="icon-button" aria-label="Tutup">${icons.close}</button></div><h2 id="panel-title">${heading}</h2>${content}<div class="panel-corner" aria-hidden="true"></div>`;
+  if (!dialog.open) dialog.showModal();
+  $('#panel-close').onclick = closePanel;
+  if (document.querySelector('#panel-done')) $('#panel-done').onclick = closePanel;
+  if (type === 'help') {
+    $('#desktop-tab').onclick = () => {
+      $('#desktop-tab').classList.add('active');
+      $('#mobile-tab').classList.remove('active');
+      $('#desktop-guide').hidden = false;
+      $('#mobile-guide').hidden = true;
+    };
+    $('#mobile-tab').onclick = () => {
+      $('#mobile-tab').classList.add('active');
+      $('#desktop-tab').classList.remove('active');
+      $('#mobile-guide').hidden = false;
+      $('#desktop-guide').hidden = true;
+    };
+  }
+  if (type === 'settings') {
+    $<HTMLSelectElement>('#quality').onchange = (e) => {
+      settings.quality = (e.target as HTMLSelectElement).value as typeof settings.quality;
+      applySettings();
+    };
+    $<HTMLInputElement>('#sensitivity').oninput = (e) => {
+      settings.sensitivity = Number((e.target as HTMLInputElement).value);
+      $('#sensitivity-label').textContent = `${settings.sensitivity.toFixed(1)}×`;
+      applySettings();
+    };
+    $<HTMLInputElement>('#volume').oninput = (e) => {
+      settings.volume = Number((e.target as HTMLInputElement).value);
+      $('#volume-label').textContent = `${Math.round(settings.volume * 100)}%`;
+      game.audio.unlock();
+      applySettings();
+    };
+    $<HTMLInputElement>('#sound-toggle').onchange = (e) => {
+      settings.sound = (e.target as HTMLInputElement).checked;
+      if (settings.sound) game.audio.unlock();
+      applySettings();
+    };
+    $<HTMLInputElement>('#comfort').onchange = (e) => {
+      settings.reducedEffects = (e.target as HTMLInputElement).checked;
+      applySettings();
+    };
+  }
+  if (type === 'pause') {
+    $('#resume-button').onclick = closePanel;
+    $('#pause-settings').onclick = () => openPanel('settings');
+  }
+  if (type === 'pause' || type === 'gameover') {
+    $('#restart-button').onclick = start;
+    $('#menu-button').onclick = menu;
+  }
+}
+
+dialog.addEventListener('cancel', (e) => {
+  e.preventDefault();
+  closePanel();
+});
+dialog.addEventListener('click', (e) => {
+  if (e.target !== dialog) return;
+  const rect = dialog.getBoundingClientRect();
+  if (
+    e.clientX < rect.left ||
+    e.clientX > rect.right ||
+    e.clientY < rect.top ||
+    e.clientY > rect.bottom
+  )
+    closePanel();
+});
+
+function updateHud(s: Snapshot) {
+  $('#health-value').textContent = String(Math.ceil(s.health));
+  $('#health-fill').style.transform = `scaleX(${s.health / 100})`;
+  $('.vitals').classList.toggle('critical', s.health <= 30);
+  $('#energy-value').textContent = String(Math.floor(s.energy));
+  $('#energy-fill').style.transform = `scaleX(${s.energy / 100})`;
+  $('#wave-value').textContent = String(s.wave).padStart(2, '0');
+  $('#enemy-value').textContent = String(s.enemies);
+  $('#score-value').textContent = String(s.score).padStart(6, '0');
+  $('#best-value').textContent = String(s.best);
+  $('#dash-value').textContent = s.dash >= 1 ? 'SIAP' : `${((1 - s.dash) * 1.65).toFixed(1)}s`;
+  $('#dash-fill').style.transform = `scaleX(${s.dash})`;
+  $('#dash-value').classList.toggle('not-ready', s.dash < 1);
+  $('#reticle').classList.toggle('on-target', s.aimTarget);
+  $('#reticle').classList.toggle('shielding', s.shield);
+  $('#session-time').textContent = timeLabel(s.elapsed);
+  $('#hud-fps').textContent = `${s.fps} FPS`;
+  $('#menu-fps').textContent = String(s.fps);
+  $('#speed-lines').classList.toggle(
+    'active',
+    s.dash < 0.12 && s.mode === 'playing' && !settings.reducedEffects,
+  );
+  document.querySelectorAll<HTMLElement>('.spell-slot').forEach((button, i) => {
+    button.classList.toggle('selected', i === s.spell);
+    button.classList.toggle('empty', s.energy < SPELLS[i].cost);
+    button.setAttribute('aria-pressed', String(i === s.spell));
+    button.style.setProperty('--cooldown', String(s.cooldowns[i]));
+  });
+  if (s.spell !== lastSpell) {
+    $('#touch-fire-icon').innerHTML = spellIcons[s.spell];
+    $('#touch-fire').style.setProperty('--element', SPELLS[s.spell].color);
+    lastSpell = s.spell;
+  }
+  $('#touch-fire').classList.toggle(
+    'cooling',
+    s.cooldowns[s.spell] > 0 || s.energy < SPELLS[s.spell].cost,
+  );
+  $('#touch-dash').classList.toggle('cooling', s.dash < 1);
+}
+
+async function boot() {
+  try {
+    await document.fonts.ready;
+    game = new Game($<HTMLCanvasElement>('#arena'), settings, event);
+    applySettings();
+    $('#start-button').onclick = start;
+    $('#demo-play').onclick = start;
+    $('#demo-button').onclick = () => game.demo();
+    $('#demo-exit').onclick = menu;
+    $('#brand').onclick = () => {
+      if (game.snapshot.mode === 'playing') game.pause();
+      else if (game.snapshot.mode === 'demo') menu();
+    };
+    $('#help-button').onclick = () => openPanel('help');
+    $('#settings-button').onclick = () => openPanel('settings');
+    $('#reference-button').onclick = () => openPanel('reference');
+    $('#pause-button').onclick = () => game.pause();
+    $('#sound-button').onclick = () => {
+      settings.sound = !settings.sound;
+      if (settings.sound) game.audio.unlock();
+      applySettings();
+    };
+    $('#fullscreen-button').onclick = async () => {
+      try {
+        if (document.fullscreenElement) await document.exitFullscreen();
+        else if (experience.requestFullscreen) await experience.requestFullscreen();
+        else toast('Layar penuh tidak tersedia di browser ini.');
+      } catch {
+        toast('Browser tidak mengizinkan layar penuh pada preview ini.');
+      }
+    };
+    document.querySelectorAll<HTMLElement>('[data-spell]').forEach((button) => {
+      button.onclick = () => game.selectSpell(Number(button.dataset.spell));
+    });
+    window.addEventListener('keydown', (e) => {
+      if (e.repeat || dialog.open) return;
+      if (e.code === 'KeyR' && game.snapshot.mode === 'playing') {
+        e.preventDefault();
+        start();
+      }
+      if (e.key === '?' && game.snapshot.mode !== 'gameover') openPanel('help');
+      if (
+        e.code === 'Enter' &&
+        game.snapshot.mode === 'menu' &&
+        (document.activeElement === document.body || document.activeElement === $('#arena'))
+      )
+        start();
+    });
+    if (import.meta.env.DEV)
+      Object.assign(window, {
+        __HEA_DEBUG__: { snapshot: () => game.snapshot, diagnostics: () => game.diagnostics },
+      });
+    setInterval(() => {
+      if (!document.hidden) updateHud(game.snapshot);
+    }, 100);
+    requestAnimationFrame(() => {
+      $('#boot').classList.add('loaded');
+      setTimeout(() => {
+        $('#boot').hidden = true;
+      }, 550);
+    });
+  } catch (error) {
+    console.error('Unable to initialize HEA:', error);
+    $('#boot').innerHTML =
+      `<span class="boot-wordmark">HEA.</span><h2>ARENA BELUM BISA DIMUAT.</h2><p>Browser ini memerlukan WebGL 2 dan akselerasi grafis.<br>Coba Chrome terbaru atau aktifkan akselerasi perangkat keras.</p><button id="reload-button" class="primary-button">MUAT ULANG ${icons.reset}</button>`;
+    $('#reload-button').onclick = () => location.reload();
+  }
+}
+
+void boot();

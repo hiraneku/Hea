@@ -1,0 +1,10 @@
+node_modules/
+dist/
+# docs/ is intentionally tracked: GitHub Pages publishes this static build.
+.cache/
+.playwright/
+test-results/
+playwright-report/
+coverage/
+*.local
+.DS_Store

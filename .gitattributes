@@ -1,0 +1,4 @@
+# GitHub Pages bundles are generated; review the corresponding source files instead.
+docs/** linguist-generated=true
+# Three.js embeds upstream GLSL strings with intentional trailing whitespace.
+docs/assets/*.js -whitespace
