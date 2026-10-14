@@ -430,6 +430,8 @@ const enemy = {
   attackTimer: 2.1,
   hp: 120,
   maxHp: 120,
+  hoverY: 3.6,
+  missileQueue: [],
   kbVel: null,
   kbY: 0,
   kbVy: 0,
@@ -537,22 +539,56 @@ function createViewmodel() {
 }
 createViewmodel();
 
+// Perisai sarang lebah: panel heksagon cyan menyala yang terbentuk di depan pemain.
+const shieldGroup = new THREE.Group();
+const shieldTiles = [];
+let shieldBorn = -9, shieldFlashAt = -9, shieldKindNow = 'perisai', shieldRadiusNow = 1.15;
+{
+  const tileGeo = new THREE.CylinderGeometry(0.185, 0.185, 0.05, 6);
+  const faceMat = new THREE.MeshBasicMaterial({ color: 0x86f1ff, transparent: true, opacity: 0.3, depthWrite: false });
+  const edgeMat = new THREE.LineBasicMaterial({ color: 0xc9fbff, transparent: true, opacity: 0.95 });
+  const edgeGeo = new THREE.EdgesGeometry(tileGeo);
+  for (let row = -3; row <= 3; row++) for (let colIdx = -3; colIdx <= 3; colIdx++) {
+    const hx = colIdx * 0.335 + (row % 2 ? 0.167 : 0), hy = row * 0.29;
+    if (Math.hypot(hx, hy) > 0.82) continue;
+    const tile = new THREE.Group();
+    const face = new THREE.Mesh(tileGeo, faceMat);
+    face.rotation.x = Math.PI / 2;
+    const edge = new THREE.LineSegments(edgeGeo, edgeMat);
+    edge.rotation.x = Math.PI / 2;
+    tile.add(face, edge);
+    tile.position.set(hx, hy, 0);
+    tile.userData.delay = Math.hypot(hx, hy) * 0.16;
+    shieldGroup.add(tile);
+    shieldTiles.push(tile);
+  }
+  shieldGroup.position.set(0, -0.04, -1.3);
+  shieldGroup.visible = false;
+  camera.add(shieldGroup);
+}
+
+
 // Particles and projectile effects.
 const projectiles = [];
 const bursts = [];
 const rings = [];
 
-function spawnProjectile(now) {
-  const projectileMat = new THREE.MeshBasicMaterial({ color: 0xff6259 });
-  const core = mesh(new THREE.IcosahedronGeometry(.17, 0), projectileMat, { shadow: false });
-  core.position.copy(enemy.group.position).add(new THREE.Vector3(0, 2.4, 0));
-  const target = player.position.clone();
-  const velocity = target.sub(core.position).normalize().multiplyScalar(6.9);
-  const light = new THREE.PointLight(0xff5149, 1.7, 3.5);
-  core.add(light);
-  scene.add(core);
-  projectiles.push({ mesh: core, velocity, born: now, life: 4 });
-  tone(155, .12, 'sawtooth', .035);
+function spawnProjectile(now, kind = 'api') {
+  const isWisp = kind === 'wisp';
+  const grp = new THREE.Group();
+  const geo = isWisp ? new THREE.SphereGeometry(0.17, 10, 8) : new THREE.ConeGeometry(0.19, 0.68, 8);
+  if (!isWisp) geo.rotateX(Math.PI / 2); // ujung misil menghadap arah terbang (+Z)
+  const core = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: isWisp ? 0xff7ad9 : 0xff9a3c }));
+  const glow = new THREE.Sprite(new THREE.SpriteMaterial({ map: blobTex, color: isWisp ? 0xff9ae2 : 0xffb52e, transparent: true, opacity: 0.85, depthWrite: false }));
+  glow.scale.setScalar(isWisp ? 1.15 : 1.5);
+  grp.add(core, glow);
+  grp.position.copy(enemy.group.position).add(new THREE.Vector3(seeded(now * 91 + performance.now() * .01, -1.4, 1.4), 2.1, seeded(now * 57, -1.4, 1.4)));
+  const speed = isWisp ? 11.5 : 9.6;
+  const velocity = player.position.clone().sub(grp.position).normalize()
+    .add(new THREE.Vector3(seeded(now * 31, -.25, .25), seeded(now * 41, .05, .4), seeded(now * 51, -.25, .25))).normalize().multiplyScalar(speed);
+  scene.add(grp);
+  projectiles.push({ mesh: grp, velocity, born: now, life: 6.5, homing: true, turn: isWisp ? 2.7 : 1.65, speed, kind });
+  tone(isWisp ? 880 : 300, .1, 'sawtooth', .02);
 }
 
 // Tekstur gumpalan debu tidak beraturan (blobby) untuk debu & noda tanah.
@@ -570,7 +606,7 @@ function makeBlobTexture() {
 const blobTex = makeBlobTexture();
 // Puing = pecahan balok/batu 3D betulan yang beterbangan, menggelinding, lalu menetap.
 const CHUNK_MAX = 150;
-const chunkMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.17, 0), toon(0x42474d), CHUNK_MAX);
+const chunkMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.24, 0), toon(0x42474d), CHUNK_MAX);
 chunkMesh.castShadow = false; chunkMesh.frustumCulled = false;
 { const d0 = new THREE.Object3D(); d0.scale.setScalar(0); d0.updateMatrix();
   for (let i = 0; i < CHUNK_MAX; i++) { chunkMesh.setMatrixAt(i, d0.matrix); chunkMesh.setColorAt(i, new THREE.Color().setHex(i % 3 ? 0x42474d : 0x2f3338)); }
@@ -579,11 +615,11 @@ scene.add(chunkMesh);
 const chunks = Array.from({ length: CHUNK_MAX }, () => ({ on: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), rot: new THREE.Euler(), av: new THREE.Vector3(), s: 1, age: 0, life: 4 }));
 let chunkIdx = 0;
 function spawnChunks(position, normal, power = 1, count = null) {
-  const n = count ?? Math.round(7 + power * 6);
+  const n = count ?? Math.round(9 + power * 8);
   for (let i = 0; i < n; i++) {
     const ch = chunks[chunkIdx]; chunkIdx = (chunkIdx + 1) % CHUNK_MAX;
     ch.on = true; ch.age = 0; ch.life = 3.6 + seeded(i * 3.3, 0, 1.6);
-    ch.s = seeded(i * 7.7 + performance.now() * 0.01, 0.45, 1.35) * (0.8 + power * 0.22);
+    ch.s = seeded(i * 7.7 + performance.now() * 0.01, 0.55, 1.9) * (0.85 + power * 0.25);
     ch.pos.copy(position).add(new THREE.Vector3(seeded(i, -.3, .3), seeded(i * 2, 0, .35), seeded(i * 3, -.3, .3)));
     ch.vel.set(seeded(i * 3.1, -1, 1), seeded(i * 5.7, .35, 1.6), seeded(i * 7.9, -1, 1)).normalize()
       .multiplyScalar(seeded(i * 9.3, 1.2, 3 + power * 1.7));
@@ -604,7 +640,7 @@ let dustIdx = 0;
 function spawnDust(position, count = 5, base = 1.4, tint = 0xb7bdc2) {
   for (let i = 0; i < count; i++) {
     const d = dustPool[dustIdx]; dustIdx = (dustIdx + 1) % DUST_MAX;
-    d.on = true; d.age = 0; d.life = 1 + seeded(i * 3.7, 0, .6); d.grow = 1.6 + seeded(i * 5.1, 0, 1.2);
+    d.on = true; d.age = 0; d.life = 1.3 + seeded(i * 3.7, 0, .8); d.grow = 2 + seeded(i * 5.1, 0, 1.6);
     d.sp.visible = true; d.sp.material.color.setHex(tint);
     d.sp.position.copy(position).add(new THREE.Vector3(seeded(i, -.5, .5), seeded(i * 2, 0, .4), seeded(i * 3, -.5, .5)));
     d.sp.scale.setScalar(base * seeded(i * 7.3, .7, 1.3));
@@ -613,12 +649,12 @@ function spawnDust(position, count = 5, base = 1.4, tint = 0xb7bdc2) {
 }
 function spawnDebris(position, normal, power = 1) {
   spawnChunks(position, normal, power);
-  spawnDust(position, Math.round(4 + power * 2), 1.2 + power * 0.5);
+  spawnDust(position, Math.round(5 + power * 3), 1.7 + power * 0.8);
 }
 function spawnGroundMark(position, radius = 0.6, life = 5) {
   // Noda debu/tanah tergeser: gumpalan abu tidak beraturan, bukan lingkaran polos.
-  const m = new THREE.MeshBasicMaterial({ map: blobTex, color: 0x565d63, transparent: true, opacity: 0.55, depthWrite: false });
-  const mark = new THREE.Mesh(new THREE.PlaneGeometry(radius * 3.1, radius * 2.2), m);
+  const m = new THREE.MeshBasicMaterial({ map: blobTex, color: 0x494f55, transparent: true, opacity: 0.62, depthWrite: false });
+  const mark = new THREE.Mesh(new THREE.PlaneGeometry(radius * 3.9, radius * 2.8), m);
   mark.rotation.x = -Math.PI / 2; mark.rotation.z = Math.random() * Math.PI;
   mark.position.set(position.x, 0.02 + Math.random() * 0.012, position.z);
   scene.add(mark);
@@ -653,7 +689,7 @@ function updateChunksDust(dt) {
     const t = d.age / d.life;
     d.sp.position.addScaledVector(d.vel, dt);
     d.sp.scale.addScalar(d.grow * dt);
-    d.sp.material.opacity = 0.42 * (1 - t) * Math.min(1, t * 5);
+    d.sp.material.opacity = 0.5 * (1 - t) * Math.min(1, t * 5);
   }
 }
 function spawnBurst(position, color = 0xffd267, count = 20, force = 1.6) {
@@ -712,6 +748,7 @@ let masterGain = null;
 
 const keys = new Set();
 const joystick = { id: null, x: 0, y: 0 };
+const touchFly = { up: false, down: false }; // tombol sentuh naik/turun
 let lookPointer = null;
 let lookLast = { x: 0, y: 0 };
 let gameState = 'menu';
@@ -1218,7 +1255,8 @@ function castSelected() {
   tone(key === 'perisai' || key === 'perisaiDuri' ? 520 : 740, .09, 'triangle', .035);
   if (f.kind === 'shield') {
     shieldUntil = now + (key === 'perisaiDuri' ? 3.6 : 2.5);
-    spawnRing(player.position, 0x8ddbd2, 2.2);
+    shieldKindNow = key; shieldBorn = now;
+    shieldGroup.visible = true;
     showToast('Perisai Sekejap aktif — proyektil roh tertahan.', 1500);
     updateResourceUI();
     return;
@@ -1555,7 +1593,14 @@ function updatePlayer(dt, now) {
   player.dodgeVelocity.multiplyScalar(Math.pow(.03, dt));
   const moveAmount = Math.min(1, move.length());
   player.bobPhase += dt * (player.sprinting ? 11.5 : 8.2) * moveAmount;
-  next.y = 1.68 + Math.sin(player.bobPhase * 2) * 0.028 * moveAmount;
+  // Terbang bebas seperti video: tahan SPASI naik, C turun, melayang di ketinggian.
+  const flyUp = keys.has('Space') || touchFly.up;
+  const flyDown = keys.has('KeyC') || touchFly.down;
+  if (flyUp) next.y = Math.min(13.5, player.position.y + 6.8 * dt);
+  else if (flyDown) next.y = Math.max(1.68, player.position.y - 6.8 * dt);
+  else next.y = player.position.y;
+  if (next.y <= 1.72) next.y = 1.68 + Math.sin(player.bobPhase * 2) * 0.028 * moveAmount;
+  else next.y += Math.sin(now * 1.9) * 0.04 * dt * 8;
   player.roll = THREE.MathUtils.lerp(player.roll, -input.x * 0.016 - player.dodgeVelocity.x * 0.004, Math.min(1, dt * 9));
   player.fovKick = THREE.MathUtils.lerp(player.fovKick, 0, Math.min(1, dt * 5));
   const targetFov = 68 + (player.sprinting ? 7 : 0) + player.fovKick;
@@ -1712,34 +1757,33 @@ function updateKnockback(dt, now) {
     pos.addScaledVector(enemy.kbVel, sdt);
     resolveKnockbackWalls(now);
   }
-  // Vertikal: jatuh, menghantam tanah, dan memantul sekali bila masih kencang
-  const wasAirborne = enemy.kbY > 0 || enemy.kbVy > 0;
+  // Vertikal: melayang di hoverY; terlontar bisa menghantam TANAH lalu naik lagi.
+  const floorKbY = -enemy.hoverY;
   const vyBefore = enemy.kbVy;
-  if (wasAirborne) {
+  if (enemy.kbY !== 0 || enemy.kbVy !== 0) {
     enemy.kbVy -= cfg.gravity * dt;
     enemy.kbY += enemy.kbVy * dt;
-    if (enemy.kbY <= 0) {
-      enemy.kbY = 0;
-      const landingHard = vyBefore < -3.5;
-      if (landingHard) {
-        enemy.squashV = (enemy.squashV || 0) - 3.6;
-        const at = pos.clone(); at.y = 0.4;
-        spawnDebris(at, new THREE.Vector3(0, 1, 0), Math.min(3, speed * 0.3));
-        spawnGroundMark(pos, 0.55 + Math.min(1.2, speed * 0.09), 4);
-        spawnRing(pos.clone().setY(0.09), 0xd8d2c4, 3.5);
-        tone(65, .2, 'sawtooth', .05);
-        if (speed > 6 && !enemy.bounced) { enemy.kbVy = 2.3; enemy.bounced = true; }
-      }
-      if (enemy.kbVy <= 0) enemy.kbVy = 0;
-      if (!enemy.bounced || enemy.kbVy === 0) enemy.launched = enemy.launched && speed > 5;
+    if (enemy.kbY <= floorKbY) {
+      enemy.kbY = floorKbY;
+      if (vyBefore < -3.2) {
+        enemy.squashV = (enemy.squashV || 0) - 4.2;
+        const at = pos.clone(); at.y = 0.5;
+        spawnChunks(at, new THREE.Vector3(0, 1, 0), Math.min(3.2, Math.abs(vyBefore) * 0.28 + speed * 0.2), 26);
+        spawnDust(at, 9, 2.8, 0xaeb4b9);
+        spawnGroundMark(pos, 0.85 + Math.min(1.5, speed * 0.1), 7);
+        tone(58, .28, 'sawtooth', .065);
+        enemy.kbVy = 3.8; // terpantul naik, kembali terbang
+        enemy.launched = false;
+      } else enemy.kbVy = 0;
     }
+    if (Math.abs(enemy.kbY) < 0.08 && Math.abs(enemy.kbVy) < 1.1) { enemy.kbY = 0; enemy.kbVy = 0; }
   }
-  pos.y = Math.sin(now * 2.1) * 0.055 + enemy.kbY;
+  pos.y = enemy.hoverY + Math.sin(now * 2.1) * 0.16 + enemy.kbY;
   // Gesekan: sangat licin selagi terlontar (seperti video), normal setelahnya
   const damping = enemy.kbY > 0 ? cfg.dampingAir : (enemy.launched || enemy.kbVel.length() > 6) ? cfg.dampingLaunched : cfg.dampingGround;
   enemy.kbVel.multiplyScalar(Math.exp(-damping * dt));
   // Menyeret tanah: puing kecil + bekas gesekan selama meluncur kencang di tanah
-  if (enemy.kbY === 0 && enemy.kbVel.length() > 4) {
+  if (enemy.kbY <= floorKbY + 0.01 && enemy.kbVel.length() > 4) {
     enemy.skidTimer = (enemy.skidTimer || 0) - dt;
     if (enemy.skidTimer <= 0) {
       enemy.skidTimer = 0.07;
@@ -1770,12 +1814,12 @@ function applyBodyFeel(dt, now) {
   const stretch = enemy.kbY > 0 ? Math.min(0.17, speed * 0.012) : 0;
   enemy.group.scale.set(0.92 * (1 + enemy.squash * 0.17 - stretch * 0.35), 0.92 * (1 - enemy.squash * 0.3 + stretch), 0.92 * (1 + enemy.squash * 0.17 - stretch * 0.35));
   // Kepak lengan mengikuti momentum; melambai liar selagi melayang.
-  const flail = enemy.kbY > 0 ? Math.sin(now * 13) * 0.4 : enemy.kbActive ? THREE.MathUtils.clamp(-speed * 0.055, -0.75, 0.1) : Math.sin(now * 1.8) * 0.05;
+  const flail = enemy.kbY !== 0 ? Math.sin(now * 13) * 0.4 : enemy.kbActive ? THREE.MathUtils.clamp(-speed * 0.055, -0.75, 0.1) : Math.sin(now * 1.8) * 0.05;
   enemy.armSwing = THREE.MathUtils.lerp(enemy.armSwing || 0, flail, Math.min(1, dt * 10));
   if (enemy.armL) { enemy.armL.rotation.x = enemy.armSwing; enemy.armR.rotation.x = enemy.armSwing * 0.92; }
   // Postur: remuk menempel dinding, condong saat meluncur, tegak lagi perlahan.
   if (now < (enemy.crumpleUntil || 0)) { enemy.group.rotation.x = -0.52; enemy.group.rotation.z = 0.1; }
-  else if (enemy.kbY > 0 && enemy.kbActive) { enemy.group.rotation.x = -0.42 + Math.sin(now * 11) * 0.26; enemy.group.rotation.z = Math.sin(now * 9) * 0.13; }
+  else if (enemy.kbY !== 0 && enemy.kbActive) { enemy.group.rotation.x = -0.42 + Math.sin(now * 11) * 0.26; enemy.group.rotation.z = Math.sin(now * 9) * 0.13; }
   else if (enemy.kbActive) { enemy.group.rotation.x = -Math.min(0.4, speed * 0.035); enemy.group.rotation.z *= Math.exp(-6 * dt); }
   else { enemy.group.rotation.x *= Math.exp(-7 * dt); enemy.group.rotation.z *= Math.exp(-7 * dt); }
 }
@@ -1788,7 +1832,7 @@ function updateEnemy(dt, now) {
 
   if (enemy.resolved) {
     enemy.group.rotation.y += dt * .12;
-    enemy.group.position.y = Math.sin(now * 1.3) * .07;
+    enemy.group.position.y = enemy.hoverY + Math.sin(now * 1.3) * .07;
     return;
   }
   if (gameState === 'revelation') {
@@ -1800,7 +1844,7 @@ function updateEnemy(dt, now) {
     return;
   }
 
-  enemy.group.position.y = Math.sin(now * 2.1) * .055;
+  enemy.group.position.y = enemy.hoverY + Math.sin(now * 2.1) * .16 + enemy.kbY;
   enemy.head.rotation.z = Math.sin(now * 1.7) * .045;
   enemy.aura.rotation.z += dt * .3;
   enemy.aura.scale.setScalar(1 + Math.sin(now * 3.2) * .08);
@@ -1826,9 +1870,9 @@ function updateEnemy(dt, now) {
   if (enemy.kbActive || now < enemy.kbStaggerUntil) return; // knockback/stagger menguasai tubuh; serangan berhenti dulu
 
   if (enemy.rushing) {
-    tempV.copy(player.position).sub(enemy.group.position).setY(0);
+    tempV.copy(player.position).sub(enemy.group.position);
     const d = tempV.length();
-    if (d > .01) enemy.group.position.addScaledVector(tempV.normalize(), dt * 7.1);
+    if (d > .01) enemy.group.position.addScaledVector(tempV.normalize(), dt * 8.6);
     if (d < 2.1) {
       damage(24);
       enemy.rushing = false;
@@ -1848,19 +1892,42 @@ function updateEnemy(dt, now) {
     enemy.group.position.addScaledVector(tempV.normalize(), Math.min(anchorDistance, dt * 0.45));
   }
 
+  // Melayang mengitari titik jaga di udara.
+  if (!enemy.kbActive) {
+    enemy.group.position.x += Math.sin(now * 0.5) * dt * 1.1;
+    enemy.group.position.z += Math.cos(now * 0.37) * dt * 0.8;
+  }
   enemy.attackTimer -= dt * (now < enemy.enragedUntil ? 1.8 : 1);
-  if (enemy.attackTimer <= 0 && distance < 25) {
-    spawnProjectile(now);
-    enemy.attackTimer = 2.85;
+  while (enemy.missileQueue.length && enemy.missileQueue[0].at <= now) spawnProjectile(now, enemy.missileQueue.shift().kind);
+  if (enemy.attackTimer <= 0 && distance < 30) {
+    // Rentetan misil memburu seperti video: api + wisp merah muda bergantian.
+    const n = now < enemy.enragedUntil ? 9 : 7;
+    for (let i = 0; i < n; i++) enemy.missileQueue.push({ at: now + i * 0.13, kind: i % 3 === 2 ? 'wisp' : 'api' });
+    enemy.attackTimer = now < enemy.enragedUntil ? 3.4 : 4.6;
   }
 }
 
 function updateEffects(dt, now) {
   for (let i = projectiles.length - 1; i >= 0; i--) {
     const p = projectiles[i];
+    if (p.homing) { // misil memburu pemain (belok terbatas, bisa dihindari dgn manuver tajam)
+      tempV.copy(player.position).sub(p.mesh.position).normalize().multiplyScalar(p.speed);
+      p.velocity.lerp(tempV, Math.min(1, dt * p.turn));
+    }
     p.mesh.position.addScaledVector(p.velocity, dt);
-    p.mesh.rotation.x += dt * 8;
-    p.mesh.rotation.y += dt * 5;
+    p.mesh.lookAt(tempV.copy(p.mesh.position).add(p.velocity));
+    if (p.mesh.position.y < 0.15) { spawnChunks(p.mesh.position, new THREE.Vector3(0, 1, 0), 0.8, 6); spawnBurst(p.mesh.position, 0xffa63e, 8, 1.4); scene.remove(p.mesh); projectiles.splice(i, 1); continue; }
+    if (now < shieldUntil) { // tertahan panel sarang lebah di depan pemain
+      shieldGroup.getWorldPosition(tempV2);
+      if (p.mesh.position.distanceTo(tempV2) < shieldRadiusNow) {
+        spawnBurst(p.mesh.position, 0x8df6ff, 14, 2.1);
+        spawnChunks(p.mesh.position, p.velocity.clone().normalize().negate(), 0.5, 4);
+        shieldFlashAt = now;
+        tone(720, .08, 'sine', .04);
+        if (shieldKindNow === 'perisaiDuri') { enemy.hp = Math.max(1, enemy.hp - 5); updateResourceUI(); }
+        scene.remove(p.mesh); projectiles.splice(i, 1); continue;
+      }
+    }
     if (p.mesh.position.distanceTo(player.position) < .55) {
       if (tryPerfectDodge(p.mesh.position.clone(), now)) {
         scene.remove(p.mesh);
@@ -1868,7 +1935,7 @@ function updateEffects(dt, now) {
         continue;
       }
       player.dodgeVelocity.addScaledVector(p.velocity.clone().setY(0).normalize(), 2.0);
-      damage(18);
+      damage(9);
       spawnBurst(p.mesh.position, 0xff6259, 14, 1.8);
       scene.remove(p.mesh);
       projectiles.splice(i, 1);
@@ -1901,6 +1968,20 @@ function updateEffects(dt, now) {
     if (now - pp.born > 2.6 || pp.mesh.position.y < 0) {
       scene.remove(pp.mesh);
       playerProjectiles.splice(i, 1);
+    }
+  }
+  { // Perisai sarang lebah: keping muncul berjenjang dari tengah, berdenyut saat menahan.
+    const activeShield = now < shieldUntil;
+    shieldGroup.visible = activeShield;
+    if (activeShield) {
+      shieldRadiusNow = shieldKindNow === 'perisaiDuri' ? 1.5 : 1.15;
+      const pop = 1 + Math.max(0, 0.35 - (now - shieldFlashAt)) * 1.6;
+      shieldGroup.scale.setScalar((shieldKindNow === 'perisaiDuri' ? 1.35 : 1.05) * pop);
+      shieldGroup.rotation.z += dt * 0.35;
+      for (const t of shieldTiles) {
+        const lt = THREE.MathUtils.clamp((now - shieldBorn - t.userData.delay) / 0.16, 0, 1);
+        t.scale.setScalar(lt * lt);
+      }
     }
   }
   updateChunksDust(dt);
@@ -2087,7 +2168,8 @@ addEventListener('keydown', (event) => {
   if (event.code === 'KeyE') toggleFutureSight();
   if (event.code === 'KeyT') openSynthesis();
   if (event.code === 'KeyF') interact();
-  if (event.code === 'Space') { event.preventDefault(); dodge(); }
+  if (event.code === 'ShiftLeft' && !event.repeat) dodge();
+  if (event.code === 'Space') event.preventDefault(); // SPASI (tahan) = terbang naik; hindar via Shift/tombol
   if (event.code.startsWith('Digit')) {
     const n = Number(event.code.slice(5));
     if (n >= 1 && n <= 4) { selectedSlot = n - 1; updateSpellBar(); }
@@ -2289,3 +2371,15 @@ updateClarity();
 updateSpellBar();
 updateResourceUI();
 if (isTouch) $('#evidencePanel')?.classList.add('collapsed');
+
+// Tombol sentuh terbang (tahan untuk naik/turun).
+for (const [id, key] of [['#flyUpBtn', 'up'], ['#flyDownBtn', 'down']]) {
+  const el = $(id);
+  if (!el) continue;
+  const on = (e) => { e.preventDefault(); touchFly[key] = true; };
+  const off = (e) => { e.preventDefault(); touchFly[key] = false; };
+  el.addEventListener('pointerdown', on);
+  el.addEventListener('pointerup', off);
+  el.addEventListener('pointerleave', off);
+  el.addEventListener('pointercancel', off);
+}
