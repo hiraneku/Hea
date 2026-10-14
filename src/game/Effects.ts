@@ -288,6 +288,7 @@ export class Effects {
       .map((e) => ({
         serial: e.object.userData.serial as number,
         pattern: e.object.userData.pattern as string,
+        cells: e.object.userData.count as number,
         position: e.object.position.toArray(),
         remaining: e.life,
       }));
@@ -436,7 +437,7 @@ export class Effects {
       patch = makeShieldPatch(serial);
     patch.position.copy(at);
     patch.lookAt(at.clone().sub(incoming.clone().normalize()));
-    patch.rotateZ((serial * 2.39996) % (Math.PI * 2));
+    patch.rotateZ(((serial % 6) * Math.PI) / 3);
     patch.scale.setScalar(scale);
     // This remains in WORLD space. It is a visual afterimage, never a moving player attachment.
     this.add(patch, scale > 2 ? 1.45 : 1.25, 0, 0);

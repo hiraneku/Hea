@@ -71,7 +71,7 @@ describe('continuous flight and dash', () => {
     release.start(new Vector3(70, 0, 0));
     release.step(1 / 120, force);
     expect(force.x).toBeGreaterThan(0);
-    expect(force.x).toBeLessThan(10);
+    expect(force.x).toBeCloseTo(70);
     release.step(0.03, force);
     expect(force.x).toBeCloseTo(70);
     release.start(new Vector3(0, 80, 0));
@@ -164,12 +164,12 @@ describe('varied boss tactics and satellite circles', () => {
     for (let i = 0; i < 4; i++) {
       const p = fireGateOffset(i, 0);
       sides.add(p.side);
-      expect(Math.hypot(p.local.x, p.local.y - 0.1)).toBeGreaterThan(2.3);
+      expect(Math.hypot(p.local.x, p.local.y - 0.1)).toBeGreaterThan(1.6);
       expect(p).toEqual(fireGateOffset(i, 0));
     }
     expect(sides.size).toBe(4);
     expect(fireGateOffset(0, 0).local.equals(fireGateOffset(0, 1).local)).toBe(false);
-    expect(ATTACKS.fire.duration).toBeGreaterThan(4.5);
+    expect(ATTACKS.fire.duration).toBeCloseTo(3.3);
     expect(ATTACKS.missiles.shots * 2).toBe(12);
   });
 });

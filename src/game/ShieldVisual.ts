@@ -1,124 +1,157 @@
 import * as THREE from 'three';
 import { seededRandom } from './math';
 
-export const SHIELD_PATTERNS = [
-  'honeycomb',
-  'triangles',
-  'diamonds',
-  'rings',
-  'petals',
-  'shards',
-] as const;
-export type ShieldPattern = (typeof SHIELD_PATTERNS)[number];
-function bag(cycle: number) {
-  const random = seededRandom(719 + cycle * 131),
-    values = [0, 1, 2, 3, 4, 5];
-  for (let i = 5; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1));
-    [values[i], values[j]] = [values[j], values[i]];
-  }
-  return values;
+export interface HexCell {
+  q: number;
+  r: number;
 }
-export function shieldPattern(serial: number): ShieldPattern {
-  const cycle = Math.floor(serial / 6),
-    values = bag(cycle);
-  if (cycle > 0 && values[0] === bag(cycle - 1)[5]) [values[0], values[1]] = [values[1], values[0]];
-  return SHIELD_PATTERNS[values[serial % 6]];
+export const HEX_COUNTS = [6, 8, 7, 5, 9, 10] as const;
+export const HEX_NEIGHBORS = [
+  [1, 0],
+  [0, 1],
+  [-1, 1],
+  [-1, 0],
+  [0, -1],
+  [1, -1],
+] as const;
+
+/** Connected polyhex pieces: different cell counts/layouts, always the same hexagonal prism. */
+export function shieldLayout(serial: number): HexCell[] {
+  const random = seededRandom(7411 + serial * 127),
+    count = HEX_COUNTS[serial % HEX_COUNTS.length];
+  const cells: HexCell[] = [{ q: 0, r: 0 }],
+    occupied = new Set(['0,0']);
+  while (cells.length < count) {
+    const candidates = new Map<string, { q: number; r: number; score: number }>();
+    for (const cell of cells)
+      for (const [dq, dr] of HEX_NEIGHBORS) {
+        const q = cell.q + dq,
+          r = cell.r + dr,
+          key = `${q},${r}`;
+        if (occupied.has(key) || Math.max(Math.abs(q), Math.abs(r), Math.abs(q + r)) > 2) continue;
+        const neighbors = HEX_NEIGHBORS.filter(([x, y]) =>
+          occupied.has(`${q + x},${r + y}`),
+        ).length;
+        candidates.set(key, { q, r, score: neighbors * 0.55 + random() * 1.5 });
+      }
+    const next = [...candidates.values()].sort((a, b) => b.score - a.score)[0];
+    cells.push({ q: next.q, r: next.r });
+    occupied.add(`${next.q},${next.r}`);
+  }
+  return cells;
+}
+export function shieldPattern(serial: number) {
+  return `hex-${shieldLayout(serial).length}`;
 }
 
-/** Different tessellations/silhouettes, not simply six-sided fields rotated in place. */
 export function makeShieldPatch(serial: number): THREE.Group {
-  const pattern = shieldPattern(serial),
-    random = seededRandom(3001 + serial * 41),
-    lines: number[] = [],
-    fill: number[] = [];
-  const polygon = (cx: number, cy: number, r: number, sides: number, angle = 0, stretch = 1) => {
-    const p = Array.from({ length: sides }, (_, i) => {
-      const a = angle + (i * Math.PI * 2) / sides;
-      return [cx + Math.cos(a) * r, cy + Math.sin(a) * r * stretch];
-    });
-    for (let i = 0; i < sides; i++) {
-      const a = p[i],
-        b = p[(i + 1) % sides];
-      lines.push(...a, 0, ...b, 0);
-      fill.push(cx, cy, -0.008, ...a, -0.008, ...b, -0.008);
-    }
+  const cells = shieldLayout(serial),
+    radius = 0.29,
+    depth = 0.05,
+    centers = cells.map(
+      (c) => new THREE.Vector2(Math.sqrt(3) * radius * (c.q + c.r / 2), 1.5 * radius * c.r),
+    );
+  const center = centers.reduce((a, b) => a.add(b), new THREE.Vector2()).divideScalar(cells.length);
+  const fill: number[] = [],
+    wires: number[] = [],
+    glow: number[] = [],
+    edges = new Set<string>();
+  const edge = (ax: number, ay: number, bx: number, by: number) => {
+    const a = `${ax.toFixed(4)},${ay.toFixed(4)}`,
+      b = `${bx.toFixed(4)},${by.toFixed(4)}`,
+      key = [a, b].sort().join('|');
+    if (edges.has(key)) return;
+    edges.add(key);
+    wires.push(ax, ay, depth, bx, by, depth, ax, ay, -depth, bx, by, -depth);
+    const length = Math.hypot(bx - ax, by - ay),
+      dx = (-(by - ay) / length) * 0.012,
+      dy = ((bx - ax) / length) * 0.012;
+    glow.push(
+      ax + dx,
+      ay + dy,
+      depth,
+      bx + dx,
+      by + dy,
+      depth,
+      bx - dx,
+      by - dy,
+      depth,
+      ax + dx,
+      ay + dy,
+      depth,
+      bx - dx,
+      by - dy,
+      depth,
+      ax - dx,
+      ay - dy,
+      depth,
+    );
   };
-  const ring = (r: number, segments = 48) => {
-    for (let i = 0; i < segments; i++) {
-      const a = (i * Math.PI * 2) / segments,
-        b = ((i + 1) * Math.PI * 2) / segments;
-      lines.push(Math.cos(a) * r, Math.sin(a) * r, 0, Math.cos(b) * r, Math.sin(b) * r, 0);
-    }
-  };
-  if (pattern === 'honeycomb') {
-    for (let q = -2; q <= 2; q++)
-      for (let r = Math.max(-2, -q - 2); r <= Math.min(2, -q + 2); r++) {
-        if (Math.abs(q + r) === 2 && random() < 0.3) continue;
-        polygon(0.25 * Math.sqrt(3) * (q + r / 2), 0.375 * r, 0.22, 6, Math.PI / 6);
-      }
-  } else if (pattern === 'triangles') {
-    for (let row = 0; row < 4; row++)
-      for (let j = 0; j <= row; j++)
-        polygon((j - row / 2) * 0.47, 0.8 - row * 0.43, 0.28, 3, Math.PI / 2);
-    polygon(0, 0.05, 1.12, 3, Math.PI / 2);
-  } else if (pattern === 'diamonds') {
-    for (let x = -1; x <= 1; x++)
-      for (let y = -1; y <= 1; y++) polygon(x * 0.54, y * 0.54, 0.32, 4, 0);
-    polygon(0, 0, 1.1, 4, Math.PI / 4);
-  } else if (pattern === 'rings') {
-    ring(1.04);
-    ring(0.86);
-    ring(0.48);
-    polygon(0, 0, 0.42, 12, Math.PI / 12);
-    for (let i = 0; i < 12; i++) {
-      const a = (i * Math.PI) / 6;
-      polygon(Math.cos(a) * 0.68, Math.sin(a) * 0.68, 0.065, 4, a);
-    }
-  } else if (pattern === 'petals') {
-    ring(0.35, 32);
-    for (let i = 0; i < 5; i++) {
-      const a = (i * Math.PI * 2) / 5;
-      polygon(Math.cos(a) * 0.66, Math.sin(a) * 0.66, 0.38, 10, a, 0.8);
-    }
-  } else {
-    polygon(0, 0, 0.4, 4, Math.PI / 4);
-    for (let i = 0; i < 7; i++) {
-      const a = (i * Math.PI * 2) / 7;
-      polygon(
-        Math.cos(a) * (0.65 + random() * 0.2),
-        Math.sin(a) * (0.65 + random() * 0.2),
-        0.24 + random() * 0.12,
-        3,
-        a,
-        1.3,
+  for (const raw of centers) {
+    const c = raw.clone().sub(center);
+    for (let i = 0; i < 6; i++) {
+      const a = Math.PI / 6 + (i * Math.PI) / 3,
+        b = a + Math.PI / 3,
+        ax = c.x + Math.cos(a) * radius,
+        ay = c.y + Math.sin(a) * radius,
+        bx = c.x + Math.cos(b) * radius,
+        by = c.y + Math.sin(b) * radius;
+      edge(ax, ay, bx, by);
+      fill.push(
+        c.x,
+        c.y,
+        depth,
+        ax,
+        ay,
+        depth,
+        bx,
+        by,
+        depth,
+        c.x,
+        c.y,
+        -depth,
+        bx,
+        by,
+        -depth,
+        ax,
+        ay,
+        -depth,
+      );
+      fill.push(
+        ax,
+        ay,
+        depth,
+        ax,
+        ay,
+        -depth,
+        bx,
+        by,
+        depth,
+        bx,
+        by,
+        depth,
+        ax,
+        ay,
+        -depth,
+        bx,
+        by,
+        -depth,
       );
     }
   }
-  const group = new THREE.Group(),
-    wire = new THREE.BufferGeometry(),
-    faces = new THREE.BufferGeometry();
-  wire.setAttribute('position', new THREE.Float32BufferAttribute(lines, 3));
-  faces.setAttribute('position', new THREE.Float32BufferAttribute(fill, 3));
-  group.add(
-    new THREE.LineSegments(
-      wire,
-      new THREE.LineBasicMaterial({
-        color: '#80f2ff',
-        transparent: true,
-        opacity: 0.95,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    ),
-  );
+  const geometry = (vertices: number[]) =>
+    new THREE.BufferGeometry().setAttribute(
+      'position',
+      new THREE.Float32BufferAttribute(vertices, 3),
+    );
+  const group = new THREE.Group();
   group.add(
     new THREE.Mesh(
-      faces,
+      geometry(fill),
       new THREE.MeshBasicMaterial({
-        color: '#50d7ef',
+        color: '#76e5ed',
         transparent: true,
-        opacity: 0.085,
+        opacity: 0.075,
         side: THREE.DoubleSide,
         forceSinglePass: true,
         depthWrite: false,
@@ -126,8 +159,35 @@ export function makeShieldPatch(serial: number): THREE.Group {
       }),
     ),
   );
-  group.rotation.z = (random() - 0.5) * 0.6;
-  group.userData.pattern = pattern;
+  group.add(
+    new THREE.Mesh(
+      geometry(glow),
+      new THREE.MeshBasicMaterial({
+        color: '#66efff',
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+        forceSinglePass: true,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    ),
+  );
+  group.add(
+    new THREE.LineSegments(
+      geometry(wires),
+      new THREE.LineBasicMaterial({
+        color: '#d1ffff',
+        transparent: true,
+        opacity: 0.95,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    ),
+  );
+  group.userData.pattern = shieldPattern(serial);
+  group.userData.cells = cells;
+  group.userData.count = cells.length;
   group.userData.serial = serial;
   group.userData.kind = 'shield-echo';
   return group;

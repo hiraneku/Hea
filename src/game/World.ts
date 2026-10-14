@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { Effects } from './Effects';
 import { ARENA, HEAVY } from './config';
+import { assessFiringLane, type FiringLane } from './AttackSight';
+import { PROJECTILES, type AttackId } from './combat';
 import { DestructibleVolume, TerrainDeformation, type Cell } from './destruction';
 import { seededRandom, firstSolidSpan, type Obstacle } from './math';
 
@@ -505,6 +507,18 @@ export class World {
   }
   get wallBounds() {
     return this.buildings.map((b) => ({ ...b.volume.bounds }));
+  }
+  firingLane(from: THREE.Vector3, target: THREE.Vector3, attack: AttackId): FiringLane {
+    const radius =
+      PROJECTILES[attack === 'missiles' ? 'missile' : attack === 'fire' ? 'fire' : 'hammer'].radius;
+    const toward = target.clone().sub(from),
+      distance = toward.length();
+    const end = from
+      .clone()
+      .addScaledVector(toward.normalize(), Math.max(0, distance - radius - 0.72));
+    if (this.traceGround(from, end, radius) !== null)
+      return { mode: 'blocked', walls: [], thickness: Infinity };
+    return assessFiringLane(from, target, attack, this.obstacles);
   }
   pierceThin(
     obstacle: Obstacle,

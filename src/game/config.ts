@@ -19,6 +19,5 @@ export const HEAVY = {
   thinDepth: 3.2,
   tunnelRadius: 1.8,
   gravity: 27,
-  bounceThreshold: 12,
-  maxBounce: 13,
+  impactSpeed: 12,
 } as const;

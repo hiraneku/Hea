@@ -13,8 +13,8 @@ export const DUEL = {
   shieldArcDegrees: 210,
   shieldShell: 2.35,
   shieldReach: 4.15,
-  novaLaunch: 70,
-  novaPause: 0.105,
+  novaLaunch: 112,
+  novaPause: 0.135,
   wallBreakSpeed: 12,
   groundBreakSpeed: 10,
   impactInterval: 0.65,
@@ -76,10 +76,10 @@ export const ATTACKS = {
     label: 'RENTETAN API',
     warning: 'SALVO API',
     tell: 0.9,
-    duration: 4.8,
+    duration: 3.3,
     recovery: 0.95,
-    shots: 44,
-    interval: 0.11,
+    shots: 32,
+    interval: 0.095,
   },
   missiles: {
     label: 'MANTRA PEMBURU',
@@ -112,6 +112,7 @@ export class BossDirector {
   private index = 0;
   private fired = 0;
   private opening = true;
+  private override: AttackId | null = null;
   stage: AttackStage = 'telegraph';
   elapsed = 0;
   reset() {
@@ -119,12 +120,21 @@ export class BossDirector {
     this.sequence = ['fire', 'missiles', 'hammer'];
     this.stage = 'telegraph';
     this.opening = true;
+    this.override = null;
+  }
+  redirect(attack: AttackId) {
+    if (this.attack === attack) return false;
+    this.override = attack;
+    this.stage = 'telegraph';
+    this.elapsed = this.fired = 0;
+    this.opening = false;
+    return true;
   }
   get pattern() {
     return this.index;
   }
   get attack(): AttackId {
-    return this.sequence[this.index % this.sequence.length];
+    return this.override ?? this.sequence[this.index % this.sequence.length];
   }
   get duration() {
     const a = ATTACKS[this.attack];
@@ -159,6 +169,7 @@ export class BossDirector {
         } else if (this.stage === 'attack') this.stage = 'recover';
         else {
           const previous = this.attack;
+          this.override = null;
           this.index++;
           if (this.index % 3 === 0) {
             const random = seededRandom(this.index * 997 + 71);
@@ -212,7 +223,7 @@ export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, stagger: 0 },
   fire: { radius: 0.32, speed: 30, life: 4, launch: 36, pause: 0.065, stagger: 0.85 },
   missile: { radius: 0.34, speed: 25, life: 4.5, launch: 60, pause: 0.08, stagger: 1.2 },
-  hammer: { radius: 1.25, speed: 31, life: 5, launch: 84, pause: 0.105, stagger: 1.5 },
+  hammer: { radius: 1.25, speed: 31, life: 5, launch: 122, pause: 0.135, stagger: 1.5 },
 } as const;
 
 /** Front and peripheral vision in 3D; the rear cone is a genuine blind spot, even while active. */
@@ -245,10 +256,11 @@ export class HitPause {
 
 /** Low-discrepancy spray: readable cone, wider than the previous pinpoint stream. */
 export function salvoSpread(index: number): { yaw: number; pitch: number } {
-  if (index % 5 === 0) return { yaw: 0, pitch: 0 };
-  const angle = index * 2.39996323,
-    radius = 0.5 + (index % 4) * 0.16;
-  return { yaw: Math.cos(angle) * 0.105 * radius, pitch: Math.sin(angle) * 0.06 * radius };
+  // Four-shot rakes; one centred bolt in each packet and a broad surrounding fan.
+  const side = Math.floor(index / 4) % 2 ? -1 : 1;
+  const yaw = [-0.085, 0, 0.095, 0.035][index % 4] * side;
+  const pitch = [0.045, 0, -0.04, 0.065][index % 4];
+  return { yaw, pitch };
 }
 
 export interface MissileGuidance {

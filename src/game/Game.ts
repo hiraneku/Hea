@@ -43,13 +43,14 @@ import {
 
 import { ARENA, FLIGHT, GROUND, HEAVY } from './config';
 import { flightWish, advanceFlight } from './flight';
+import type { FiringLane } from './AttackSight';
 import {
   AirDash,
   BodyTumble,
   LaunchRelease,
   recoveryBlend,
   springVector,
-  groundBounce,
+  landingSlide,
   groundFriction,
   supportHeight,
 } from './motion';
@@ -111,9 +112,15 @@ export class Game {
     [];
   private flightAcceleration = new THREE.Vector3();
   private cameraSpringVelocity = new THREE.Vector3();
-  private playerTumble = new BodyTumble();
+  private playerTumble = new BodyTumble(true);
   private playerRelease = new LaunchRelease();
   private bank = new THREE.Vector3();
+  private bossLane: FiringLane = { mode: 'clear', walls: [], thickness: 0 };
+  private sightClock = 0;
+  private seekClock = 0;
+  private breachClock = 0;
+  private blockedCasts = 0;
+  private firePacket: { packet: number; pattern: number; origin: THREE.Vector3 } | null = null;
   private pendingFire: { origin: THREE.Vector3; delay: number; index: number }[] = [];
   private shieldPatches: { offset: number[]; position: number[]; normal: number[] }[] = [];
   private avatar: THREE.Mesh;
@@ -178,10 +185,22 @@ export class Game {
   });
   private spellRuneGeometry = new THREE.PlaneGeometry(0.61, 0.61);
   private spellRuneMaterial: THREE.MeshBasicMaterial;
+  private fireGeometry = new THREE.LatheGeometry(
+    [
+      new THREE.Vector2(0, -0.8),
+      new THREE.Vector2(0.045, -0.4),
+      new THREE.Vector2(0.12, -0.08),
+      new THREE.Vector2(0.17, 0.035),
+      new THREE.Vector2(0.13, 0.13),
+      new THREE.Vector2(0, 0.19),
+    ],
+    10,
+  ).rotateX(Math.PI / 2);
+  private fireCore = new THREE.MeshBasicMaterial({ color: '#fff5b8', toneMapped: false });
   private projectileGeometry = new THREE.IcosahedronGeometry(0.17, 1);
   private projectileMaterials = {
     player: new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffad53').multiplyScalar(3) }),
-    fire: new THREE.MeshBasicMaterial({ color: new THREE.Color('#ff702e').multiplyScalar(3) }),
+    fire: new THREE.MeshBasicMaterial({ color: '#ff842b', toneMapped: false }),
     missile: new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffbc70').multiplyScalar(3) }),
     hammer: new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff0ba').multiplyScalar(4) }),
   };
@@ -324,7 +343,12 @@ export class Game {
         maxHealth: DUEL.bossHealth,
         alive: this.boss.alive,
         attack: ATTACKS[this.boss.director.attack].label,
-        stage: this.boss.knockTime > 0 ? 'stagger' : this.boss.director.stage,
+        stage:
+          this.boss.knockTime > 0
+            ? 'stagger'
+            : this.bossLane.mode === 'blocked'
+              ? 'search'
+              : this.boss.director.stage,
         charge: this.boss.director.charge,
         distance: this.boss.position.distanceTo(this.player),
         enraged: this.boss.enraged,
@@ -423,6 +447,9 @@ export class Game {
         bossOrientation: this.boss.group.quaternion.toArray(),
       },
       bossTactic: this.boss.tactics.maneuver,
+      bossLane: this.bossLane,
+      blockedCasts: this.blockedCasts,
+      bossVelocity: this.boss.velocity.clone().add(this.boss.impulse).toArray(),
       bossGoal: this.boss.tactics.goal.toArray(),
       bossDecisions: this.boss.tactics.decisions,
       fireGates: this.boss.activeGates,
@@ -476,6 +503,9 @@ export class Game {
     this.playerRelease.cancel();
     this.bank.set(0, 0, 0);
     this.pendingFire = [];
+    this.firePacket = null;
+    this.bossLane = { mode: 'clear', walls: [], thickness: 0 };
+    this.sightClock = this.seekClock = this.breachClock = this.blockedCasts = 0;
     this.shieldPatches = [];
     this.health = this.energy = 100;
     this.dashCooldown = this.dashTime = this.knockTime = 0;
@@ -677,6 +707,7 @@ export class Game {
     this.knockTime = this.playerTumble.physical
       ? Math.max(0.4, this.knockTime - dt)
       : Math.max(0, this.knockTime - dt);
+    if (this.playerTumble.phase === 'recover') this.knockTime = Math.min(this.knockTime, 0.18);
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
 
     this.cooldowns = this.cooldowns.map((c) => Math.max(0, c - dt));
@@ -794,7 +825,7 @@ export class Game {
       this.verticalVelocity = 0;
     if (physical && this.playerTumble.grounded) groundFriction(this.impulse, dt);
     else {
-      const drag = Math.exp(-dt * (physical ? 0.42 : 0.55 * (1 - recovery) + recovery * 5));
+      const drag = Math.exp(-dt * (physical ? 0.28 : 0.55 * (1 - recovery) + recovery * 5));
       this.impulse.x *= drag;
       this.impulse.z *= drag;
     }
@@ -912,21 +943,28 @@ export class Game {
         }
         if (throughRoof) position.y = Math.max(ny, floor);
         else {
-          const bounce = tumble.physical ? groundBounce(force) : 0;
-          position.y =
-            (bounce > 0 ? Math.max(floor, contactFloor) : floor) + (bounce > 0 ? 0.012 : 0);
+          const away =
+            actor === 'player'
+              ? this.player.clone().sub(this.boss.position)
+              : this.boss.position.clone().sub(this.player);
+          const slide = tumble.physical
+            ? landingSlide(total, away)
+            : new THREE.Vector3(total.x, 0, total.z);
           motor.y = 0;
-          impulse.y = bounce;
-          if (bounce > 0) {
-            impulse.x *= 0.88;
-            impulse.z *= 0.88;
+          impulse.copy(slide).sub(motor);
+          impulse.y = 0;
+          // New craters do not teleport a body to their bottom, nor throw it back upwards.
+          position.y = Math.max(ny, floor);
+          if (position.y > floor + 0.06) impulse.y = -Math.min(8, Math.max(2, force * 0.12));
+          else {
+            position.y = floor;
+            tumble.ground(impulse.clone().add(motor), 0, actor === 'player' ? 0.55 : 1.4);
           }
-          tumble.ground(impulse.clone().add(motor), bounce, actor === 'player' ? 0.55 : 1.4);
-          if (force > HEAVY.bounceThreshold) {
+          if (force > HEAVY.impactSpeed) {
             this.groundReactions.push({
               actor,
               speed: force,
-              bounce,
+              bounce: 0,
               position: position.toArray(),
             });
             if (this.groundReactions.length > 24) this.groundReactions.shift();
@@ -1106,6 +1144,14 @@ export class Game {
       ? Math.max(0.4, b.knockTime - dt)
       : Math.max(0, b.knockTime - dt);
     if (wasKnocked && b.knockTime === 0) b.tactics.displaced(b.position, this.player);
+    if (b.tumble.phase === 'recover') b.knockTime = Math.min(b.knockTime, 0.18);
+    this.sightClock -= dt;
+    this.seekClock -= dt;
+    this.breachClock -= dt;
+    if (this.sightClock <= 0 && !b.tumble.physical) {
+      this.sightClock = 0.1;
+      this.updateBossSight();
+    }
     const recovery = b.tumble.physical ? 0 : recoveryBlend(b.knockTime) * (1 - b.tumble.weight);
     const motor = b.tactics.step(
       dt,
@@ -1166,7 +1212,7 @@ export class Game {
     b.position.copy(feet).addScaledVector(UP, extent);
     if (b.tumble.physical && b.tumble.grounded) groundFriction(b.impulse, dt);
     else {
-      const drag = Math.exp(-dt * (b.tumble.physical ? 0.42 : 0.55 + recovery * 4.45));
+      const drag = Math.exp(-dt * (b.tumble.physical ? 0.28 : 0.55 + recovery * 4.45));
       b.impulse.x *= drag;
       b.impulse.z *= drag;
     }
@@ -1179,6 +1225,7 @@ export class Game {
       b.knockTime > 0.15 ||
       b.tumble.weight > 0.25 ||
       this.testIdleBoss ||
+      this.bossLane.mode === 'blocked' ||
       this.hitPause.remaining > 0
     )
       return;
@@ -1203,12 +1250,102 @@ export class Game {
       } else this.bossAttack(command.attack, command.index);
     }
   }
+  private updateBossSight() {
+    const b = this.boss,
+      target = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
+    this.bossLane = this.world.firingLane(b.position, target, b.director.attack);
+    if (this.bossLane.mode !== 'blocked') return;
+    this.pendingFire = [];
+    this.firePacket = null;
+    b.clearGates();
+    if (!this.testIdleBoss && this.breachClock <= 0) {
+      for (const attack of ['missiles', 'hammer'] as const) {
+        const lane = this.world.firingLane(b.position, target, attack);
+        if (lane.mode === 'breach' && b.director.redirect(attack)) {
+          this.bossLane = lane;
+          this.breachClock = 4;
+          b.lockedTarget.copy(target);
+          if (this.mode !== 'menu') this.audio.charge();
+          return;
+        }
+      }
+    }
+    if (this.seekClock > 0 || this.testIdleBoss) return;
+    this.seekClock = 0.55;
+    const delta = b.position.clone().sub(this.player),
+      angle = Math.atan2(delta.z, delta.x);
+    const obstruction = this.trace(b.position, target, false)?.obstacle;
+    let best: THREE.Vector3 | null = null,
+      cost = Infinity;
+    const heights = [
+      b.position.y,
+      Math.max(2.5, this.player.y + 0.9),
+      Math.min(ARENA.ceiling, (obstruction?.top ?? b.position.y) + 3),
+    ];
+    for (const height of heights)
+      for (const turn of [-0.45, 0.45, -0.9, 0.9, -1.4, 1.4]) {
+        const candidate = new THREE.Vector3(
+          this.player.x + Math.cos(angle + turn) * DUEL.preferredRange,
+          height,
+          this.player.z + Math.sin(angle + turn) * DUEL.preferredRange,
+        );
+        if (
+          Math.abs(candidate.x) > ARENA.halfSize - 5 ||
+          Math.abs(candidate.z) > ARENA.halfSize - 5
+        )
+          continue;
+        if (
+          this.trace(candidate, candidate, false, 1.3) ||
+          this.world.firingLane(candidate, target, 'fire').mode !== 'clear'
+        )
+          continue;
+        const score = candidate.distanceTo(b.position) + Math.abs(height - b.position.y) * 1.4;
+        if (score < cost) {
+          cost = score;
+          best = candidate;
+        }
+      }
+    if (best) b.tactics.seekSight(best, b.director.pattern);
+  }
+  private permittedCast(
+    attack: AttackId,
+    origin?: THREE.Vector3,
+    target = this.player.clone().add(new THREE.Vector3(0, 0.9, 0)),
+  ) {
+    const core = this.world.firingLane(this.boss.position, target, attack);
+    if (core.mode === 'blocked') {
+      this.blockedCasts++;
+      return false;
+    }
+    if (
+      origin &&
+      (!this.clearSight(this.boss.position, origin) ||
+        this.world.firingLane(origin, target, attack).mode === 'blocked')
+    ) {
+      this.blockedCasts++;
+      return false;
+    }
+    return true;
+  }
   private bossAttack(attack: AttackId, index: number) {
+    if (!this.permittedCast(attack)) return;
     const muzzle = this.boss.muzzle(attack === 'hammer' ? PROJECTILES.hammer.radius : 0);
     if (attack === 'fire') {
-      const target = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
-      const origin = this.boss.fireGate(index, target, (x, z) => this.world.surfaceHeight(x, z));
-      this.pendingFire.push({ origin, delay: 0.12, index });
+      const packet = Math.floor(index / 4),
+        pattern = this.boss.director.pattern;
+      if (
+        !this.firePacket ||
+        this.firePacket.packet !== packet ||
+        this.firePacket.pattern !== pattern
+      ) {
+        const origin = this.boss.fireGate(
+          packet,
+          this.player.clone().addScaledVector(UP, 0.9),
+          (x, z) => this.world.surfaceHeight(x, z),
+        );
+        this.firePacket = { packet, pattern, origin };
+      }
+      this.pendingFire.push({ origin: this.firePacket.origin.clone(), delay: 0.12, index });
     } else if (attack === 'missiles') {
       for (const side of [0, 3]) {
         const port = this.boss.spellPort(index + side),
@@ -1223,11 +1360,13 @@ export class Game {
           .addScaledVector(radial, 0.3 * Math.min(1, port.distanceTo(this.player) / 12))
           .normalize()
           .multiplyScalar(15);
+        if (!this.permittedCast('missiles', port)) continue;
         this.spawn(port, launch, 'missile', 16);
         this.fx.glyph(port, forward, '#ffbc80', 0.32, 0.32);
       }
       if (this.mode !== 'menu') this.audio.cast(0);
     } else {
+      if (!this.permittedCast('hammer', muzzle, this.boss.lockedTarget)) return;
       const aim = this.boss.lockedTarget.clone().sub(muzzle).normalize();
       this.spawn(muzzle, aim.clone().multiplyScalar(PROJECTILES.hammer.speed), 'hammer', 29);
       this.fx.glyph(muzzle, aim, '#fff0b8', 2.3, 0.55);
@@ -1245,6 +1384,7 @@ export class Game {
       shot.delay -= dt;
       if (shot.delay > 0) continue;
       this.pendingFire.splice(i, 1);
+      if (!this.permittedCast('fire', shot.origin)) continue;
       const aim = this.player
         .clone()
         .add(
@@ -1348,10 +1488,19 @@ export class Game {
     homing = false,
   ) {
     if (this.projectiles.length >= 72) this.removeProjectile(0);
-    const mesh = new THREE.Mesh(this.projectileGeometry, this.projectileMaterials[kind]);
+    const mesh = new THREE.Mesh(
+      kind === 'fire' ? this.fireGeometry : this.projectileGeometry,
+      this.projectileMaterials[kind],
+    );
     mesh.position.copy(at);
     const radius = PROJECTILES[kind].radius;
     mesh.scale.setScalar(radius / 0.17);
+    if (kind === 'fire') {
+      const core = new THREE.Mesh(this.fireGeometry, this.fireCore);
+      core.scale.set(0.62, 0.62, 0.9);
+      core.position.z = 0.04;
+      mesh.add(core);
+    }
     if (kind === 'missile' || kind === 'hammer') {
       const orbit = new THREE.Mesh(this.spellOrbitGeometry, this.spellOrbitMaterial);
       orbit.rotation.x = Math.PI / 3;
@@ -1609,7 +1758,7 @@ export class Game {
     vector
       .addScaledVector(this.velocity, 0.25)
       .addScaledVector(this.impulse, 0.2)
-      .clampLength(0, 112);
+      .clampLength(0, 140);
     vector.y += this.verticalVelocity * 0.2;
     this.verticalVelocity = 0;
     this.pendingPlayerImpulse = vector;
@@ -1649,7 +1798,7 @@ export class Game {
     if (surface === 'ground') this.fx.shock(at.clone().addScaledVector(UP, 0.09), '#edf4e9', 6);
     if (this.mode !== 'menu') this.audio.crash(strength);
     this.shake = this.settings.reducedEffects ? 0 : Math.min(0.1, strength / 500);
-    this.hitPause.request(0.055);
+    this.hitPause.request(0.035);
     // Impact frames are caused by secondary world collisions, never by ordinary spell casts.
     if (this.flashTimer <= 0) {
       this.flashTimer = DUEL.impactInterval;
@@ -1700,6 +1849,20 @@ export class Game {
       },
       face: orient,
       castBoss: (attack: AttackId, index = 0) => this.bossAttack(attack, index),
+      place: (player: number[], boss: number[]) => {
+        this.player.fromArray(player);
+        this.previousPlayer.copy(this.player);
+        this.boss.position.fromArray(boss);
+        this.boss.lockedTarget.copy(this.player).addScaledVector(UP, 0.9);
+        this.sightClock = 0;
+        this.presentActors(0);
+      },
+      lane: (attack: AttackId) =>
+        this.world.firingLane(
+          this.boss.position,
+          this.player.clone().addScaledVector(UP, 0.9),
+          attack,
+        ),
       incoming,
       scenario: (name: string) => {
         this.start(false);
@@ -1707,7 +1870,33 @@ export class Game {
         if (['wall', 'ground', 'contact', 'missile-near', 'defeat', 'ragdoll'].includes(name)) {
           this.aegis.setEnabled(false);
         }
-        if (['pierce-player', 'pierce-ground', 'thick-cover'].includes(name)) {
+        if (['sight-thick', 'sight-thin', 'sight-live'].includes(name)) {
+          if (name === 'sight-thin') {
+            this.player.set(-2, 7, -18);
+            this.boss.position.set(-2, 7, -3);
+          } else {
+            this.player.set(-4, 6, 12);
+            this.boss.position.set(-27, 6, 12);
+          }
+          if (name === 'sight-live') {
+            this.testIdleBoss = false;
+            this.testInvulnerable = true;
+          }
+        } else if (name === 'nova-air') {
+          this.player.set(0, 34, 15);
+          this.boss.position.set(0, 37, 4);
+          this.spell = 2;
+          this.lockedOn = true;
+        } else if (name === 'player-air') {
+          this.player.set(0, 32, 24);
+          this.aegis.setEnabled(false);
+          this.spawn(
+            this.player.clone().add(new THREE.Vector3(0, 0.9, 2.1)),
+            new THREE.Vector3(0, 0, -31),
+            'hammer',
+            29,
+          );
+        } else if (['pierce-player', 'pierce-ground', 'thick-cover'].includes(name)) {
           this.aegis.setEnabled(false);
           if (name === 'pierce-player') {
             this.player.set(-2, 6, -15);
@@ -1774,10 +1963,13 @@ export class Game {
             9,
           );
         } else if (name === 'patterns') {
+          this.player.set(0, 35, 24);
+          this.boss.position.set(0, 39, 1.5);
           this.testIdleBoss = false;
           this.testInvulnerable = true;
         }
         this.previousPlayer.copy(this.player);
+        this.boss.lockedTarget.copy(this.player).addScaledVector(UP, 0.9);
         this.aimAtBoss(1);
         this.facingQuaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
         this.facing.set(0, 0, -1).applyQuaternion(this.facingQuaternion);

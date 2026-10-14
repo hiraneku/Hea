@@ -1,20 +1,20 @@
 import { describe, expect, it } from 'vitest';
 import { Quaternion, Vector3 } from 'three';
-import { BodyTumble, groundBounce, groundFriction, supportHeight } from '../../src/game/motion';
+import { BodyTumble, landingSlide, groundFriction, supportHeight } from '../../src/game/motion';
 import { DestructibleVolume } from '../../src/game/destruction';
 import { firstSolidSpan, segmentBox } from '../../src/game/math';
 import { HEAVY } from '../../src/game/config';
-import { makeShieldPatch, shieldPattern, SHIELD_PATTERNS } from '../../src/game/ShieldVisual';
+import { makeShieldPatch, shieldPattern, HEX_COUNTS } from '../../src/game/ShieldVisual';
 
 describe('varied shield echoes', () => {
-  it('shuffles every shape and never repeats the previous silhouette', () => {
+  it('varies hex counts without replacing the hexagonal cell shape', () => {
     for (let i = 1; i < 90; i++) expect(shieldPattern(i)).not.toBe(shieldPattern(i - 1));
     for (let i = 0; i < 30; i += 6)
       expect(new Set(Array.from({ length: 6 }, (_, j) => shieldPattern(i + j))).size).toBe(
-        SHIELD_PATTERNS.length,
+        HEX_COUNTS.length,
       );
   });
-  it('uses different polygon and curved geometries, not just rotated honeycomb', () => {
+  it('builds prism clusters with a different number of hexagonal cells', () => {
     const counts = new Set<number>();
     for (let i = 0; i < 6; i++) {
       const patch = makeShieldPatch(i);
@@ -78,11 +78,13 @@ describe('ground ragdoll', () => {
     expect(body.physical).toBe(true);
     expect(body.phase).toBe('air');
   });
-  it('only energetic impacts bounce and each rebound has bounded energy', () => {
-    expect(groundBounce(8)).toBe(0);
-    expect(groundBounce(45)).toBeGreaterThan(5);
-    expect(groundBounce(100)).toBeLessThanOrEqual(HEAVY.maxBounce);
-    expect(groundBounce(groundBounce(100))).toBeLessThan(groundBounce(100));
+  it('absorbs vertical pressure into a ground skim with no upward rebound', () => {
+    for (const speed of [8, 45, 100]) {
+      const result = landingSlide(new Vector3(0, -speed, 0), new Vector3(0, 0, 1));
+      expect(result.y).toBe(0);
+      expect(result.length()).toBeLessThanOrEqual(speed);
+    }
+    expect(landingSlide(new Vector3(50, -30, 0), new Vector3(0, 0, 1)).x).toBeGreaterThan(40);
   });
   it('keeps a visible skid but settles monotonically, independent of timestep subdivision', () => {
     const a = new Vector3(35, 0, 0),

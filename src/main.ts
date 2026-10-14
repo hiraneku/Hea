@@ -6,6 +6,7 @@ import '@fontsource/inter/latin-600.css';
 import './style.css';
 import './duel.css';
 import referenceUrl from '../reference.mp4?url';
+import reference2Url from '../reference2.mp4?url';
 import { icons } from './icons';
 import { Game } from './game/Game';
 import {
@@ -59,7 +60,7 @@ app.innerHTML = `
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.5</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.6</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -267,7 +268,7 @@ function renderPanel(type: Exclude<typeof panel, null>) {
         <div><span>Bergerak</span><b>JOYSTICK KIRI</b></div><div><span>Arahkan kamera</span><b>GESER AREA KANAN</b></div><div><span>Serang berulang</span><b>TAHAN TOMBOL SERANG</b></div><div><span>Ganti sihir</span><b>SENTUH SLOT SIHIR</b></div><div><span>Terbang naik / turun</span><b>TAHAN NAIK / TURUN</b></div><div><span>Menghindar / kunci kamera</span><b>DASH / FOKUS</b></div><div><span>Perisai ON / OFF</span><b><kbd>G</kbd> / TOMBOL AEGIS</b></div><div><span>Mode terbang / jalan</span><b><kbd>F</kbd> / TOMBOL MODE</b></div><div><span>Bantuan bidik</span><b>OTOMATIS AKTIF</b></div>
       </div>
       <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${['Proyektil cepat. Ikuti target dengan crosshair.', 'Sinar instan. Tepat untuk target yang bergerak.', 'Ledakan kuat. Hempaskan boss dan hancurkan penghalang.'][i]}</span></div>`).join('')}</div>
-      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; saat OFF jejak lama tidak memblokir serangan baru. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat, lalu hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat membuat tubuh jatuh, memantul bila benturannya kuat, lalu berguling/terseret. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Seret kamera untuk melepas fokus.</p>
+      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; saat OFF jejak lama tidak memblokir serangan baru. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat, lalu hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret, lalu langsung bangkit. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Seret kamera untuk melepas fokus.</p>
       <button class="primary-button full-width" id="panel-done"><span>MENGERTI</span>${icons.arrow}</button>`;
   } else if (type === 'settings') {
     content = `<p class="panel-description">Preferensimu tersimpan di perangkat ini.</p>
@@ -279,7 +280,7 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render.</p>
       <button class="primary-button full-width" id="panel-done"><span>SIMPAN & KEMBALI</span>${icons.arrow}</button>`;
   } else if (type === 'reference') {
-    content = `<video class="reference-video" src="${referenceUrl}" controls playsinline autoplay muted loop preload="metadata" aria-label="Video referensi asli dari repositori"></video><p class="panel-note">Video asli dari repo, sekitar 7 detik. Prototipe ini merekonstruksi gaya gerakan dan efeknya; aturan pertarungan merupakan interpretasi untuk versi yang bisa dimainkan.</p>`;
+    content = `<div class="control-tabs"><button id="reference-one">REFERENSI 1</button><button id="reference-two" class="active">REFERENSI 2</button></div><video class="reference-video" src="${reference2Url}" controls playsinline autoplay muted loop preload="metadata" aria-label="Video referensi asli dari repositori"></video><p class="panel-note">Referensi 2 dari repo, 11,75 detik: kepingan shield heksagonal dan rentetan api. Referensi 1 tetap tersedia. Pilihan fisika dan timing yang tidak terlihat di video tetap berupa tuning prototipe.</p>`;
   } else if (type === 'pause') {
     content = `<p class="panel-description">Arena akan menunggu. Lanjutkan saat kamu siap.</p><div class="pause-actions"><button id="resume-button" class="primary-button full-width"><span>LANJUTKAN</span>${icons.play}</button><button id="restart-button" class="secondary-button">${icons.reset}<span>ULANGI DUEL</span></button><button id="pause-settings" class="secondary-button">${icons.settings}<span>PENGATURAN</span></button><button id="menu-button" class="quiet-button">KEMBALI KE MENU ${icons.arrow}</button></div>`;
   } else {
@@ -291,6 +292,19 @@ function renderPanel(type: Exclude<typeof panel, null>) {
   if (!dialog.open) dialog.showModal();
   $('#panel-close').onclick = closePanel;
   if (document.querySelector('#panel-done')) $('#panel-done').onclick = closePanel;
+  if (type === 'reference') {
+    for (const [id, url] of [
+      ['#reference-one', referenceUrl],
+      ['#reference-two', reference2Url],
+    ])
+      $(id).onclick = () => {
+        const video = $<HTMLVideoElement>('.reference-video');
+        video.src = url;
+        void video.play().catch(() => {});
+        $('#reference-one').classList.toggle('active', id === '#reference-one');
+        $('#reference-two').classList.toggle('active', id === '#reference-two');
+      };
+  }
   if (type === 'help') {
     $('#desktop-tab').onclick = () => {
       $('#desktop-tab').classList.add('active');
@@ -381,11 +395,13 @@ function updateHud(s: Snapshot) {
       }[s.boss.maneuver];
   $('#boss-action').textContent = !s.boss.alive
     ? 'DITAKLUKKAN'
-    : s.boss.stage === 'stagger'
-      ? 'TERHEMPAS / MEMULIHKAN POSISI'
-      : s.boss.stage === 'recover'
-        ? 'MEMPOSISIKAN ULANG'
-        : `${s.boss.stage === 'telegraph' ? 'MENGISI' : 'MENEMBAK'} / ${s.boss.attack}`;
+    : s.boss.stage === 'search'
+      ? 'TERHALANG / MENCARI SUDUT'
+      : s.boss.stage === 'stagger'
+        ? 'TERHEMPAS / MEMULIHKAN POSISI'
+        : s.boss.stage === 'recover'
+          ? 'MEMPOSISIKAN ULANG'
+          : `${s.boss.stage === 'telegraph' ? 'MENGISI' : 'MENEMBAK'} / ${s.boss.attack}`;
   $('.boss-hud').dataset.stage = s.boss.stage;
   $('#boss-charge-fill').style.transform = `scaleX(${s.boss.charge})`;
   $('#boss-distance').textContent = `${Math.round(s.boss.distance)} M`;

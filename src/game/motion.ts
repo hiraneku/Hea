@@ -1,7 +1,6 @@
 import { Quaternion, Vector3 } from 'three';
 import { clamp } from './math';
 import { steerMissile } from './combat';
-import { HEAVY } from './config';
 
 export const ease = (t: number) => {
   const x = clamp(t, 0, 1);
@@ -77,13 +76,13 @@ export class LaunchRelease {
   step(dt: number, impulse: Vector3) {
     if (this.applied >= 1) return;
     this.age += dt;
-    const weight = ease(this.age / 0.035);
+    const weight = ease(this.age / 0.008);
     impulse.addScaledVector(this.target, weight - this.applied);
     this.applied = weight;
   }
 }
 
-/** Torque-driven block body: fall -> bounce/roll/slide -> settle -> recover. */
+/** Shoulder-first tumble and frictional skid. No ground restitution or idle unconscious delay. */
 export class BodyTumble {
   readonly orientation = new Quaternion();
   readonly angularVelocity = new Vector3();
@@ -98,6 +97,10 @@ export class BodyTumble {
   private groundSpeed = 0;
   private roll = new Vector3();
   private settled = 0;
+  private groundRoll = 0;
+  private slidePose = new Quaternion();
+  private riseStart = new Quaternion();
+  constructor(private humanLike = false) {}
   private recoveryTime = 0;
   get physical() {
     return this.phase === 'air' || this.phase === 'slide';
@@ -112,6 +115,7 @@ export class BodyTumble {
       this.bounces =
       this.landings =
         0;
+    this.groundRoll = 0;
     this.angularVelocity.set(0, 0, 0);
     this.orientation.identity();
     this.roll.set(0, 0, 0);
@@ -122,38 +126,37 @@ export class BodyTumble {
     this.phase = 'air';
     this.weight = 1;
     this.grounded = false;
+    this.groundRoll = 0;
     this.settled = this.recoveryTime = this.bounces = this.landings = this.groundTravel = 0;
     const direction = impulse.clone().normalize(),
       axis = new Vector3().crossVectors(direction, new Vector3(0, 1, 0));
     if (axis.lengthSq() < 0.02) axis.set(1, 0, 0.35);
     this.angularVelocity
       .copy(axis.normalize())
-      .multiplyScalar(8.5)
-      .addScaledVector(direction, 3.2)
-      .add(new Vector3(0, 1.3, 0));
+      .multiplyScalar(this.humanLike ? 4.8 : 7.2)
+      .addScaledVector(direction, this.humanLike ? 0.55 : 1.1)
+      .add(new Vector3(0, 0.25, 0));
   }
   beginStep() {
     this.wasGrounded = this.grounded;
     this.grounded = false;
   }
-  ground(velocity: Vector3, bounce: number, radius: number) {
+  ground(velocity: Vector3, _bounce: number, radius: number) {
     if (!this.physical) return;
     if (!this.wasGrounded) this.landings++;
-    if (bounce > 0) {
-      this.bounces++;
-      this.phase = 'air';
-      this.grounded = false;
-      this.settled = 0;
-      return;
-    }
     this.grounded = true;
     this.phase = 'slide';
     this.groundSpeed = Math.hypot(velocity.x, velocity.z);
     this.roll
       .crossVectors(new Vector3(0, 1, 0), velocity)
       .setY(0)
-      .multiplyScalar(0.65 / radius)
-      .clampLength(0, 10);
+      .multiplyScalar(0.18 / radius)
+      .clampLength(0, this.humanLike ? 4.3 : 5.5);
+    if (this.groundSpeed > 0.1)
+      this.slidePose.setFromUnitVectors(
+        new Vector3(0, 1, 0),
+        new Vector3(velocity.x, 0, velocity.z).normalize(),
+      );
   }
   collide(normal: Vector3, velocity: Vector3) {
     if (!this.active) return;
@@ -172,11 +175,18 @@ export class BodyTumble {
     if (dt <= 0) return this.orientation;
     if (this.physical) {
       if (this.grounded) {
-        this.angularVelocity.lerp(this.roll, 1 - Math.exp(-dt * 5));
-        this.settled = this.groundSpeed < 2.4 ? this.settled + dt : 0;
-        if (this.settled > 0.22) {
+        const remaining = Math.max(0, 1 - this.groundRoll / (Math.PI * 1.2));
+        this.angularVelocity.lerp(
+          this.roll.clone().multiplyScalar(remaining),
+          1 - Math.exp(-dt * 9),
+        );
+        this.groundRoll += this.angularVelocity.length() * dt;
+        if (this.groundRoll > 1.1) this.orientation.slerp(this.slidePose, 1 - Math.exp(-dt * 5));
+        if (this.groundSpeed <= 4) {
           this.phase = 'recover';
           this.recoveryTime = 0;
+          this.riseStart.copy(this.orientation);
+          this.angularVelocity.set(0, 0, 0);
         }
       } else {
         this.phase = 'air';
@@ -196,10 +206,9 @@ export class BodyTumble {
         .normalize();
     if (this.phase === 'recover') {
       this.recoveryTime += dt;
-      this.angularVelocity.multiplyScalar(Math.exp(-dt * 9));
-      this.orientation.slerp(desired, 1 - Math.exp(-dt * 6));
-      this.weight = 1 - ease(this.recoveryTime / 0.85);
-      if (this.recoveryTime >= 1) {
+      this.orientation.slerpQuaternions(this.riseStart, desired, ease(this.recoveryTime / 0.22));
+      this.weight = 1 - ease(this.recoveryTime / 0.22);
+      if (this.recoveryTime >= 0.22) {
         this.active = false;
         this.phase = 'idle';
         this.weight = 0;
@@ -218,14 +227,24 @@ export function supportHeight(q: Quaternion, halfSize: Vector3, centerY = 0): nu
     Math.abs(x) * halfSize.x + Math.abs(y) * halfSize.y + Math.abs(z) * halfSize.z - centerY * y
   );
 }
-export function groundBounce(normalSpeed: number): number {
-  return normalSpeed > HEAVY.bounceThreshold ? Math.min(HEAVY.maxBounce, normalSpeed * 0.23) : 0;
+/** Absorb the normal impulse. A steep slam is redirected into a modest skim, never a bounce. */
+export function landingSlide(velocity: Vector3, away: Vector3): Vector3 {
+  const speed = Math.hypot(velocity.x, velocity.z),
+    normal = Math.max(0, -velocity.y);
+  const retention = normal > 12 ? 0.94 : 1;
+  const result = new Vector3(velocity.x * retention, 0, velocity.z * retention);
+  if (speed < 10 && normal > 18) {
+    const tangent = away.clone().setY(0);
+    if (tangent.lengthSq() < 0.001) tangent.set(0, 0, 1);
+    result.copy(tangent.normalize()).multiplyScalar(Math.min(28, normal * 0.28));
+  }
+  return result;
 }
 /** Continuous ground friction preserves a visible skid, but cannot accelerate a resting body. */
 export function groundFriction(velocity: Vector3, dt: number) {
   const speed = Math.hypot(velocity.x, velocity.z);
   if (speed < 1e-6) return;
-  const next = Math.max(0, (speed + 5 / 0.9) * Math.exp(-0.9 * dt) - 5 / 0.9),
+  const next = Math.max(0, (speed + 7) * Math.exp(-dt) - 7),
     factor = next / speed;
   velocity.x *= factor;
   velocity.z *= factor;

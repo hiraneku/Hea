@@ -522,10 +522,10 @@ test('fire comes from warmed satellite gates, seekers double, and boss altitude 
   await scenario(page, 'patterns');
   await step(page, 1 + ATTACKS.fire.tell + ATTACKS.fire.duration + 0.15);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  expect(d.attacksFired.fire).toBe(44);
+  expect(d.attacksFired.fire).toBe(ATTACKS.fire.shots);
   expect(new Set(d.fireOrigins.map((g) => g.side)).size).toBe(4);
   for (const g of d.fireOrigins)
-    expect(Math.hypot(g.local[0], g.local[1] - 0.1)).toBeGreaterThan(2.3);
+    expect(Math.hypot(g.local[0], g.local[1] - 0.1)).toBeGreaterThan(1.6);
   await step(page, ATTACKS.fire.recovery + ATTACKS.missiles.tell + ATTACKS.missiles.duration);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.attacksFired.missile).toBe(12);
@@ -658,7 +658,7 @@ test('solar sphere bores thin slabs, continues into player/ground, but thick wal
   expect(d.shots.filter((s) => s.kind === 'hammer')).toHaveLength(0);
 });
 
-test('heavy ragdoll bounces, rolls and drags before recovering; walls and sigils are enlarged', async ({
+test('heavy ragdoll slides without bounce and promptly recovers; walls and sigils remain enlarged', async ({
   page,
 }, info) => {
   test.skip(info.project.name !== 'mobile');
@@ -666,8 +666,8 @@ test('heavy ragdoll bounces, rolls and drags before recovering; walls and sigils
   await scenario(page, 'ground-skid');
   await step(page, 1.4);
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  expect(d.ragdoll.playerBounces).toBeGreaterThan(0);
-  expect(d.groundReactions.some((r) => r.actor === 'player' && r.bounce > 0)).toBe(true);
+  expect(d.ragdoll.playerBounces).toBe(0);
+  expect(d.groundReactions.some((r) => r.actor === 'player' && r.bounce === 0)).toBe(true);
   await step(page, 5);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.playerGroundTravel).toBeGreaterThan(2);
@@ -680,7 +680,83 @@ test('heavy ragdoll bounces, rolls and drags before recovering; walls and sigils
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.fireGates.some((g) => g.radius >= 1)).toBe(true);
   expect(d.walls.filter((w) => w.maxX - w.minX >= 10 && w.top >= 15).length).toBeGreaterThan(45);
-  await step(page, 10.8);
+  await step(page, 9.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.heavyCircleRadius).toBeGreaterThan(3.4);
+});
+
+test('boss holds fire behind thick cover, repositions, and permits a real thin-wall breach', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'sight-thick');
+  for (const attack of ['fire', 'missiles', 'hammer'] as const)
+    await page.evaluate((a) => window.__HEA_DEBUG__.harness!.castBoss(a), attack);
+  await step(page, 0.3);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.attacksFired).toEqual({ fire: 0, missile: 0, hammer: 0 });
+  expect(d.blockedCasts).toBeGreaterThanOrEqual(3);
+  await scenario(page, 'sight-thin');
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.harness!.lane('fire').mode)).toBe(
+    'blocked',
+  );
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.harness!.lane('hammer').mode)).toBe(
+    'breach',
+  );
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('hammer'));
+  await step(page, 0.6);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.attacksFired.hammer).toBe(1);
+  expect(d.heavyPenetrations.length).toBeGreaterThan(0);
+  await scenario(page, 'sight-live');
+  const before = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition;
+  await step(page, 1);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.bossPosition).not.toEqual(before);
+  expect(d.bossDecisions).toBeGreaterThan(1);
+});
+
+test('a warmed fire gate cannot shoot after the player moves behind a wall', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'flight');
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('fire'));
+  await step(page, 0.03);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).pendingFire).toBe(1);
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([-4, 6, 12], [-27, 6, 12]));
+  await step(page, 0.3);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.pendingFire).toBe(0);
+  expect(d.attacksFired.fire).toBe(0);
+});
+
+test('heavy contact holds a little longer then instantly launches both actors at high speed', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'player-air');
+  await step(page, 0.02);
+  const p = (await state(page)).position;
+  await step(page, 0.09);
+  expect((await state(page)).position).toEqual(p);
+  await step(page, 0.1);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(Math.hypot(...d.playerVelocity)).toBeGreaterThan(100);
+  expect((await state(page)).position.z).toBeLessThan(p.z - 5);
+  await scenario(page, 'nova-air');
+  await page.locator('#touch-fire').tap();
+  await step(page, 0.008);
+  const boss = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition;
+  await step(page, 0.11);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition).toEqual(
+    boss,
+  );
+  await step(page, 0.1);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(Math.hypot(...d.bossVelocity)).toBeGreaterThan(100);
+  expect(d.bossPosition[2]).toBeLessThan(boss[2] - 5);
 });

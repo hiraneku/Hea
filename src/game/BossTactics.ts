@@ -22,6 +22,13 @@ export class BossTactics {
     this.direction = 1;
     this.maneuver = 'strafe';
   }
+  seekSight(goal: Vector3, pattern: number) {
+    this.goal.copy(goal);
+    this.maneuver = 'flank';
+    this.remaining = 1.4;
+    this.lastPattern = pattern;
+    this.decisions++;
+  }
   displaced(position: Vector3, player: Vector3) {
     this.choose(position, player, 'recover');
     // Recover near the actual post-impact altitude, rather than snapping above the player.
@@ -97,24 +104,22 @@ export class BossTactics {
   }
 }
 
-/** Shuffled cardinal bags ensure all four sides appear, without a repeating L/R/U/D loop. */
+/** Successive packets sweep a tight arc around the frontal glyph, as in reference2. */
 export function fireGateOffset(index: number, pattern: number): { local: Vector3; side: number } {
-  const random = seededRandom(9001 + pattern * 317 + Math.floor(index / 4) * 71),
-    bag = [0, 1, 2, 3];
-  for (let i = 3; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1));
-    [bag[i], bag[j]] = [bag[j], bag[i]];
-  }
-  const side = bag[index % 4],
-    cardinal = [0, Math.PI, Math.PI / 2, -Math.PI / 2][side];
-  const angle = cardinal + (random() - 0.5) * 0.34,
-    radius = 2.4 + random() * 0.65;
+  const angles = [
+    Math.PI * 0.72,
+    -Math.PI * 0.22,
+    Math.PI * 0.22,
+    -Math.PI * 0.72,
+    Math.PI * 0.5,
+    0,
+    -Math.PI * 0.5,
+    Math.PI,
+  ];
+  const angle = angles[(index + pattern) % angles.length],
+    radius = 1.75 + (index % 3) * 0.12;
   return {
-    local: new Vector3(
-      Math.cos(angle) * radius,
-      0.1 + Math.sin(angle) * radius,
-      1 + random() * 0.25,
-    ),
-    side,
+    local: new Vector3(Math.cos(angle) * radius, 0.1 + Math.sin(angle) * radius, 1.2),
+    side: index % 4,
   };
 }
