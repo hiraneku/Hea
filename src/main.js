@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { createImpactFrameSystem } from './impactFrames.js';
 import './style.css';
 
 const $ = (selector) => document.querySelector(selector);
@@ -23,6 +24,12 @@ scene.fog = new THREE.Fog(0x91ced9, 22, 67);
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.08, 110);
 camera.rotation.order = 'YXZ';
 scene.add(camera);
+
+// Anime impact frames: post-processing pass (visual only, no gameplay hooks).
+const impactFrames = createImpactFrameSystem(renderer);
+function triggerImpactFrame(options) { return impactFrames.trigger(options, camera); }
+window.triggerImpactFrame = triggerImpactFrame;
+window.impactFrameSettings = impactFrames.settings;
 
 const clock = new THREE.Clock();
 const raycaster = new THREE.Raycaster();
@@ -1500,6 +1507,14 @@ function updateEffects(dt, now) {
     pp.mesh.rotation.x += dt * 9;
     const target = enemy.group.position.clone().add(new THREE.Vector3(0, 2.2, 0));
     if (enemy.group.visible && pp.mesh.position.distanceTo(target) < 1.15) {
+      const preHp = enemy.hp;
+      const fDmg = FORMULAS[pp.formula]?.dmg || 10;
+      triggerImpactFrame({
+        intensity: preHp <= fDmg ? 1 : fDmg >= 20 ? 0.85 : fDmg >= 13 ? 0.6 : 0.4,
+        position: pp.mesh.position.clone(),
+        style: preHp <= fDmg ? 'alternating' : fDmg >= 20 ? 'silhouette' : 'radial',
+        duration: preHp <= fDmg ? 6 : 3,
+      });
       hitEnemy(pp.formula, pp.mesh.position.clone());
       scene.remove(pp.mesh);
       playerProjectiles.splice(i, 1);
@@ -1622,7 +1637,7 @@ function animate() {
   const dt = rawDt * (synthesisOpen ? 0.12 : 1);
   const now = performance.now() / 1000;
   trackPerformance(rawDt);
-  if (paused) { renderer.render(scene, camera); return; }
+  if (paused) { impactFrames.render(scene, camera); return; }
   if (gameState === 'menu') updateMenuCamera(now);
   else {
     updatePlayer(dt, now);
@@ -1632,7 +1647,7 @@ function animate() {
     updateCompass();
     updateEyes(dt, now);
   }
-  renderer.render(scene, camera);
+  impactFrames.render(scene, camera);
 }
 animate();
 
@@ -1671,8 +1686,15 @@ function bellSound() {
 }
 
 // Desktop input.
+let impactTestIndex = 0;
 addEventListener('keydown', (event) => {
   keys.add(event.code);
+  if (event.code === 'KeyI' && !event.repeat) {
+    const styles = ['radial', 'invert', 'silhouette', 'alternating'];
+    const style = styles[impactTestIndex++ % styles.length];
+    triggerImpactFrame({ intensity: 0.9, position: enemy.group.position.clone().add(new THREE.Vector3(0, 2.2, 0)), style, duration: style === 'alternating' ? 6 : 3 });
+    showToast(`Uji impact frame: ${style} (tekan I lagi untuk gaya berikutnya)`, 1400);
+  }
   if (event.repeat) return;
   if (event.code === 'KeyQ') toggleAppraisal();
   if (event.code === 'KeyE') toggleFutureSight();
@@ -1847,6 +1869,7 @@ function fitViewport() {
   camera.updateProjectionMatrix();
   renderer.setPixelRatio(Math.min(devicePixelRatio, isTouch ? 1.35 : 1.8));
   renderer.setSize(w, h);
+  impactFrames.setSize(w, h, renderer.getPixelRatio());
 }
 addEventListener('resize', fitViewport);
 addEventListener('orientationchange', () => { setTimeout(fitViewport, 60); setTimeout(fitViewport, 350); });

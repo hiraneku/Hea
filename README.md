@@ -37,6 +37,19 @@ Alur: dekati roh → **AMATI** saat ia bereaksi → gunakan **UJI** (berpura-pur
 - **Checkpoint otomatis** di `localStorage`, 3 interpretasi, 3 ending berbeda.
 - **Siap install sebagai PWA** (`manifest.webmanifest`, mode fullscreen landscape) — jembatan menuju aplikasi.
 
+## 💥 Anime Impact Frames (Playtest 0.3.2)
+
+Efek impact frame ala anime (hitam-putih ekstrem, garis radial bergerigi, siluet kontras tinggi) diimplementasikan sebagai **post-processing shader pass** di `src/impactFrames.js` — scene 3D dirender ke render target lalu diproses shader prosedural; bukan gambar tempelan dan tidak mengubah mekanik combat apa pun.
+
+```js
+triggerImpactFrame({ intensity: 0.9, position, direction, style: 'radial', duration: 3 });
+```
+
+- `style`: `'radial'` | `'invert'` | `'silhouette'` | `'alternating'` · `duration` dalam frame (default 2–3, cinematic 6)
+- Preset: `impactFrames.presets.subtle / strong / cinematic` · Pengaman: `window.impactFrameSettings = { enabled, reducedFlash, intensityScale }`
+- Uji cepat: tekan **`I`** di desktop untuk memicu berganti gaya di posisi roh; serangan sihir yang mengenai roh juga memicu otomatis sesuai kekuatannya.
+- Di GitHub Pages, shader berjalan di GPU pengunjung; perangkat sangat lemah dapat menurunkan kualitas via `reducedFlash` atau menurunkan `intensityScale`.
+
 ## 🛠️ Menjalankan lokal
 
 ```bash
