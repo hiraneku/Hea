@@ -191,6 +191,7 @@ function createWorld() {
   shrine.add(seal);
   shrine.position.set(0, 0, -17.5);
   world.add(shrine);
+  colliders.push({ x: 0, z: -17.5, r: 1.0 }); // kuil = permukaan tabrakan knockback
 }
 
 // Village dressing: fences along the path, flowers, rocks and warm lanterns.
@@ -332,6 +333,7 @@ function createBell(x, z) {
   bell.userData.body = bellBody;
   bell.position.set(x, 0, z);
   world.add(bell);
+  colliders.push({ x, z, r: 1.05 });
 }
 
 function createField() {
@@ -415,6 +417,14 @@ const enemy = {
   attackTimer: 2.1,
   hp: 120,
   maxHp: 120,
+  kbVel: null,
+  kbY: 0,
+  kbVy: 0,
+  kbActive: false,
+  kbWallHitDone: false,
+  kbStaggerUntil: 0,
+  reactUntil: 0,
+  reactPower: 0,
   vel: null,
   lastPos: null,
 };
@@ -461,6 +471,7 @@ function createEnemy() {
   scene.add(g);
 }
 createEnemy();
+enemy.kbVel = new THREE.Vector3();
 
 // Bayangan masa depan (Future Sight): ghost musuh + garis lintasan proyektil.
 const fsGhost = new THREE.Group();
@@ -623,6 +634,18 @@ const FORMULAS = {
   badaiJarum: { name: 'Badai Jarum', cost: 20, cd: 1.3, dmg: 15, speed: 23, color: 0xd8ffd8, kind: 'knock' },
   perisaiDuri: { name: 'Perisai Berduri', cost: 22, cd: 7, dmg: 0, color: 0xa8f0d8, kind: 'shield' },
 };
+export const KNOCKBACK_CONFIG = {
+  lightImpulse: 1.7, mediumImpulse: 3.4, heavyImpulse: 5.6, launchImpulse: 9.0,
+  launchVertical: 4.2, maxSpeed: 11,
+  dampingAir: 1.6, dampingGround: 3.0, gravity: 20,
+  wallImpactSpeed: 4.2,      // kecepatan menabrak minimum agar jadi wall impact
+  wallRecoil: 2.4, wallRecoilPerSpeed: 0.18,
+  staggerLight: 0.1, staggerMedium: 0.25, staggerHeavy: 0.5, staggerWall: 0.85,
+  enemyRadius: 0.85,
+};
+window.KNOCKBACK_CONFIG = KNOCKBACK_CONFIG;
+const wallMarks = [];
+
 const RECIPES = {
   'cahaya+proyektilRoh': 'jarumCahaya',
   'angin+proyektilRoh': 'badaiJarum',
@@ -956,6 +979,10 @@ function loseClarity() {
     player.pdCharges = 3;
     enemy.hp = enemy.maxHp;
     enemyBroken = false;
+    enemy.kbActive = false;
+    enemy.kbVel.set(0, 0, 0);
+    enemy.kbY = 0;
+    enemy.group.rotation.x = 0;
     updateResourceUI();
     player.invulnerableUntil = performance.now() / 1000 + 2;
     enemy.group.position.copy(enemy.anchor);
@@ -1090,26 +1117,57 @@ function castSelected() {
   spawnBurst(proj.position, f.color, 5, 0.7);
 }
 
-function hitEnemy(formulaKey, atPos) {
+function hitEnemy(formulaKey, atPos, dirVel = null) {
   if (enemyBroken || enemy.resolved) return;
   const f = FORMULAS[formulaKey];
   const now = performance.now() / 1000;
   let dmg = f.dmg;
-  if (now < enemy.stunnedUntil && archive.mechanism >= 100) { dmg *= 1.8; setPrompt('KELEMAHAN TERKENA!'); setTimeout(() => setPrompt(''), 700); }
+  const weaknessHit = now < enemy.stunnedUntil && archive.mechanism >= 100;
+  if (weaknessHit) { dmg *= 1.8; setPrompt('KELEMAHAN TERKENA!'); setTimeout(() => setPrompt(''), 700); }
   enemy.hp = Math.max(0, enemy.hp - dmg);
   spawnBurst(atPos, f.color, 16, 2);
   tone(180, .1, 'sawtooth', .04);
-  if (f.kind === 'knock') {
-    tempV.copy(enemy.group.position).sub(player.position).setY(0).normalize();
-    enemy.group.position.addScaledVector(tempV, 1.1);
-    enemy.attackTimer += 1.4;
-  }
+  applyHitReaction(formulaKey, dmg, dirVel, weaknessHit, now);
   updateResourceUI();
   if (enemy.hp <= 0) breakMechanism(now);
 }
 
+// Reaksi kena: flinch -> recoil -> knockback -> launch, sesuai kekuatan serangan.
+function applyHitReaction(formulaKey, dmg, dirVel, weaknessHit, now) {
+  const cfg = KNOCKBACK_CONFIG;
+  const f = FORMULAS[formulaKey];
+  if (!f || f.dmg <= 0) return;
+  const dir = new THREE.Vector3();
+  if (dirVel) dir.copy(dirVel).setY(0);
+  if (dir.lengthSq() < 0.01) dir.copy(enemy.group.position).sub(player.position).setY(0);
+  dir.normalize();
+
+  let tier = 'light';
+  if ((weaknessHit && dmg >= 24) || dmg >= 30) tier = 'launch';
+  else if (f.kind === 'knock' || dmg >= 20) tier = 'heavy';
+  else if (dmg >= 12) tier = 'medium';
+
+  const impulse = tier === 'launch' ? cfg.launchImpulse : tier === 'heavy' ? cfg.heavyImpulse : tier === 'medium' ? cfg.mediumImpulse : cfg.lightImpulse;
+  enemy.kbVel.addScaledVector(dir, impulse);
+  if (enemy.kbVel.length() > cfg.maxSpeed) enemy.kbVel.setLength(cfg.maxSpeed);
+  if (tier === 'launch') enemy.kbVy = Math.max(enemy.kbVy, cfg.launchVertical);
+  enemy.kbActive = true;
+  enemy.kbWallHitDone = false;
+  enemy.reactUntil = now + (tier === 'launch' ? 0.7 : tier === 'heavy' ? 0.5 : tier === 'medium' ? 0.35 : 0.22);
+  enemy.reactPower = tier === 'launch' ? 1 : tier === 'heavy' ? 0.75 : tier === 'medium' ? 0.45 : 0.2;
+  const stagger = tier === 'launch' || tier === 'heavy' ? cfg.staggerHeavy : tier === 'medium' ? cfg.staggerMedium : cfg.staggerLight;
+  enemy.kbStaggerUntil = Math.max(enemy.kbStaggerUntil, now + stagger);
+  enemy.attackTimer += tier === 'heavy' || tier === 'launch' ? 1.4 : tier === 'medium' ? 0.8 : 0.25;
+  if (tier !== 'light') setPrompt(tier === 'launch' ? 'TERLONTAR!' : tier === 'heavy' ? 'HANTAMAN KERAS' : '');
+  if (tier !== 'light') setTimeout(() => setPrompt(''), 650);
+}
+
 function breakMechanism(now) {
   enemyBroken = true;
+  enemy.kbActive = false;
+  enemy.kbVel.set(0, 0, 0);
+  enemy.kbY = 0;
+  enemy.group.rotation.x = 0;
   enemy.revealed = true;
   futureSightOn = false;
   archive.identity = 100;
@@ -1407,6 +1465,118 @@ function updatePlayer(dt, now) {
   if (player.saveTimer > 6) { player.saveTimer = 0; saveCheckpoint(); }
 }
 
+// --- Knockback controller: momentum, sub-step anti-tunneling, dinding nyata ---
+function onWallImpact(contact, normal, speed, now) {
+  const cfg = KNOCKBACK_CONFIG;
+  enemy.kbWallHitDone = true;
+  const n = normal.clone();
+  const into = -enemy.kbVel.dot(n);
+  const tangential = enemy.kbVel.clone().addScaledVector(n, into); // vel - (vel.n)n  (into = -vel.n)
+  enemy.kbVel.copy(tangential.multiplyScalar(0.35)).addScaledVector(n, cfg.wallRecoil + speed * cfg.wallRecoilPerSpeed);
+  enemy.kbStaggerUntil = Math.max(enemy.kbStaggerUntil, now + cfg.staggerWall);
+  enemy.reactUntil = now + 0.6;
+  enemy.reactPower = 1;
+  spawnWallImpact(contact, n, speed);
+  triggerImpactFrame({
+    intensity: THREE.MathUtils.clamp(0.45 + speed * 0.055, 0.5, 0.95),
+    position: contact.clone(),
+    direction: n.clone(),
+    style: speed > 7 ? 'silhouette' : 'radial',
+    duration: speed > 7 ? 4 : 3,
+  });
+  tone(70, .25, 'sawtooth', .06);
+  setPrompt('TABRAKAN DINDING!');
+  setTimeout(() => setPrompt(''), 800);
+}
+
+function spawnWallImpact(contact, normal, speed) {
+  spawnBurst(contact, 0xffffff, Math.round(10 + speed * 2), 2.4);
+  spawnBurst(contact, 0x21333a, Math.round(8 + speed), 1.8);
+  const groundRing = contact.clone(); groundRing.y = 0.09;
+  spawnRing(groundRing, 0xffffff, 3 + speed * 0.35);
+  // Retakan singkat yang menempel mengikuti arah normal permukaan.
+  const crackMat = new THREE.MeshBasicMaterial({ color: 0x14202a, transparent: true, opacity: 0.85, depthWrite: false });
+  const crack = new THREE.Group();
+  for (let i = 0; i < 5; i++) {
+    const shard = new THREE.Mesh(new THREE.BoxGeometry(0.34 + (i % 3) * 0.16, 0.028, 0.012), crackMat);
+    shard.position.set((seeded(i * 3.3, -0.2, 0.2)), seeded(i * 7.7, -0.25, 0.3), 0);
+    shard.rotation.z = seeded(i * 5.1, -1.1, 1.1);
+    crack.add(shard);
+  }
+  crack.position.copy(contact);
+  crack.lookAt(contact.clone().add(normal));
+  scene.add(crack);
+  wallMarks.push({ group: crack, mat: crackMat, age: 0 });
+}
+
+function resolveKnockbackWalls(now) {
+  const cfg = KNOCKBACK_CONFIG;
+  const pos = enemy.group.position;
+  const r = cfg.enemyRadius;
+  // Batas dunia (dinding tak terlihat di tepi arena)
+  const bounds = [
+    { hit: pos.x > 30 - r, nx: -1, nz: 0, cx: 30, cz: pos.z },
+    { hit: pos.x < -30 + r, nx: 1, nz: 0, cx: -30, cz: pos.z },
+    { hit: pos.z > 27 - r, nx: 0, nz: -1, cx: pos.x, cz: 27 },
+    { hit: pos.z < -29 + r, nx: 0, nz: 1, cx: pos.x, cz: -29 },
+  ];
+  for (const b of bounds) {
+    if (!b.hit) continue;
+    if (b.nx < 0) pos.x = 30 - r; else if (b.nx > 0) pos.x = -30 + r;
+    if (b.nz < 0) pos.z = 27 - r; else if (b.nz > 0) pos.z = -29 + r;
+    const normal = new THREE.Vector3(b.nx, 0, b.nz);
+    const speed = -enemy.kbVel.dot(normal);
+    const contact = new THREE.Vector3(b.cx, 1.6, b.cz);
+    if (speed > cfg.wallImpactSpeed && !enemy.kbWallHitDone) onWallImpact(contact, normal, speed, now);
+    else if (speed > 0) enemy.kbVel.addScaledVector(normal, speed); // hilangkan komponen menembus
+  }
+  // Collider lingkaran rumah/pohon yang sama dengan yang dipakai pemain
+  for (const col of colliders) {
+    const dx = pos.x - col.x;
+    const dz = pos.z - col.z;
+    const dist = Math.hypot(dx, dz);
+    const min = col.r + r;
+    if (dist >= min || dist < 0.0001) continue;
+    const normal = new THREE.Vector3(dx / dist, 0, dz / dist);
+    pos.x = col.x + normal.x * min;
+    pos.z = col.z + normal.z * min;
+    const speed = -enemy.kbVel.dot(normal);
+    const contact = new THREE.Vector3(col.x + normal.x * col.r, 1.6, col.z + normal.z * col.r);
+    if (speed > cfg.wallImpactSpeed && !enemy.kbWallHitDone) onWallImpact(contact, normal, speed, now);
+    else if (speed > 0) enemy.kbVel.addScaledVector(normal, speed);
+  }
+}
+
+function updateKnockback(dt, now) {
+  const cfg = KNOCKBACK_CONFIG;
+  const pos = enemy.group.position;
+  const speed = enemy.kbVel.length();
+  const steps = Math.max(1, Math.ceil((speed * dt) / 0.3)); // anti-tunneling
+  const sdt = dt / steps;
+  for (let i = 0; i < steps; i++) {
+    pos.addScaledVector(enemy.kbVel, sdt);
+    resolveKnockbackWalls(now);
+  }
+  // Lontaran vertikal sederhana di atas bob normal
+  if (enemy.kbY > 0 || enemy.kbVy > 0) {
+    enemy.kbVy -= cfg.gravity * dt;
+    enemy.kbY = Math.max(0, enemy.kbY + enemy.kbVy * dt);
+    if (enemy.kbY === 0) enemy.kbVy = 0;
+  }
+  pos.y = Math.sin(now * 2.1) * 0.055 + enemy.kbY;
+  const damping = enemy.kbY > 0 ? cfg.dampingAir : cfg.dampingGround;
+  enemy.kbVel.multiplyScalar(Math.exp(-damping * dt));
+  // Reaksi prosedural: tubuh condong & kepala tersentak mengikuti kekuatan
+  const react = now < enemy.reactUntil ? enemy.reactPower : 0;
+  enemy.group.rotation.x = -Math.min(0.4, enemy.kbVel.length() * 0.035) - react * 0.12;
+  if (enemy.head) enemy.head.rotation.x = -react * 0.55;
+  if (enemy.kbVel.length() < 0.45 && enemy.kbY === 0) {
+    enemy.kbActive = false;
+    enemy.kbVel.set(0, 0, 0);
+    enemy.group.rotation.x = 0;
+  }
+}
+
 function updateEnemy(dt, now) {
   const distance = horizontalDistance(player.position, enemy.group.position);
   const aimed = isAimingAtEnemy(.79);
@@ -1439,6 +1609,7 @@ function updateEnemy(dt, now) {
 
   const flatTarget = tempV.set(player.position.x, enemy.group.position.y, player.position.z);
   enemy.group.lookAt(flatTarget);
+  if (gameState === 'playing' && !modalOpen && enemy.kbActive && !enemyBroken) updateKnockback(dt, now);
 
   if (gameState !== 'playing' || modalOpen || !enemy.active || enemyBroken) return;
   if (now < enemy.stunnedUntil) {
@@ -1446,8 +1617,9 @@ function updateEnemy(dt, now) {
     $('#enemyState').textContent = 'Mengingat sesuatu';
     return;
   }
-  enemy.head.rotation.x = 0;
-  $('#enemyState').textContent = enemyBroken ? 'Mekanisme lumpuh' : appraisalOn ? archiveTierName(Math.max(archive.mechanism, archive.formula)) : 'Tidak terbaca';
+  if (now >= enemy.reactUntil && enemy.head) enemy.head.rotation.x = 0;
+  $('#enemyState').textContent = enemyBroken ? 'Mekanisme lumpuh' : now < enemy.kbStaggerUntil ? 'Terpental…' : appraisalOn ? archiveTierName(Math.max(archive.mechanism, archive.formula)) : 'Tidak terbaca';
+  if (enemy.kbActive || now < enemy.kbStaggerUntil) return; // knockback/stagger menguasai tubuh; serangan berhenti dulu
 
   if (enemy.rushing) {
     tempV.copy(player.position).sub(enemy.group.position).setY(0);
@@ -1490,6 +1662,7 @@ function updateEffects(dt, now) {
         projectiles.splice(i, 1);
         continue;
       }
+      player.dodgeVelocity.addScaledVector(p.velocity.clone().setY(0).normalize(), 2.0);
       damage(18);
       spawnBurst(p.mesh.position, 0xff6259, 14, 1.8);
       scene.remove(p.mesh);
@@ -1515,7 +1688,7 @@ function updateEffects(dt, now) {
         style: preHp <= fDmg ? 'alternating' : fDmg >= 20 ? 'silhouette' : 'radial',
         duration: preHp <= fDmg ? 6 : 3,
       });
-      hitEnemy(pp.formula, pp.mesh.position.clone());
+      hitEnemy(pp.formula, pp.mesh.position.clone(), pp.velocity.clone());
       scene.remove(pp.mesh);
       playerProjectiles.splice(i, 1);
       continue;
@@ -1556,6 +1729,13 @@ function updateEffects(dt, now) {
       ring.mesh.material.dispose();
       rings.splice(i, 1);
     }
+  }
+  for (let i = wallMarks.length - 1; i >= 0; i--) {
+    const m = wallMarks[i];
+    m.age += dt;
+    m.mat.opacity = Math.max(0, 0.85 * (1 - m.age / 0.9));
+    m.group.scale.setScalar(1 + m.age * 0.7);
+    if (m.age > 0.9) { scene.remove(m.group); m.mat.dispose(); wallMarks.splice(i, 1); }
   }
   clouds.forEach((cloud) => {
     cloud.position.x += dt * cloud.userData.speed;
