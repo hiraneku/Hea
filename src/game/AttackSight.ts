@@ -20,7 +20,15 @@ export function assessFiringLane(
   if (distance < 0.001) return { mode: 'blocked', walls: [], thickness: 0 };
   ray.divideScalar(distance);
   const radius =
-    PROJECTILES[attack === 'missiles' ? 'missile' : attack === 'fire' ? 'fire' : 'hammer'].radius;
+    PROJECTILES[
+      attack === 'missiles'
+        ? 'missile'
+        : attack === 'fire'
+          ? 'fire'
+          : attack === 'vortex'
+            ? 'vortex'
+            : 'hammer'
+    ].radius;
   const limit = Math.max(0, distance - radius - 0.72),
     groups = new Map<number, { enter: number; exit: number }[]>();
   for (const box of obstacles) {
@@ -34,7 +42,8 @@ export function assessFiringLane(
       top: box.top + radius,
     };
     if (!rayBoxSpan(from, ray, padded, limit)) continue;
-    if (attack === 'fire' || box.owner === undefined)
+    // Bolts and the vortex seed break on any wall; only missiles and the hammer chew through.
+    if (attack === 'fire' || attack === 'vortex' || box.owner === undefined)
       return { mode: 'blocked', walls: [], thickness: Infinity };
     const span = rayBoxSpan(from, ray, box, limit);
     const list = groups.get(box.owner) ?? [];

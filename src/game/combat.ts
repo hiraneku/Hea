@@ -21,9 +21,15 @@ export const DUEL = {
    * Hits one patch can take before it shatters, and the hole that leaves in the shell: for
    * `shieldGap` seconds nothing is intercepted within `shieldGapDegrees` of that direction.
    */
-  shieldPatchHits: 3,
+  shieldPatchHits: 5,
   shieldGap: 1,
   shieldGapDegrees: 30,
+  /** Solar vortex: how long the well pulls before it detonates, its reach and peak pull. */
+  vortexPull: 1.7,
+  vortexRadius: 22,
+  vortexStrength: 30,
+  vortexCoreRadius: 3.2,
+  vortexEmbers: 14,
   novaLaunch: 112,
   /** Heavy contact: a dead freeze, then a slow-motion release that ramps back to real time. */
   heavyFreeze: 0.15,
@@ -82,7 +88,8 @@ export function threatTime(
   return fraction === null ? null : fraction * horizon;
 }
 
-export type AttackId = 'fire' | 'missiles' | 'hammer';
+export type AttackId = 'fire' | 'missiles' | 'hammer' | 'vortex';
+export const ATTACK_ORDER: readonly AttackId[] = ['fire', 'missiles', 'hammer', 'vortex'];
 export type AttackStage = 'telegraph' | 'attack' | 'recover';
 export const ATTACKS = {
   fire: {
@@ -112,6 +119,20 @@ export const ATTACKS = {
     shots: 1,
     interval: 0.15,
   },
+  /**
+   * A seed flies to the player and anchors as a gravity well: it drags the body (and every
+   * loose particle) inwards for `DUEL.vortexPull` seconds, then detonates into a flat ring of
+   * embers — fleeing straight away turns your blind rear to the ring; climbing or diving clears it.
+   */
+  vortex: {
+    label: 'PUSARAN SURYA',
+    warning: 'TARIKAN GRAVITASI',
+    tell: 1.25,
+    duration: 2.9,
+    recovery: 1.3,
+    shots: 1,
+    interval: 0.1,
+  },
 } as const;
 export interface AttackCommand {
   type: 'tell' | 'shot';
@@ -121,7 +142,7 @@ export interface AttackCommand {
 
 /** A deterministic state machine, not random per-frame attacks. */
 export class BossDirector {
-  private sequence: AttackId[] = ['fire', 'missiles', 'hammer'];
+  private sequence: AttackId[] = [...ATTACK_ORDER];
   private index = 0;
   private fired = 0;
   private opening = true;
@@ -130,7 +151,7 @@ export class BossDirector {
   elapsed = 0;
   reset() {
     this.index = this.fired = this.elapsed = 0;
-    this.sequence = ['fire', 'missiles', 'hammer'];
+    this.sequence = [...ATTACK_ORDER];
     this.stage = 'telegraph';
     this.opening = true;
     this.override = null;
@@ -184,10 +205,10 @@ export class BossDirector {
           const previous = this.attack;
           this.override = null;
           this.index++;
-          if (this.index % 3 === 0) {
+          if (this.index % ATTACK_ORDER.length === 0) {
             const random = seededRandom(this.index * 997 + 71);
-            this.sequence = ['fire', 'missiles', 'hammer'];
-            for (let i = 2; i > 0; i--) {
+            this.sequence = [...ATTACK_ORDER];
+            for (let i = this.sequence.length - 1; i > 0; i--) {
               const j = Math.floor(random() * (i + 1));
               [this.sequence[i], this.sequence[j]] = [this.sequence[j], this.sequence[i]];
             }
@@ -230,7 +251,7 @@ export function rangeCorrection(distance: number): number {
   return clamp((distance - DUEL.preferredRange) * 0.8, -2.5, 2.5);
 }
 
-export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer';
+export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer' | 'vortex';
 /** The same radius drives the visible core, shield size and swept collision. */
 export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, slow: 0, stagger: 0 },
@@ -245,7 +266,21 @@ export const PROJECTILES = {
     slow: DUEL.heavySlow,
     stagger: 1.5,
   },
+  /** The vortex seed: harmless in flight, but its core detonation is a heavy contact. */
+  vortex: {
+    radius: 0.55,
+    speed: 26,
+    life: 3,
+    launch: 80,
+    pause: DUEL.heavyFreeze,
+    slow: DUEL.heavySlow,
+    stagger: 1.4,
+  },
 } as const;
+/** How far the visible head of a projectile reaches ahead of its centre (fire is a long bolt). */
+export function projectileNose(kind: ProjectileKind): number {
+  return kind === 'fire' ? 0.36 : PROJECTILES[kind].radius;
+}
 
 /** Front and peripheral vision in 3D; the rear cone is a genuine blind spot, even while active. */
 export function shieldCovers(facing: Vector3, toProjectile: Vector3): boolean {
@@ -271,10 +306,16 @@ export interface ShieldPatch {
   life: number;
   serial: number;
   hits: number;
+  /** Visual scale of the polyhex, and the lattice it was fitted into (see ShieldLattice). */
+  scale: number;
+  cluster: number;
+  anchor: { q: number; r: number };
 }
 /**
- * A patch that is still standing stops later shots travelling the same lane: the swept
- * projectile crosses the patch AND approaches from its front face. Rear/edge passes ignore it.
+ * A patch that is still standing stops later shots travelling the same lane. The patch is a
+ * disc: the shot connects when its visible head reaches the plane inside the disc, approaching
+ * from the front face — not metres early on a bounding sphere. Rear/edge passes ignore it.
+ * Returns the fraction of `start → end` at which the head touches the surface.
  */
 export function patchBlocks(
   patch: Pick<ShieldPatch, 'position' | 'normal' | 'radius'>,
@@ -282,19 +323,26 @@ export function patchBlocks(
   end: Point3,
   velocity: Point3,
   projectileRadius: number,
+  nose = projectileRadius,
 ): number | null {
   const speed = Math.hypot(velocity.x, velocity.y, velocity.z);
   if (speed < 1e-6) return null;
-  const approach =
-    (velocity.x * patch.normal[0] + velocity.y * patch.normal[1] + velocity.z * patch.normal[2]) /
-    speed;
+  const [nx, ny, nz] = patch.normal;
+  const approach = (velocity.x * nx + velocity.y * ny + velocity.z * nz) / speed;
   if (approach > -0.25) return null;
-  return segmentSphere(
-    start,
-    end,
-    { x: patch.position[0], y: patch.position[1], z: patch.position[2] },
-    patch.radius + projectileRadius,
-  );
+  const [px, py, pz] = patch.position;
+  // Signed heights of the head above the patch plane at both ends of the step.
+  const h0 = (start.x - px) * nx + (start.y - py) * ny + (start.z - pz) * nz - nose,
+    h1 = (end.x - px) * nx + (end.y - py) * ny + (end.z - pz) * nz - nose;
+  if (h1 > 0) return null; // Still in front of the surface.
+  if (h0 < -projectileRadius * 2.5) return null; // Already well past it: never crossed here.
+  const t = h0 <= 0 ? 0 : h0 / (h0 - h1);
+  const cx = start.x + (end.x - start.x) * t - px,
+    cy = start.y + (end.y - start.y) * t - py,
+    cz = start.z + (end.z - start.z) * t - pz;
+  const along = cx * nx + cy * ny + cz * nz,
+    lateral = Math.sqrt(Math.max(0, cx * cx + cy * cy + cz * cz - along * along));
+  return lateral <= patch.radius + projectileRadius ? t : null;
 }
 
 /** Deterministic per-orb aim scatter: each seeker chases its own point around the player. */
@@ -415,5 +463,8 @@ export function shieldIntercept(
   const offset = relative.addScaledVector(velocity, time);
   if (offset.lengthSq() < 1e-6) offset.copy(projectileVelocity).negate().normalize();
   offset.clampLength(DUEL.shieldNear, DUEL.shieldReach);
-  return { time, offset, normal: projectileVelocity.clone().negate().normalize() };
+  // The body keeps moving during `time`: the shot crosses the shell at `point` in world space,
+  // which is where the patch must stand for the shot to actually arrive on it.
+  const point = center.clone().addScaledVector(playerVelocity, time).add(offset);
+  return { time, offset, point, normal: projectileVelocity.clone().negate().normalize() };
 }

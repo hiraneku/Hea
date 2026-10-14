@@ -1,53 +1,21 @@
 import * as THREE from 'three';
 import { seededRandom } from './math';
-import { makeShieldPatch, shieldPattern } from './ShieldVisual';
+import {
+  HEX_RADIUS,
+  cellPoint,
+  crackSegments,
+  hexPrismGeometry,
+  makeShieldPatch,
+  shieldPattern,
+  type HexCell,
+} from './ShieldVisual';
+import { FurrowTrail } from './Furrows';
+import { projectileNose, type ProjectileKind } from './combat';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const v1 = new THREE.Vector3();
 const v2 = new THREE.Vector3();
 const dummy = new THREE.Object3D();
-
-/** Soft, streaky scratch mark (alpha only), long axis along U, for skid decals. */
-export function skidMarkTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 32;
-  const c = canvas.getContext('2d')!;
-  c.clearRect(0, 0, 128, 32);
-  const random = seededRandom(7);
-  for (let i = 0; i < 9; i++) {
-    const y = 4 + random() * 24,
-      start = random() * 30,
-      end = 128 - random() * 30,
-      width = 0.8 + random() * 2.2;
-    const fade = c.createLinearGradient(start, 0, end, 0);
-    fade.addColorStop(0, 'rgba(0,0,0,0)');
-    fade.addColorStop(0.25, `rgba(0,0,0,${0.35 + random() * 0.45})`);
-    fade.addColorStop(0.75, `rgba(0,0,0,${0.35 + random() * 0.45})`);
-    fade.addColorStop(1, 'rgba(0,0,0,0)');
-    c.strokeStyle = fade;
-    c.lineWidth = width;
-    c.lineCap = 'round';
-    c.beginPath();
-    c.moveTo(start, y);
-    c.lineTo(end, y + (random() - 0.5) * 3);
-    c.stroke();
-  }
-  // A faint broad smear under the scratches so the mark reads from a distance too.
-  const smear = c.createRadialGradient(64, 16, 2, 64, 16, 62);
-  smear.addColorStop(0, 'rgba(0,0,0,0.35)');
-  smear.addColorStop(1, 'rgba(0,0,0,0)');
-  c.fillStyle = smear;
-  c.save();
-  c.scale(1, 0.3);
-  c.beginPath();
-  c.arc(64, 16 / 0.3, 62, 0, Math.PI * 2);
-  c.fill();
-  c.restore();
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.colorSpace = THREE.NoColorSpace;
-  return texture;
-}
 
 export function sigilTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -316,7 +284,22 @@ interface TimedEffect {
   grow: number;
   baseScale: number;
   spin: number;
+  /** Optional per-frame driver for effects with their own choreography (shards, remnants). */
+  animate?: (e: TimedEffect, progress: number, dt: number) => void;
 }
+interface Attractor {
+  center: THREE.Vector3;
+  radius: number;
+  strength: number;
+  swirl: number;
+}
+const IMPACT_TINT: Record<ProjectileKind, string> = {
+  player: '#ffd9a8',
+  fire: '#ffb169',
+  missile: '#ffd7a4',
+  hammer: '#fff4cf',
+  vortex: '#ff9c9c',
+};
 
 export class Effects {
   readonly sigilMap = sigilTexture();
@@ -331,28 +314,38 @@ export class Effects {
         serial: e.object.userData.serial as number,
         pattern: e.object.userData.pattern as string,
         cells: e.object.userData.count as number,
-        position: e.object.position.toArray(),
+        // The anchored world position: recoil is a cosmetic offset around it.
+        position: (
+          (e.object.userData.base as THREE.Vector3 | undefined) ?? e.object.position
+        ).toArray(),
         remaining: e.life,
         hits: (e.object.userData.hits ?? 0) as number,
+        shattered: !!e.object.userData.shattered,
       }));
   }
-  /** Live particle counts for diagnostics (skid trails, bursts, dust plumes). */
+  /** Live particle counts for diagnostics (skid trails, bursts, dust plumes, furrows). */
   get activity() {
     return {
       sparks: this.sparks.filter((p) => p.life > 0).length,
       dust: this.dustClouds.filter((p) => p.life > 0).length,
       skids: this.skidCalls,
-      marks: this.marks.filter((m) => m.life > 0).length,
+      furrow: this.furrows.count,
+      furrows: this.furrows.furrows,
+      clods: this.clods,
       airRecoveries: this.airRecoveries,
+      shieldImpacts: this.shieldImpacts,
+      shards: this.timed.filter((e) => e.object.userData.kind === 'shield-shards').length,
     };
   }
   private skidCalls = 0;
+  private clods = 0;
   private airRecoveries = 0;
-  private markMesh: THREE.InstancedMesh;
-  private markCapacity = 220;
-  private markCursor = 0;
-  private markAlpha: Float32Array;
-  private marks: { life: number; max: number }[] = [];
+  private shieldImpacts = 0;
+  private time = 0;
+  readonly furrows = new FurrowTrail();
+  private attractors: Attractor[] = [];
+  private readonly shardGeometry = hexPrismGeometry();
+  private readonly shardRim = new THREE.RingGeometry(HEX_RADIUS * 0.78, HEX_RADIUS, 6);
   private sparkMesh: THREE.Points;
   private rockMesh: THREE.InstancedMesh;
   private position: Float32Array;
@@ -441,47 +434,20 @@ export class Effects {
     scene.add(this.dustMesh);
     this.rockMesh = new THREE.InstancedMesh(
       new THREE.BoxGeometry(1, 1, 1),
-      new THREE.MeshStandardMaterial({ color: '#67696a', roughness: 1 }),
+      // White base: each instance carries its own colour (grey stone chips, brown earth clods).
+      new THREE.MeshStandardMaterial({ color: '#ffffff', roughness: 1 }),
       this.rockCapacity,
     );
     this.rockMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.rockMesh.frustumCulled = false;
+    // Per-instance colour lets the same pool serve grey stone chips and brown earth clods.
+    this.rockMesh.instanceColor = new THREE.InstancedBufferAttribute(
+      new Float32Array(this.rockCapacity * 3).fill(1),
+      3,
+    );
+    this.rockMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.rockMesh);
-    // Skid marks: flat scorch/scratch decals laid along a drag path, fading over several
-    // seconds — the lasting record of a slide once the dust has settled.
-    this.markAlpha = new Float32Array(this.markCapacity);
-    const markGeometry = new THREE.PlaneGeometry(1, 1);
-    markGeometry.setAttribute(
-      'aAlpha',
-      new THREE.InstancedBufferAttribute(this.markAlpha, 1).setUsage(THREE.DynamicDrawUsage),
-    );
-    this.markMesh = new THREE.InstancedMesh(
-      markGeometry,
-      new THREE.ShaderMaterial({
-        uniforms: { map: { value: skidMarkTexture() } },
-        vertexShader:
-          'attribute float aAlpha; varying vec2 vUv; varying float vAlpha; void main(){vUv=uv;vAlpha=aAlpha;gl_Position=projectionMatrix*modelViewMatrix*instanceMatrix*vec4(position,1.0);}',
-        fragmentShader:
-          'uniform sampler2D map; varying vec2 vUv; varying float vAlpha; void main(){float a=texture2D(map,vUv).a*vAlpha;if(a<0.01)discard;gl_FragColor=vec4(vec3(0.075,0.07,0.065),a);}',
-        transparent: true,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -2,
-        polygonOffsetUnits: -2,
-      }),
-      this.markCapacity,
-    );
-    this.markMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    this.markMesh.frustumCulled = false;
-    this.markMesh.renderOrder = -1;
-    for (let i = 0; i < this.markCapacity; i++) {
-      this.marks.push({ life: 0, max: 1 });
-      dummy.position.set(0, -1000, 0);
-      dummy.scale.setScalar(0);
-      dummy.updateMatrix();
-      this.markMesh.setMatrixAt(i, dummy.matrix);
-    }
-    scene.add(this.markMesh);
+    scene.add(this.furrows.mesh);
     for (let i = 0; i < this.capacity; i++)
       this.sparks.push({
         p: new THREE.Vector3(0, -1000, 0),
@@ -508,6 +474,73 @@ export class Effects {
   }
   setGroundSampler(sampler: (x: number, z: number) => number) {
     this.groundAt = sampler;
+    this.furrows.setGroundSampler(sampler);
+  }
+  /**
+   * A gravity well for loose matter: for this frame, sparks, dust and debris inside `radius`
+   * fall towards `center` (with a sideways swirl), so a vortex visibly drinks the arena.
+   */
+  attract(center: THREE.Vector3, radius: number, strength: number, swirl = 0.6) {
+    this.attractors.push({ center: center.clone(), radius, strength, swirl });
+  }
+  /** Embers born on a ring around a well and streaming inwards: the pull made visible. */
+  inflow(center: THREE.Vector3, radius: number, count: number, tint = '#ff9a5a') {
+    const color = new THREE.Color(tint);
+    const n = this.particleBudget < this.capacity ? Math.ceil(count * 0.5) : count;
+    for (let i = 0; i < n; i++) {
+      const p = this.sparks[this.cursor++ % this.particleBudget];
+      const direction = new THREE.Vector3(
+        Math.random() - 0.5,
+        (Math.random() - 0.5) * 0.7,
+        Math.random() - 0.5,
+      ).normalize();
+      p.p.copy(center).addScaledVector(direction, radius * (0.55 + Math.random() * 0.45));
+      // Inward with a sideways component, so the stream spirals in rather than falling straight.
+      const tangent = new THREE.Vector3(-direction.z, 0, direction.x);
+      p.v
+        .copy(direction)
+        .multiplyScalar(-radius * (0.8 + Math.random() * 0.5))
+        .addScaledVector(tangent, radius * (0.35 + Math.random() * 0.35));
+      p.color.copy(color);
+      p.life = p.max = 0.6 + Math.random() * 0.45;
+      p.size = 0.16 + Math.random() * 0.14;
+      p.gravity = 0;
+    }
+  }
+  /** The well bursting: a hot flash, a flat hexagonal shockwave and matter flung back out. */
+  detonate(at: THREE.Vector3, radius: number) {
+    const flash = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 20, 14),
+      new THREE.MeshBasicMaterial({
+        color: '#fff1d6',
+        transparent: true,
+        opacity: 0.9,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    flash.position.copy(at);
+    flash.scale.setScalar(0.6);
+    this.add(flash, 0.28, 9 / 0.28);
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.9, 1, 6),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color('#ff8c4a').multiplyScalar(2.2),
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    ring.position.copy(at);
+    ring.rotation.x = -Math.PI / 2;
+    ring.scale.setScalar(0.5);
+    this.add(ring, 0.55, radius / 0.55, 1.2);
+    this.burst(at, '#ffb378', 60, 11, 0.55, 3);
+    this.burst(at, '#ffffff', 20, 7, 0.4, 1);
+    this.dust(at, 18, 3);
+    this.attract(at, radius, -90, 0);
   }
   dust(at: THREE.Vector3, count = 12, radius = 1.5, force?: THREE.Vector3) {
     for (let i = 0; i < count; i++) {
@@ -527,13 +560,18 @@ export class Effects {
       p.life = p.max = 1.1 + Math.random();
     }
   }
-  block(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1, life = 1.5) {
+  /** The serial the next raised patch will get: lets placement be planned around its layout. */
+  get nextShieldSerial() {
+    return this.shieldSerial;
+  }
+  block(at: THREE.Vector3, orientation: THREE.Quaternion, scale = 1, life = 1.5) {
     const serial = this.shieldSerial++,
       patch = makeShieldPatch(serial);
     patch.position.copy(at);
-    patch.lookAt(at.clone().sub(incoming.clone().normalize()));
-    patch.rotateZ(((serial % 6) * Math.PI) / 3);
+    patch.quaternion.copy(orientation);
     patch.scale.setScalar(scale);
+    patch.userData.base = at.clone();
+    patch.userData.hits = 0;
     // This remains in WORLD space. It is a visual afterimage, never a moving player attachment.
     this.add(patch, life, 0, 0);
     this.burst(at, '#7af1ff', scale > 2 ? 26 : 12, 3, 0.24 * Math.sqrt(scale), 0.5);
@@ -545,32 +583,352 @@ export class Effects {
     );
   }
   /**
-   * A standing patch that stops another shot: its fade restarts, a ripple runs over the hex
-   * pieces and the glow steps up with every hit it has taken, so a patch under sustained fire
-   * visibly carries that load.
+   * A shot connecting with a standing patch. The projectile is not simply deleted: its body is
+   * crushed flat against the surface and fades, the strike splashes sideways across the plane,
+   * the patch is punched back on its normal and springs home, its fade restarts, and from the
+   * second hit on white cracks spread from the strike while the hex pieces glow brighter — so a
+   * patch under sustained fire visibly carries that load right up to the hit that breaks it.
    */
-  refreshEcho(serial: number, at: THREE.Vector3, scale = 1, hits = 2): boolean {
+  shieldImpact(
+    serial: number,
+    at: THREE.Vector3,
+    normal: THREE.Vector3,
+    kind: ProjectileKind,
+    scale = 1,
+    hits = 1,
+    remnant?: THREE.Object3D,
+  ): boolean {
+    this.shieldImpacts++;
+    const tint = IMPACT_TINT[kind],
+      size = Math.sqrt(scale) * (kind === 'hammer' ? 1.5 : 1);
+    if (remnant) this.crush(remnant, normal, kind, size);
     const echo = this.findEcho(serial);
+    const frame = echo
+      ? echo.object.getWorldQuaternion(new THREE.Quaternion())
+      : new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
+    this.splash(at, frame, tint, size);
+    const ex = new THREE.Vector3(1, 0, 0).applyQuaternion(frame),
+      ey = new THREE.Vector3(0, 1, 0).applyQuaternion(frame);
+    const sparks = kind === 'hammer' ? 26 : 14,
+      n = this.particleBudget < this.capacity ? Math.ceil(sparks * 0.6) : sparks;
+    for (let i = 0; i < n; i++) {
+      const p = this.sparks[this.cursor++ % this.particleBudget],
+        angle = Math.random() * Math.PI * 2,
+        speed = (2.5 + Math.random() * 5) * size;
+      p.p.copy(at).addScaledVector(normal, 0.03);
+      p.v
+        .copy(ex)
+        .multiplyScalar(Math.cos(angle) * speed)
+        .addScaledVector(ey, Math.sin(angle) * speed)
+        .addScaledVector(normal, 0.4 + Math.random() * 0.8);
+      p.color.set(i % 3 ? tint : '#ffffff');
+      p.life = p.max = 0.22 + Math.random() * 0.3;
+      p.size = (0.1 + Math.random() * 0.1) * size;
+      p.gravity = 2.5;
+    }
+    // A few slow licks crawl across the surface and rise: fire clinging to glass.
+    for (let i = 0; i < 4; i++) {
+      const p = this.sparks[this.cursor++ % this.particleBudget],
+        angle = Math.random() * Math.PI * 2;
+      p.p.copy(at).addScaledVector(normal, 0.04);
+      p.v
+        .copy(ex)
+        .multiplyScalar(Math.cos(angle) * 1.4 * size)
+        .addScaledVector(ey, Math.sin(angle) * 1.4 * size);
+      p.color.set(tint);
+      p.life = p.max = 0.45 + Math.random() * 0.3;
+      p.size = 0.22 * size;
+      p.gravity = -1.2;
+    }
     if (!echo) return false;
     echo.life = echo.max;
-    echo.object.userData.hits = hits;
-    echo.object.userData.ripple = 0.32;
+    const data = echo.object.userData;
+    data.hits = hits;
+    data.ripple = 0.32;
+    data.recoil = 0;
+    data.recoilStrength = (kind === 'hammer' ? 0.22 : 0.12) * scale;
+    data.recoilNormal = normal.clone();
     this.ripple(echo.object, at, scale, '#9cf6ff');
-    this.burst(at, '#9cf6ff', 10, 2.6, 0.2 * Math.sqrt(scale), 0.5);
+    if (hits >= 2) {
+      // Cracks live in patch-local space so they ride the recoil with the pieces.
+      const local = echo.object.worldToLocal(at.clone());
+      const lines = new THREE.LineSegments(
+        new THREE.BufferGeometry().setAttribute(
+          'position',
+          new THREE.Float32BufferAttribute(
+            crackSegments(local.x, local.y, 0.35 + hits * 0.08, serial * 31 + hits),
+            3,
+          ),
+        ),
+        new THREE.LineBasicMaterial({
+          color: '#ffffff',
+          transparent: true,
+          opacity: Math.min(1, 0.55 + hits * 0.1),
+          depthWrite: false,
+          toneMapped: false,
+        }),
+      );
+      lines.userData.baseOpacity = lines.material.opacity;
+      lines.userData.crack = true;
+      echo.object.add(lines);
+    }
     return true;
   }
-  /** The last hit a patch could take: a hard flash, a wide ripple and the pieces blowing out. */
+  /** The projectile's body flattening against the patch and fading — contact you can see. */
+  private crush(
+    remnant: THREE.Object3D,
+    normal: THREE.Vector3,
+    kind: ProjectileKind,
+    size: number,
+  ) {
+    remnant.traverse((o) => {
+      if (o instanceof THREE.Mesh) {
+        // Projectile materials and geometries are shared: fade a private copy, keep the mesh data.
+        const material = (o.material as THREE.Material).clone() as THREE.Material & {
+          opacity: number;
+        };
+        material.transparent = true;
+        material.depthWrite = false;
+        o.material = material;
+        o.userData.keepGeometry = true;
+      }
+    });
+    remnant.position.addScaledVector(normal, 0.02);
+    remnant.lookAt(remnant.position.clone().sub(normal));
+    const base = remnant.scale.clone(),
+      origin = remnant.position.clone(),
+      nose = projectileNose(kind);
+    remnant.userData.kind = 'crush';
+    const life = kind === 'hammer' ? 0.26 : 0.16;
+    this.add(remnant, life, 0, 0);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e, progress) => {
+      // The body piles up against the surface: wider, flatter, and sliding in toward the plane.
+      const squash = Math.min(1, progress * 1.6);
+      e.object.scale.set(
+        base.x * (1 + squash * 0.7 * size),
+        base.y * (1 + squash * 0.7 * size),
+        base.z * Math.max(0.08, 1 - squash * 0.92),
+      );
+      e.object.position.copy(origin).addScaledVector(normal, -nose * squash * 0.85);
+    };
+  }
+  /** A flat splat spreading out from the strike along the surface of the patch. */
+  private splash(at: THREE.Vector3, frame: THREE.Quaternion, tint: string, size: number) {
+    const group = new THREE.Group();
+    const disc = new THREE.Mesh(
+      new THREE.CircleGeometry(1, 24),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color(tint).multiplyScalar(1.6),
+        transparent: true,
+        opacity: 0.55,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+      }),
+    );
+    const rim = new THREE.Mesh(
+      new THREE.RingGeometry(0.82, 1, 24),
+      new THREE.MeshBasicMaterial({
+        color: '#ffffff',
+        transparent: true,
+        opacity: 0.9,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    group.add(disc, rim);
+    group.position.copy(at);
+    group.quaternion.copy(frame);
+    group.translateZ(0.025);
+    group.scale.setScalar(0.18 * size);
+    group.userData.kind = 'shield-splash';
+    const life = 0.22;
+    this.add(group, life, (1.25 * size) / life, 0);
+  }
+  /**
+   * The last hit a patch can take. The pieces do not just vanish: for a beat the whole patch
+   * locks white with its cracks blazing, then the hex cells peel off one after another in a
+   * wave spreading from the strike, tumbling away along the normal with glowing trails, while
+   * a hexagonal shockwave (not a circle — the signature of this shield) runs out across the
+   * plane and the empty outline lingers as a ghost before it is gone.
+   */
   shatterEcho(serial: number, at: THREE.Vector3, scale = 1) {
     const echo = this.findEcho(serial);
     if (echo) {
-      echo.object.userData.shattered = true;
-      echo.object.userData.ripple = 0.3;
-      echo.max = echo.life = 0.3;
-      echo.grow = 1.4 * scale;
-      this.ripple(echo.object, at, scale * 1.6, '#ffffff');
+      const patch = echo.object,
+        data = patch.userData;
+      data.shattered = true;
+      data.ripple = 0;
+      data.recoil = undefined;
+      echo.max = echo.life = 0.45;
+      echo.grow = 0;
+      patch.updateMatrixWorld(true);
+      const frame = patch.getWorldQuaternion(new THREE.Quaternion()),
+        cells = (data.cells ?? []) as HexCell[],
+        centroid = (data.centroid ?? [0, 0]) as number[];
+      this.shards(patch, frame, cells, centroid, at, scale);
+      this.hexWave(at, frame, scale, 1, '#ffffff', 0.42);
+      this.hexWave(at, frame, scale, 0.55, '#7af1ff', 0.6);
     }
     this.burst(at, '#c8fbff', scale > 2 ? 40 : 24, 7, 0.26 * Math.sqrt(scale), 0.55);
     this.burst(at, '#7af1ff', 14, 3.2, 0.42 * Math.sqrt(scale), 0.25);
+    // Glass dust: fine motes that glitter and sink.
+    for (let i = 0; i < 18; i++) {
+      const p = this.sparks[this.cursor++ % this.particleBudget];
+      p.p
+        .copy(at)
+        .add(
+          new THREE.Vector3(
+            Math.random() - 0.5,
+            Math.random() - 0.5,
+            Math.random() - 0.5,
+          ).multiplyScalar(1.2 * scale),
+        );
+      p.v.set((Math.random() - 0.5) * 1.5, Math.random() * 0.5, (Math.random() - 0.5) * 1.5);
+      p.color.set('#e8fdff');
+      p.life = p.max = 0.6 + Math.random() * 0.6;
+      p.size = 0.06 + Math.random() * 0.06;
+      p.gravity = 1.6;
+    }
+  }
+  /** The hex cells of a broken patch as individual prisms, peeling away in a wave. */
+  private shards(
+    patch: THREE.Object3D,
+    frame: THREE.Quaternion,
+    cells: HexCell[],
+    centroid: number[],
+    strike: THREE.Vector3,
+    scale: number,
+  ) {
+    if (!cells.length) return;
+    const count = cells.length,
+      fill = new THREE.InstancedMesh(
+        this.shardGeometry,
+        new THREE.MeshBasicMaterial({
+          color: '#bff7ff',
+          transparent: true,
+          opacity: 0.55,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          toneMapped: false,
+        }),
+        count,
+      ),
+      rim = new THREE.InstancedMesh(
+        this.shardRim,
+        new THREE.MeshBasicMaterial({
+          color: '#ffffff',
+          transparent: true,
+          opacity: 1,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          toneMapped: false,
+        }),
+        count,
+      );
+    fill.frustumCulled = rim.frustumCulled = false;
+    const group = new THREE.Group();
+    group.add(fill, rim);
+    group.userData.kind = 'shield-shards';
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(frame),
+      origin = patch.position.clone(),
+      random = seededRandom(1 + count * 17 + Math.floor(strike.x * 10));
+    const local = cells.map((c) => {
+      const point = cellPoint(c.q, c.r);
+      return new THREE.Vector3((point.x - centroid[0]) * scale, (point.y - centroid[1]) * scale, 0);
+    });
+    const world = local.map((l) => l.clone().applyQuaternion(frame).add(origin));
+    const farthest = Math.max(0.2, ...world.map((w) => w.distanceTo(strike)));
+    const pieces = world.map((w, i) => {
+      const radial = w.clone().sub(strike);
+      radial.sub(normal.clone().multiplyScalar(radial.dot(normal)));
+      if (radial.lengthSq() < 1e-4)
+        radial.set(random() - 0.5, random() - 0.5, 0).applyQuaternion(frame);
+      radial.normalize();
+      return {
+        start: w,
+        delay: 0.09 + (w.distanceTo(strike) / farthest) * 0.16,
+        // Mostly outward across the plane (readable from any angle), a little back towards
+        // the body the way struck glass goes, and the strike's own kick along the normal.
+        velocity: radial
+          .clone()
+          .multiplyScalar(3.8 + random() * 3.2)
+          .addScaledVector(normal, -(0.6 + random() * 1.4))
+          .add(new THREE.Vector3(0, 1.2 + random() * 1.4, 0)),
+        axis: new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5).normalize(),
+        spin: 9 + random() * 11,
+        trail: i % 2 === 0,
+      };
+    });
+    const life = 0.75,
+      quaternion = new THREE.Quaternion(),
+      tumble = new THREE.Quaternion();
+    const place = (time: number) => {
+      pieces.forEach((piece, i) => {
+        const t = Math.max(0, time - piece.delay);
+        dummy.position
+          .copy(piece.start)
+          .addScaledVector(piece.velocity, t)
+          .add(new THREE.Vector3(0, -4.5 * t * t, 0));
+        quaternion.copy(frame);
+        if (t > 0) quaternion.multiply(tumble.setFromAxisAngle(piece.axis, piece.spin * t));
+        dummy.quaternion.copy(quaternion);
+        const shrink = t > 0.35 ? Math.max(0, 1 - (t - 0.35) / 0.3) : 1;
+        dummy.scale.setScalar(scale * shrink);
+        dummy.updateMatrix();
+        fill.setMatrixAt(i, dummy.matrix);
+        rim.setMatrixAt(i, dummy.matrix);
+        if (piece.trail && t > 0 && t < 0.3 && Math.random() < 0.6) {
+          const p = this.sparks[this.cursor++ % this.particleBudget];
+          p.p.copy(dummy.position);
+          p.v.copy(piece.velocity).multiplyScalar(0.15);
+          p.color.set('#9cf6ff');
+          p.life = p.max = 0.18;
+          p.size = 0.14 * scale;
+          p.gravity = 0;
+        }
+      });
+      fill.instanceMatrix.needsUpdate = rim.instanceMatrix.needsUpdate = true;
+    };
+    place(0);
+    this.add(group, life, 0, 0);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e) => {
+      const time = e.max - e.life;
+      place(time);
+      // Held white for the first beat, then cooling back to cyan as the pieces fly.
+      const heat = Math.max(0, 1 - time / 0.2);
+      (fill.material as THREE.MeshBasicMaterial).color.setRGB(0.75 + heat * 0.25, 0.97, 1);
+    };
+  }
+  /** A six-sided shockwave in the patch plane, aligned with the hex grid of the pieces. */
+  private hexWave(
+    at: THREE.Vector3,
+    frame: THREE.Quaternion,
+    scale: number,
+    strength: number,
+    color: string,
+    life: number,
+  ) {
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(0.8, 0.8 + 0.12 * strength, 6),
+      new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.9 * strength,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    ring.position.copy(at);
+    ring.quaternion.copy(frame);
+    ring.rotateZ(Math.PI / 6);
+    ring.translateZ(0.03);
+    ring.userData.kind = 'shield-wave';
+    ring.scale.setScalar(0.3 * Math.sqrt(scale));
+    this.add(ring, life, (2.8 * Math.sqrt(scale)) / life, 0);
   }
   /** Thin expanding ring in the plane of a patch, centred on the strike. */
   private ripple(patch: THREE.Object3D, at: THREE.Vector3, scale: number, color: string) {
@@ -620,8 +978,12 @@ export class Effects {
     this.dust(at, 4, 0.9 * scale);
     this.burst(at, '#bff6ff', 10, 2.2, 0.2 * scale, 0.35);
   }
-  /** Friction trail for a body dragged across the ground: sparks, dust and chipped stone. */
-  skid(at: THREE.Vector3, velocity: THREE.Vector3, scale = 1) {
+  /**
+   * A body dragged across the ground ploughs a furrow: the strip of lifted earth is extended
+   * along the direction of travel, clods are thrown up from both flanks, and a little dust and
+   * grit trail behind. `actor` keeps each body's furrow continuous between calls.
+   */
+  skid(at: THREE.Vector3, velocity: THREE.Vector3, scale = 1, actor = 'player') {
     const speed = Math.hypot(velocity.x, velocity.z);
     if (speed < 0.6) return;
     this.skidCalls++;
@@ -629,13 +991,27 @@ export class Effects {
       side = v2.set(-back.z, 0, back.x);
     const base = new THREE.Vector3(at.x, this.groundAt(at.x, at.z) + 0.06 * scale, at.z);
     const intensity = Math.min(1, speed / 22);
-    this.mark(base, back, scale, intensity);
-    // A grey plume kicked up behind the body (one puff per call, so a long drag reads as a
-    // continuous trail without starving other dust effects), plus a little dark grit that
-    // tumbles low along the ground — never a bright additive streak.
+    this.furrows.extend(actor, base, velocity, scale, intensity, this.time);
+    // Earth lifted off both flanks: clods arc up and outwards, a touch forward with the slide.
+    const clods = 2 + Math.round(intensity * 1.5);
+    for (let i = 0; i < clods; i++) {
+      const flank = i % 2 ? 1 : -1,
+        d = this.rocks[this.rockCursor++ % this.rockCapacity];
+      d.p.copy(base).addScaledVector(side, flank * 0.6 * scale);
+      d.v
+        .copy(side)
+        .multiplyScalar(flank * (1.8 + Math.random() * 2.6) * scale)
+        .addScaledVector(back, -speed * (0.08 + Math.random() * 0.12))
+        .add(new THREE.Vector3(0, (2.4 + Math.random() * 3.2) * (0.4 + intensity), 0));
+      d.r.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
+      d.life = d.max = 0.9 + Math.random() * 0.9;
+      d.size = (0.1 + Math.random() * 0.2) * scale;
+      this.tintRock(this.rockCursor - 1, Math.random() < 0.6 ? '#8a6a4a' : '#a8876a');
+      this.clods++;
+    }
     this.dust(base.clone().addScaledVector(back, 0.6 * scale), 1, 1.1 * scale, velocity);
     const sparks = Math.round(
-      (1 + intensity * 3) * (this.particleBudget < this.capacity ? 0.6 : 1),
+      (1 + intensity * 2) * (this.particleBudget < this.capacity ? 0.6 : 1),
     );
     for (let i = 0; i < sparks; i++) {
       const p = this.sparks[this.cursor++ % this.particleBudget];
@@ -650,25 +1026,12 @@ export class Effects {
       p.size = (0.06 + Math.random() * 0.08) * scale;
       p.gravity = 12;
     }
-    if (Math.random() < 0.2 + intensity * 0.35)
-      this.debris(base, 1 + Math.round(intensity), 2.4, 1 * scale, velocity);
   }
-  /** One decal of the drag path, long axis along the motion, offset randomly across it. */
-  private mark(base: THREE.Vector3, back: THREE.Vector3, scale: number, intensity: number) {
-    const index = this.markCursor++ % this.markCapacity,
-      mark = this.marks[index];
-    mark.max = mark.life = 5.5 + intensity * 3;
-    this.markAlpha[index] = 0.5 + intensity * 0.35;
-    const side = new THREE.Vector3(-back.z, 0, back.x),
-      length = (0.9 + intensity * 0.6) * scale,
-      width = (0.22 + Math.random() * 0.18) * scale;
-    dummy.position.copy(base).addScaledVector(side, (Math.random() - 0.5) * 0.5 * scale);
-    dummy.position.y = this.groundAt(dummy.position.x, dummy.position.z) + 0.03;
-    dummy.rotation.set(-Math.PI / 2, 0, Math.atan2(-back.x, -back.z) + Math.PI / 2);
-    dummy.scale.set(length, width, 1);
-    dummy.updateMatrix();
-    this.markMesh.setMatrixAt(index, dummy.matrix);
-    this.markMesh.instanceMatrix.needsUpdate = true;
+  private tintRock(cursor: number, tint: string) {
+    const index = ((cursor % this.rockCapacity) + this.rockCapacity) % this.rockCapacity,
+      color = new THREE.Color(tint);
+    this.rockMesh.instanceColor!.setXYZ(index, color.r, color.g, color.b);
+    this.rockMesh.instanceColor!.needsUpdate = true;
   }
   contact(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1) {
     const points: number[] = [];
@@ -742,6 +1105,7 @@ export class Effects {
   debris(at: THREE.Vector3, count = 10, force = 4, scale = 1, direction?: THREE.Vector3) {
     for (let i = 0; i < count; i++) {
       const d = this.rocks[this.rockCursor++ % this.rockCapacity];
+      this.tintRock(this.rockCursor - 1, '#67696a');
       d.p.copy(at);
       d.p.y = Math.max(this.groundAt(at.x, at.z) + 0.1, d.p.y);
       d.v.set(
@@ -844,9 +1208,31 @@ export class Effects {
       this.burst(at, '#ffffff', 18, 5, 0.5, 1);
     }
   }
+  /** Pull every live particle inside each attractor towards it (or away, for a detonation). */
+  private applyAttractors(p: THREE.Vector3, v: THREE.Vector3, dt: number, weight: number) {
+    for (const a of this.attractors) {
+      const offset = v1.subVectors(a.center, p),
+        distance = offset.length();
+      if (distance > a.radius || distance < 1e-3) continue;
+      const falloff = 1 - distance / a.radius,
+        pull = a.strength * weight * (0.25 + falloff * falloff * 0.75);
+      offset.divideScalar(distance);
+      v.addScaledVector(offset, pull * dt);
+      if (a.swirl > 0) {
+        const tangent = v2.crossVectors(UP, offset);
+        v.addScaledVector(tangent, pull * a.swirl * dt);
+      }
+      // Nothing is allowed to overshoot through the core and fly out the far side.
+      if (a.strength > 0 && distance < 1.2) v.multiplyScalar(Math.exp(-dt * 6));
+    }
+  }
   update(dt: number) {
+    this.time += dt;
+    this.furrows.update(dt);
+    const attracting = this.attractors.length > 0;
     this.dustClouds.forEach((p, i) => {
       p.life = Math.max(0, p.life - dt);
+      if (attracting && p.life > 0) this.applyAttractors(p.p, p.v, dt, 0.8);
       p.p.addScaledVector(p.v, dt);
       p.v.multiplyScalar(Math.exp(-dt));
       this.dustPositions.set(p.p.toArray(), i * 3);
@@ -861,6 +1247,7 @@ export class Effects {
       p.life = Math.max(0, p.life - dt);
       if (p.life > 0) {
         p.v.y -= p.gravity * dt;
+        if (attracting) this.applyAttractors(p.p, p.v, dt, 1);
         p.p.addScaledVector(p.v, dt);
         p.v.multiplyScalar(Math.exp(-dt * 1.7));
         this.position[i * 3] = p.p.x;
@@ -883,6 +1270,7 @@ export class Effects {
       d.life = Math.max(0, d.life - dt);
       if (d.life > 0) {
         d.v.y -= 15 * dt;
+        if (attracting) this.applyAttractors(d.p, d.v, dt, 1.4);
         d.p.addScaledVector(d.v, dt);
         const ground = this.groundAt(d.p.x, d.p.z) + d.size * 0.5;
         if (d.p.y < ground) {
@@ -901,27 +1289,7 @@ export class Effects {
       this.rockMesh.setMatrixAt(i, dummy.matrix);
     }
     this.rockMesh.instanceMatrix.needsUpdate = true;
-    let marksDirty = false;
-    for (let i = 0; i < this.markCapacity; i++) {
-      const m = this.marks[i];
-      if (m.life <= 0) continue;
-      m.life = Math.max(0, m.life - dt);
-      marksDirty = true;
-      // Hold full strength for most of the life, then fade out over the last 40 %.
-      const fade = Math.min(1, m.life / (m.max * 0.4));
-      this.markAlpha[i] = (0.5 + 0.35 * Math.min(1, m.max > 0 ? (m.max - 5.5) / 3 : 0)) * fade;
-      if (m.life === 0) {
-        this.markAlpha[i] = 0;
-        dummy.position.set(0, -1000, 0);
-        dummy.scale.setScalar(0);
-        dummy.rotation.set(0, 0, 0);
-        dummy.updateMatrix();
-        this.markMesh.setMatrixAt(i, dummy.matrix);
-        this.markMesh.instanceMatrix.needsUpdate = true;
-      }
-    }
-    if (marksDirty)
-      (this.markMesh.geometry.getAttribute('aAlpha') as THREE.BufferAttribute).needsUpdate = true;
+    this.attractors.length = 0;
     for (let i = this.timed.length - 1; i >= 0; i--) {
       const e = this.timed[i];
       e.life -= dt;
@@ -932,27 +1300,65 @@ export class Effects {
       }
       const progress = 1 - e.life / e.max,
         data = e.object.userData;
+      if (e.animate) {
+        e.animate(e, progress, dt);
+        if (data.kind === 'shield-shards') {
+          const fade = Math.min(1, e.life / 0.25);
+          e.object.traverse((o) => {
+            if (o instanceof THREE.Mesh) {
+              const material = o.material as THREE.Material & { opacity: number };
+              material.opacity = (o.userData.baseOpacity ?? 1) * fade;
+            }
+          });
+        } else if (data.kind === 'crush') {
+          const fade = Math.max(0, 1 - progress * 1.15);
+          e.object.traverse((o) => {
+            if (o instanceof THREE.Mesh)
+              (o.material as THREE.Material & { opacity: number }).opacity = fade;
+          });
+        }
+        continue;
+      }
       let scale = e.baseScale + progress * e.grow * e.max;
       if (data.kind === 'shield-echo') {
         // Ripple: a quick swell that settles back, run on every hit the patch absorbs.
         data.ripple = Math.max(0, (data.ripple ?? 0) - dt);
         const swell = data.ripple > 0 ? Math.sin((1 - data.ripple / 0.32) * Math.PI) : 0;
-        scale *= 1 + swell * (data.shattered ? 0.3 : 0.12);
+        scale *= 1 + swell * 0.1;
+        // Recoil: punched back along the strike, springing home with a small overshoot.
+        if (typeof data.recoil === 'number' && data.base) {
+          data.recoil += dt;
+          const a = data.recoil as number,
+            kick = Math.exp(-a * 7) * Math.sin(a * 16) * (data.recoilStrength ?? 0.12);
+          e.object.position
+            .copy(data.base as THREE.Vector3)
+            .addScaledVector(data.recoilNormal as THREE.Vector3, -kick);
+          if (a > 0.6) {
+            data.recoil = undefined;
+            e.object.position.copy(data.base as THREE.Vector3);
+          }
+        }
       }
       e.object.scale.setScalar(scale);
       e.object.rotation.z += e.spin * dt;
-      const load = data.kind === 'shield-echo' ? Math.min(3, Math.max(0, (data.hits ?? 1) - 1)) : 0;
+      const load = data.kind === 'shield-echo' ? Math.min(4, Math.max(0, (data.hits ?? 1) - 1)) : 0;
       e.object.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
           const material = o.material as THREE.Material & { opacity: number };
+          if (data.kind === 'shield-echo' && data.shattered) {
+            // Ghost outline: the pieces are gone (the shards carry them); only the wires linger.
+            material.opacity =
+              o instanceof THREE.LineSegments && !o.userData.crack
+                ? (o.userData.baseOpacity ?? 1) * 0.5 * Math.min(1, e.life / 0.45)
+                : 0;
+            return;
+          }
           const fade =
             data.kind === 'shield-echo'
-              ? data.shattered
-                ? Math.min(1, e.life / 0.3)
-                : Math.min(1, e.life / 0.65)
+              ? Math.min(1, e.life / 0.65)
               : Math.min(1, (e.life / e.max) * 1.6);
           // Each absorbed hit brightens the patch: fill and glow step up with the load.
-          const charge = 1 + load * (o.userData.glow ? 0.28 : 0.9) + (data.shattered ? 0.6 : 0);
+          const charge = 1 + load * (o.userData.glow ? 0.22 : 0.65);
           material.opacity = Math.min(1, (o.userData.baseOpacity ?? 1) * charge * fade);
         }
       });
@@ -961,17 +1367,11 @@ export class Effects {
   clear() {
     this.shieldSerial = 0;
     this.skidCalls = 0;
+    this.clods = 0;
     this.airRecoveries = 0;
-    this.marks.forEach((m, i) => {
-      m.life = 0;
-      this.markAlpha[i] = 0;
-      dummy.position.set(0, -1000, 0);
-      dummy.scale.setScalar(0);
-      dummy.updateMatrix();
-      this.markMesh.setMatrixAt(i, dummy.matrix);
-    });
-    this.markMesh.instanceMatrix.needsUpdate = true;
-    (this.markMesh.geometry.getAttribute('aAlpha') as THREE.BufferAttribute).needsUpdate = true;
+    this.shieldImpacts = 0;
+    this.attractors.length = 0;
+    this.furrows.clear();
     this.dustClouds.forEach((p) => {
       p.life = 0;
     });
@@ -989,7 +1389,7 @@ export class Effects {
     const geometries = new Set<THREE.BufferGeometry>();
     e.object.traverse((o) => {
       if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
-        geometries.add(o.geometry);
+        if (!o.userData.keepGeometry) geometries.add(o.geometry);
         const materials = Array.isArray(o.material) ? o.material : [o.material];
         materials.forEach((m) => m.dispose());
       }

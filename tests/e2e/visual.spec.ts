@@ -79,27 +79,60 @@ test.describe('golden frames', () => {
     test.skip(info.project.name !== 'desktop', 'golden frames are rendered once, on desktop');
   });
 
-  test('skid marks and dust trail behind a dragged body', async ({ page }) => {
+  test('the furrow ploughed by a dragged body: a trough with lifted earth on both sides', async ({
+    page,
+  }) => {
     await load(page);
     await scene(page, 'ground-skid');
     await seededStep(page, 2.1, 11);
-    // Look back along the slide so the decals laid behind the body are in frame.
+    // Look back along the slide so the strip laid behind the body is in frame.
     await page.evaluate(() => window.__HEA_DEBUG__.harness!.face(Math.PI, -0.25));
     await seededStep(page, 0.02, 12);
     await settle(page);
     const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-    expect(d.particles.marks).toBeGreaterThan(10);
-    await expect(canvas(page)).toHaveScreenshot('skid-marks.png', SNAPSHOT);
+    expect(d.particles.furrow).toBeGreaterThan(10);
+    expect(d.particles.furrows).toBeLessThanOrEqual(2);
+    await expect(canvas(page)).toHaveScreenshot('drag-furrow.png', SNAPSHOT);
   });
 
-  test('a shield patch brightening and rippling under repeated hits', async ({ page }) => {
+  test('a shattering patch: hex pieces peeling off behind a hexagonal shockwave', async ({
+    page,
+  }) => {
+    await load(page);
+    await scene(page, 'shield-volley');
+    await seededStep(page, 0.36, 61);
+    await seededStep(page, 0.1, 62);
+    await settle(page);
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    expect(d.patchShatters).toBe(1);
+    expect(d.particles.shards).toBe(1);
+    await expect(canvas(page)).toHaveScreenshot('shield-shatter.png', SNAPSHOT);
+  });
+
+  test('a solar vortex pulling the body and every ember towards its core', async ({ page }) => {
+    await load(page);
+    await scene(page, 'shield');
+    await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('vortex'));
+    await seededStep(page, 1.3, 71);
+    await seededStep(page, 0.6, 72);
+    await settle(page);
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    expect(d.wells).toHaveLength(1);
+    expect(Math.hypot(...d.pull)).toBeGreaterThan(0.5);
+    await expect(canvas(page)).toHaveScreenshot('solar-vortex.png', SNAPSHOT);
+  });
+
+  test('a bolt crushing against a standing patch that has already taken a hit', async ({
+    page,
+  }) => {
     await load(page);
     await scene(page, 'shield-line');
-    await seededStep(page, 0.07, 21);
+    await seededStep(page, 0.09, 21);
     await settle(page);
     const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
     expect(d.patchReuses).toBeGreaterThanOrEqual(1);
     expect(d.shieldEchoes.length).toBeGreaterThanOrEqual(1);
+    expect(d.particles.shieldImpacts).toBeGreaterThanOrEqual(2);
     await expect(canvas(page)).toHaveScreenshot('shield-charge.png', SNAPSHOT);
   });
 

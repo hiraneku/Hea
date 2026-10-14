@@ -56,7 +56,10 @@ export class BossTactics {
           ? ['strafe', 'press', 'low-pass']
           : attack === 'missiles'
             ? ['flank', 'low-pass', 'strafe']
-            : ['rise', 'flank', 'low-pass'];
+            : attack === 'vortex'
+              ? // The well is seeded from a distance: climb and keep the body in view.
+                ['rise', 'strafe', 'flank']
+              : ['rise', 'flank', 'low-pass'];
       this.choose(
         position,
         player,

@@ -5,7 +5,7 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Controls } from './Controls';
 import { AudioEngine } from './Audio';
-import { Effects, Ribbon } from './Effects';
+import { Effects, Ribbon, makeSigil } from './Effects';
 import { World, contactShadowTexture } from './World';
 import { Boss } from './Boss';
 import { BossNavigator } from './BossNavigation';
@@ -75,6 +75,20 @@ interface Projectile {
   guidance: MissileGuidance;
   /** Seekers chase their own scatter point around the player, not one shared centre. */
   aimOffset: THREE.Vector3 | null;
+  /** Serial of the patch raised for this shot: it flies on until it actually strikes it. */
+  claim: number | null;
+  /** Set once this shot has been let through an open hole in the shell. */
+  leaked: boolean;
+  /** Vortex seeds anchor here (or at the first wall) instead of expiring. */
+  anchor: THREE.Vector3 | null;
+}
+/** A solar vortex: anchored, pulling, then detonating into a flat ring of embers. */
+interface Well {
+  position: THREE.Vector3;
+  core: THREE.Object3D;
+  age: number;
+  spin: number;
+  detonated: boolean;
 }
 interface TraceHit {
   t: number;
@@ -139,6 +153,11 @@ export class Game {
   private pendingFire: { origin: THREE.Vector3; delay: number; index: number; packet: number }[] =
     [];
   private readonly patches = new ShieldPatchRegistry();
+  private wells: Well[] = [];
+  /** Velocity the vortex has imparted on the player; it bleeds off once the pull ends. */
+  private pull = new THREE.Vector3();
+  private vortexCoreHits = 0;
+  private vortexDetonations = 0;
   /** 1 right after a heavy contact, decaying in real time: drives the camera zoom punch. */
   private punch = 0;
   private punchClock = 0;
@@ -198,7 +217,7 @@ export class Game {
   private testIdleBoss = false;
   private testInvulnerable = false;
   private lastImpact: { surface: 'wall' | 'ground'; actor: 'player' | 'boss' } | null = null;
-  private attacksFired = { fire: 0, missile: 0, hammer: 0 };
+  private attacksFired = { fire: 0, missile: 0, hammer: 0, vortex: 0 };
   private spellOrbitGeometry = new THREE.TorusGeometry(0.225, 0.011, 3, 28);
   private spellOrbitMaterial = new THREE.MeshBasicMaterial({
     color: '#ffac57',
@@ -226,7 +245,21 @@ export class Game {
     fire: new THREE.MeshBasicMaterial({ color: '#ff842b', toneMapped: false }),
     missile: new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffbc70').multiplyScalar(3) }),
     hammer: new THREE.MeshBasicMaterial({ color: new THREE.Color('#fff0ba').multiplyScalar(4) }),
+    vortex: new THREE.MeshBasicMaterial({
+      color: '#2b0b08',
+      transparent: true,
+      opacity: 0.78,
+      toneMapped: false,
+    }),
   };
+  private vortexRimMaterial = new THREE.MeshBasicMaterial({
+    color: new THREE.Color('#ff5a2a').multiplyScalar(2.5),
+    transparent: true,
+    opacity: 0.85,
+    side: THREE.DoubleSide,
+    depthWrite: false,
+    toneMapped: false,
+  });
   private resizeListener = () => this.resize();
   private visibilityListener = () => {
     if (document.hidden) this.pause();
@@ -450,7 +483,20 @@ export class Game {
       patchShatters: this.patches.shatters,
       patchGaps: this.patches.openGaps,
       patchLeaks: this.patches.leaks,
+      patchTiling: {
+        clusters: this.patches.clusterCount,
+        joined: this.patches.joined,
+        overlaps: this.patches.overlaps,
+      },
       shieldEchoes: this.fx.shieldEchoes,
+      wells: this.wells.map((w) => ({
+        position: w.position.toArray(),
+        age: w.age,
+        detonated: w.detonated,
+      })),
+      pull: this.pull.toArray(),
+      vortexCoreHits: this.vortexCoreHits,
+      vortexDetonations: this.vortexDetonations,
       particles: this.fx.activity,
       heavyPenetrations: this.heavyPenetrations,
       groundReactions: this.groundReactions,
@@ -575,7 +621,10 @@ export class Game {
     this.finishTimer = 0;
     this.testIdleBoss = this.testInvulnerable = false;
     this.lastImpact = null;
-    this.attacksFired = { fire: 0, missile: 0, hammer: 0 };
+    this.attacksFired = { fire: 0, missile: 0, hammer: 0, vortex: 0 };
+    this.clearWells();
+    this.pull.set(0, 0, 0);
+    this.vortexCoreHits = this.vortexDetonations = 0;
     this.lockedOn = this.controls.touch;
     this.avatar.visible = true;
     this.avatar.rotation.set(0, 0, 0);
@@ -744,6 +793,7 @@ export class Game {
       if (this.hitPause.remaining === 0) this.updateBoss(dt);
       if (this.hitPause.remaining === 0) {
         this.updateFireGates(dt);
+        this.updateWells(dt);
         if (!this.outcome) this.updateProjectiles(dt);
         else this.clearProjectiles();
       }
@@ -867,6 +917,11 @@ export class Game {
     advanceFlight(this.velocity, this.flightAcceleration, wish, dt);
     const motor = this.velocity.clone().add(this.airDash.velocity);
     if (!this.flightEnabled && !physical) motor.y = this.verticalVelocity;
+    // The vortex's pull rides on top of the motor: thrust fights it, a dash breaks it.
+    if (this.pull.lengthSq() > 1e-6) {
+      if (!this.flightEnabled && !physical) this.pull.y = 0;
+      motor.add(this.pull);
+    }
     this.moveBody(
       this.player,
       motor,
@@ -900,7 +955,7 @@ export class Game {
     if (dragging && this.skidTimer <= 0) {
       // A continuous friction trail while the body is dragged, as in the reference footage.
       this.skidTimer = 0.045;
-      this.fx.skid(this.player, this.impulse.clone().add(motor), 1);
+      this.fx.skid(this.player, this.impulse.clone().add(motor), 1, 'player');
     }
     this.roll = damp(
       this.roll,
@@ -1301,7 +1356,7 @@ export class Game {
     this.bossSkidTimer -= dt;
     if (b.tumble.physical && b.tumble.grounded && this.bossSkidTimer <= 0) {
       this.bossSkidTimer = 0.045;
-      this.fx.skid(feet, b.impulse.clone().add(b.velocity), 1.8);
+      this.fx.skid(feet, b.impulse.clone().add(b.velocity), 1.8, 'boss');
     }
     if (b.tumble.physical && b.tumble.grounded) groundFriction(b.impulse, dt);
     else {
@@ -1341,6 +1396,12 @@ export class Game {
           this.fx.glyph(mark, UP, '#ff9a5d', 2.8, ATTACKS.hammer.tell);
         }
       } else this.bossAttack(command.attack, command.index);
+    }
+    if (b.director.attack === 'vortex' && b.director.stage === 'telegraph' && b.alive) {
+      // The tell: loose embers drawn into the glyph, so the pull is announced before it exists.
+      const glyph = b.muzzle();
+      if (Math.random() < dt * 40) this.fx.inflow(glyph, 3.2, 1, '#ff7a4a');
+      this.fx.attract(glyph, 4, 12, 0.9);
     }
   }
   private updateBossSight() {
@@ -1439,6 +1500,31 @@ export class Game {
         this.fx.glyph(port, forward, '#ffbc80', 0.32, 0.32);
       }
       if (this.mode !== 'menu') this.audio.cast(0);
+    } else if (attack === 'vortex') {
+      // The seed heads for where the player will be, and anchors a little short of the body.
+      const target = this.player
+        .clone()
+        .addScaledVector(UP, 1.6)
+        .addScaledVector(this.velocity, 0.45)
+        .addScaledVector(this.impulse, 0.3);
+      target.x = clamp(target.x, -ARENA.halfSize + 6, ARENA.halfSize - 6);
+      target.z = clamp(target.z, -ARENA.halfSize + 6, ARENA.halfSize - 6);
+      target.y = clamp(
+        target.y,
+        this.world.surfaceHeight(target.x, target.z) + 1.5,
+        ARENA.ceiling - 2,
+      );
+      const aim = target.clone().sub(muzzle),
+        distance = Math.max(4, aim.length() - 2.5);
+      aim.normalize();
+      if (!this.permittedCast('vortex', muzzle, target)) return;
+      this.spawn(muzzle, aim.clone().multiplyScalar(PROJECTILES.vortex.speed), 'vortex', 0);
+      const seed = this.projectiles[this.projectiles.length - 1];
+      seed.anchor = muzzle.clone().addScaledVector(aim, distance);
+      seed.life = distance / PROJECTILES.vortex.speed + 0.05;
+      this.fx.glyph(muzzle, aim, '#ff6a3a', 1.6, 0.5);
+      this.fx.burst(muzzle, '#ff8a5a', 30, 4, 0.5, 1);
+      if (this.mode !== 'menu') this.audio.cast(2);
     } else {
       if (!this.permittedCast('hammer', muzzle, this.boss.lockedTarget)) return;
       const aim = this.boss.lockedTarget.clone().sub(muzzle).normalize();
@@ -1447,6 +1533,117 @@ export class Game {
       this.fx.burst(muzzle, '#ffe7ae', 40, 5, 0.8, 1);
       if (this.mode !== 'menu') this.audio.cast(2);
     }
+  }
+  /** A vortex seed arriving: its body becomes the core of a well that starts to pull. */
+  private anchorWell(p: Projectile, at: THREE.Vector3) {
+    const core = p.mesh;
+    core.position.copy(at);
+    core.rotation.set(0, 0, 0);
+    core.scale.setScalar(PROJECTILES.vortex.radius / 0.17);
+    for (const child of [...core.children]) core.remove(child);
+    // A flat accretion disc: the outer rim marks the lethal core radius, the rune disc spins
+    // against it, and a white-hot pinpoint sits in the dark heart.
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.86, 1, 48), this.vortexRimMaterial);
+    ring.userData.ring = true;
+    const halo = makeSigil(this.fx.sigilMap, 0.55, '#ff8a52');
+    halo.userData.halo = true;
+    halo.rotation.x = -Math.PI / 2;
+    const pin = new THREE.Mesh(
+      this.projectileGeometry,
+      new THREE.MeshBasicMaterial({ color: '#fff3dc', toneMapped: false }),
+    );
+    pin.scale.setScalar(0.3);
+    pin.userData.pin = true;
+    core.add(ring, halo, pin);
+    this.wells.push({ position: at.clone(), core, age: 0, spin: 0, detonated: false });
+    this.fx.burst(at, '#ff7a4a', 26, 4, 0.4, 0.5);
+    if (this.mode !== 'menu') this.audio.vortex();
+  }
+  private updateWells(dt: number) {
+    const center = this.player.clone().addScaledVector(UP, 0.9);
+    let pulling = false;
+    for (let i = this.wells.length - 1; i >= 0; i--) {
+      const w = this.wells[i];
+      w.age += dt;
+      if (w.age >= DUEL.vortexPull) {
+        this.detonateWell(w);
+        this.wells.splice(i, 1);
+        continue;
+      }
+      pulling = true;
+      const grow = Math.min(1, w.age / 0.3);
+      w.spin += dt * (2 + w.age * 2.5);
+      w.core.rotation.y = w.spin;
+      w.core.children.forEach((o) => {
+        if (o.userData.ring) {
+          o.rotation.x = Math.PI / 2;
+          o.rotation.z = -w.spin * 0.7;
+          o.scale.setScalar((0.6 + 0.4 * grow) * (1 + Math.sin(w.age * 9) * 0.06));
+        } else if (o.userData.halo) {
+          o.rotation.z = -w.spin * 1.3;
+          o.scale.setScalar(0.7 + grow * 0.5 + w.age * 0.12);
+        } else if (o.userData.pin) o.scale.setScalar(0.3 + Math.sin(w.age * 22) * 0.06);
+      });
+      this.fx.attract(w.position, DUEL.vortexRadius, 26 * grow, 0.8);
+      if (Math.random() < dt * 70 * grow) this.fx.inflow(w.position, 7, 3);
+      // The pull on the body: strongest at the core, fading linearly to nothing at the edge.
+      const offset = w.position.clone().sub(center),
+        distance = offset.length();
+      if (distance < DUEL.vortexRadius && distance > 0.05 && !this.outcome) {
+        const falloff = 1 - distance / DUEL.vortexRadius,
+          accel = DUEL.vortexStrength * grow * falloff;
+        this.pull.addScaledVector(offset.divideScalar(distance), accel * dt);
+        if (!this.settings.reducedEffects) this.shake = Math.max(this.shake, 0.004 * falloff);
+      }
+    }
+    // The imparted velocity decays quickly, faster still once nothing is pulling any more.
+    this.pull.multiplyScalar(Math.exp(-dt * (pulling ? 2.4 : 7)));
+    if (this.pull.lengthSq() < 1e-4) this.pull.set(0, 0, 0);
+  }
+  private detonateWell(w: Well) {
+    w.detonated = true;
+    this.vortexDetonations++;
+    w.core.removeFromParent();
+    w.core.children.forEach((o) => {
+      if (o instanceof THREE.Mesh && o.userData.ring) o.geometry.dispose();
+      if (o instanceof THREE.Mesh && o.userData.pin) (o.material as THREE.Material).dispose();
+    });
+    this.fx.detonate(w.position, 9);
+    this.shake = Math.max(this.shake, 0.03);
+    if (this.mode !== 'menu') this.audio.detonate();
+    // A flat ring of embers: thin enough to climb or dive out of, wide enough to punish fleeing.
+    const base = Math.random() * Math.PI * 2;
+    for (let i = 0; i < DUEL.vortexEmbers; i++) {
+      const angle = base + (i / DUEL.vortexEmbers) * Math.PI * 2,
+        direction = new THREE.Vector3(
+          Math.cos(angle),
+          i % 2 ? 0.035 : -0.035,
+          Math.sin(angle),
+        ).normalize();
+      this.spawn(
+        w.position.clone().addScaledVector(direction, 0.9),
+        direction.multiplyScalar(PROJECTILES.fire.speed * 0.85),
+        'fire',
+        8,
+      );
+    }
+    const center = this.player.clone().addScaledVector(UP, 0.9),
+      away = center.clone().sub(w.position),
+      distance = away.length();
+    if (distance < DUEL.vortexCoreRadius && !this.outcome) {
+      // Caught in the core: a heavy contact that blasts the body straight back out.
+      if (distance < 0.2) away.copy(this.facing).negate();
+      away.normalize();
+      this.vortexCoreHits++;
+      if (!this.airDash.invulnerable) this.damagePlayer(24, away, 'vortex', false);
+    }
+    const ground = this.world.surfaceHeight(w.position.x, w.position.z);
+    if (w.position.y - ground < 4.5)
+      this.world.crater(new THREE.Vector3(w.position.x, ground, w.position.z), 24);
+  }
+  private clearWells() {
+    for (const w of this.wells) w.core.removeFromParent();
+    this.wells = [];
   }
   private updateFireGates(dt: number) {
     if (!this.boss.alive || this.outcome) {
@@ -1608,6 +1805,9 @@ export class Game {
       guidance: { committed: false },
       aimOffset,
       age: 0,
+      claim: null,
+      anchor: null,
+      leaked: false,
     });
     if (kind !== 'player') this.attacksFired[kind]++;
   }
@@ -1620,6 +1820,11 @@ export class Game {
       p.life -= dt;
       p.age += dt;
       if (p.life <= 0) {
+        if (p.kind === 'vortex') {
+          this.anchorWell(p, p.anchor ?? p.mesh.position);
+          this.removeProjectile(i, true);
+          continue;
+        }
         this.fx.burst(p.mesh.position, '#ffab72', 6, 1, 0.22);
         this.removeProjectile(i);
         continue;
@@ -1640,6 +1845,25 @@ export class Game {
       p.mesh.children.forEach((o, index) => {
         o.rotation.z += dt * (index ? -3 : 4);
       });
+      if (p.kind === 'vortex' && p.anchor) {
+        // The seed stops short of the body and opens there; a wall on the way opens it earlier.
+        const wall = this.trace(p.last, p.mesh.position, false, p.radius);
+        const reached = p.mesh.position.clone().sub(p.anchor).dot(p.velocity) >= 0;
+        if (wall || reached) {
+          const at = wall
+            ? p.last
+                .clone()
+                .lerp(p.mesh.position, wall.t)
+                .addScaledVector(p.velocity.clone().normalize(), -1.2)
+            : p.anchor.clone();
+          this.anchorWell(p, at);
+          this.removeProjectile(i, true);
+          continue;
+        }
+        p.ribbon.push(p.mesh.position, this.camera.position);
+        if (Math.random() < dt * 30) this.fx.burst(p.mesh.position, '#ff7a44', 1, 0.5, 0.3, 0);
+        continue;
+      }
       let worldHit = this.trace(p.last, p.mesh.position, p.kind === 'player', p.radius);
       // Carve only the measured thin material span, then re-run CCD for the remaining path.
       if (p.kind === 'hammer')
@@ -1668,71 +1892,72 @@ export class Game {
           ? new THREE.Vector3(0, 0, -1).applyQuaternion(this.playerTumble.orientation)
           : this.facing;
         const covered = shieldCovers(shieldFacing, p.last.clone().sub(previousCenter));
-        // 1. Patches still standing in the world stop any shot that sweeps through them.
+        // 1. Contact. A standing patch stops the shot where its head meets the surface: the
+        //    body is handed over to crush and splash there, nothing vanishes short of it.
         if (this.aegis.enabled) {
-          const standing = this.patches.sweep(p.last, p.mesh.position, p.velocity, p.radius);
-          if (standing && this.aegis.intercept()) {
+          const standing = this.patches.sweep(
+            p.last,
+            p.mesh.position,
+            p.velocity,
+            p.radius,
+            p.kind,
+          );
+          if (standing && (!worldHit || standing.t <= worldHit.t)) {
+            p.mesh.position.copy(standing.at);
             this.absorbOnPatch(standing.patch, standing.at, p);
-            this.removeProjectile(i);
+            this.removeProjectile(i, true);
             continue;
           }
         }
-        // 2. Otherwise predict the crossing of the shield shell and raise a patch there.
-        const guard = this.aegis.enabled
-          ? shieldIntercept(
-              p.last,
-              p.velocity,
-              previousCenter,
-              motion,
-              shieldFacing,
-              p.radius,
-              horizon,
-            )
-          : null;
+        // 2. Prediction. Raise a patch where the shot will cross the shell, and let the shot
+        //    fly on to it. A claim on a patch that no longer lies on the path is dropped so a
+        //    weaving body gets a fresh piece fitted next to the first one.
+        if (p.claim !== null) {
+          const claimed = this.patches.find(p.claim),
+            ahead = p.mesh.position.clone().addScaledVector(p.velocity, horizon);
+          if (!claimed || !this.patches.sweep(p.mesh.position, ahead, p.velocity, p.radius, p.kind))
+            p.claim = null;
+        }
+        const guard =
+          this.aegis.enabled && p.claim === null
+            ? shieldIntercept(
+                p.last,
+                p.velocity,
+                previousCenter,
+                motion,
+                shieldFacing,
+                p.radius,
+                horizon,
+              )
+            : null;
         if (guard) {
           const futureEnd = p.last.clone().addScaledVector(p.velocity, horizon),
             cover = this.trace(p.last, futureEnd, false, p.radius);
-          let intercept = center.clone().add(guard.offset),
+          let intercept = guard.point.clone(),
             offset = guard.offset.clone();
           if (!this.clearSight(center, intercept)) {
             // Close to a wall the patch is raised nearer the body instead of inside the wall.
             offset = guard.offset.clone().setLength(DUEL.shieldNear);
             intercept = center.clone().add(offset);
           }
+          const open = this.patches.gapAt(offset);
+          if (open && !p.leaked) {
+            // A hole left by a shattered patch stays open: this shot gets through.
+            p.leaked = true;
+            this.patches.noteLeak();
+          }
           if (
             (!cover || cover.t * horizon > guard.time + 0.001) &&
             this.clearSight(center, intercept) &&
-            // A hole left by a shattered patch stays open: this shot gets through.
-            !this.patches.gapAt(offset) &&
-            this.aegis.intercept()
+            !open
           ) {
             const scale = shieldScale(p.radius),
               radius = patchRadius(scale);
-            // A new patch inside an existing footprint on the same lane re-uses it; no stacking.
+            // A footprint already covering this lane takes the shot; otherwise a new piece is
+            // fitted onto the lattice beside its neighbours instead of on top of them.
             const existing = this.patches.overlapping(intercept, guard.normal, radius);
-            if (existing) this.absorbOnPatch(existing, intercept, p);
-            else {
-              const incoming = guard.normal.clone().negate(),
-                life = scale > 2 ? DUEL.shieldPatchLifeLarge : DUEL.shieldPatchLife;
-              const echo = this.fx.block(intercept, incoming, scale, life);
-              this.lastBlock = { scale, radius: p.radius, direction: guard.normal.toArray() };
-              this.patches.add({
-                position: intercept.toArray(),
-                offset: offset.toArray(),
-                normal: guard.normal.toArray(),
-                radius,
-                life,
-                serial: echo.serial,
-                hits: 1,
-              });
-              if (this.mode !== 'menu') this.audio.block();
-              this.emit({
-                type: 'block',
-                direction: { x: guard.normal.x, y: guard.normal.y, z: guard.normal.z },
-              });
-            }
-            this.removeProjectile(i);
-            continue;
+            if (existing) p.claim = existing.serial;
+            else p.claim = this.raisePatch(intercept, guard.normal, scale, p.radius, center);
           }
         }
         const relativeStart = p.last.clone().sub(previousCenter),
@@ -1744,6 +1969,20 @@ export class Game {
           DUEL.bodyRadius + p.radius,
         );
         if (hitPlayer !== null && (!worldHit || hitPlayer <= worldHit.t)) {
+          if (this.aegis.enabled && covered && !this.patches.gapAt(relativeStart)) {
+            // The shell's last line: a piece snaps up right at the body and takes the shot.
+            const direction = p.velocity.clone().normalize().negate(),
+              at = center.clone().addScaledVector(direction, DUEL.shieldNear),
+              scale = shieldScale(p.radius),
+              radius = patchRadius(scale);
+            const patch =
+              this.patches.overlapping(at, direction, radius) ??
+              this.patches.find(this.raisePatch(at, direction, scale, p.radius, center))!;
+            p.mesh.position.copy(at).addScaledVector(direction, p.radius * 0.5);
+            this.absorbOnPatch(patch, at, p);
+            this.removeProjectile(i, true);
+            continue;
+          }
           if (!this.airDash.invulnerable) this.damagePlayer(p.damage, p.velocity, p.kind, !covered);
           this.fx.burst(p.mesh.position, '#ff9a62', 18, 3.5, 0.36);
           this.removeProjectile(i);
@@ -1778,32 +2017,62 @@ export class Game {
         this.fx.burst(p.mesh.position, '#ffc086', 1, 0.35, p.kind === 'hammer' ? 0.5 : 0.22, 0);
     }
   }
-  private removeProjectile(index: number) {
+  /** `keepMesh` hands the body over (to a shield crush or a vortex well) instead of dropping it. */
+  private removeProjectile(index: number, keepMesh = false) {
     const p = this.projectiles[index];
     if (!p) return;
-    p.mesh.removeFromParent();
+    if (!keepMesh) p.mesh.removeFromParent();
     p.ribbon.dispose();
     this.projectiles.splice(index, 1);
+  }
+  /** A new Aegis piece fitted onto the shell for a shot of `radius`; returns its serial. */
+  private raisePatch(
+    desired: THREE.Vector3,
+    normal: THREE.Vector3,
+    scale: number,
+    radius: number,
+    center: THREE.Vector3,
+  ): number {
+    const life = scale > 2 ? DUEL.shieldPatchLifeLarge : DUEL.shieldPatchLife,
+      placement = this.patches.place(desired, normal, scale, this.fx.nextShieldSerial),
+      echo = this.fx.block(placement.position, placement.quaternion, scale, life);
+    this.lastBlock = { scale, radius, direction: normal.toArray() };
+    this.patches.add({
+      position: placement.position.toArray(),
+      offset: placement.position.clone().sub(center).toArray(),
+      normal: normal.toArray(),
+      radius: patchRadius(scale),
+      life,
+      serial: echo.serial,
+      hits: 0,
+      scale,
+      cluster: placement.cluster,
+      anchor: placement.anchor,
+    });
+    if (this.mode !== 'menu') this.audio.raise();
+    return echo.serial;
   }
   private clearProjectiles() {
     while (this.projectiles.length) this.removeProjectile(this.projectiles.length - 1);
   }
   /**
-   * A standing patch takes another shot: its echo ripples and brightens, until the hit budget
-   * is spent and it shatters — leaving that lane open for a moment.
+   * A shot connects with a standing patch. The projectile's body is left on the surface to
+   * crush and splash, the patch recoils and ripples and (from the second hit) cracks, until
+   * the hit budget is spent and it shatters — leaving that lane open for a moment.
    */
   private absorbOnPatch(patch: ShieldPatch, at: THREE.Vector3, p: Projectile) {
     const scale = shieldScale(p.radius),
       normal = new THREE.Vector3().fromArray(patch.normal),
       result = this.patches.absorb(patch, scale);
+    this.aegis.intercept();
     this.lastBlock = { scale, radius: p.radius, direction: normal.toArray() };
+    const shown = this.fx.shieldImpact(patch.serial, at, normal, p.kind, scale, patch.hits, p.mesh);
+    if (!shown) this.fx.burst(at, '#9cf6ff', 10, 2.6, 0.2 * Math.sqrt(scale), 0.5);
     if (result === 'shattered') {
       this.fx.shatterEcho(patch.serial, at, scale);
+      this.shake = Math.max(this.shake, 0.014);
       if (this.mode !== 'menu') this.audio.shatter();
-    } else if (!this.fx.refreshEcho(patch.serial, at, scale, patch.hits)) {
-      this.fx.burst(at, '#9cf6ff', 10, 2.6, 0.2 * Math.sqrt(scale), 0.5);
-    }
-    if (this.mode !== 'menu' && result === 'held') this.audio.block();
+    } else if (this.mode !== 'menu') this.audio.block(p.kind);
     this.emit({ type: 'block', direction: { x: normal.x, y: normal.y, z: normal.z } });
   }
   private contactPause(

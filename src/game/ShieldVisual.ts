@@ -15,6 +15,64 @@ export const HEX_NEIGHBORS = [
   [1, -1],
 ] as const;
 
+/** Circumradius of one hex cell (unscaled) and the prism's half thickness. */
+export const HEX_RADIUS = 0.29;
+export const HEX_DEPTH = 0.05;
+/** Centre of axial cell (q, r) in the patch plane, pointy-top orientation. */
+export function cellPoint(q: number, r: number, radius = HEX_RADIUS): THREE.Vector2 {
+  return new THREE.Vector2(Math.sqrt(3) * radius * (q + r / 2), 1.5 * radius * r);
+}
+/** Mean of the cell centres: the group origin of a patch sits here, not on cell (0, 0). */
+export function layoutCentroid(cells: HexCell[], radius = HEX_RADIUS): THREE.Vector2 {
+  const sum = cells.reduce((a, c) => a.add(cellPoint(c.q, c.r, radius)), new THREE.Vector2());
+  return sum.divideScalar(Math.max(1, cells.length));
+}
+/** Axial cell nearest to a point in the patch plane (pointy-top axial rounding). */
+export function nearestCell(x: number, y: number, radius = HEX_RADIUS): HexCell {
+  const q = ((Math.sqrt(3) / 3) * x - y / 3) / radius,
+    r = ((2 / 3) * y) / radius;
+  let rq = Math.round(q),
+    rr = Math.round(r);
+  const rs = Math.round(-q - r),
+    dq = Math.abs(rq - q),
+    dr = Math.abs(rr - r),
+    ds = Math.abs(rs + q + r);
+  if (dq > dr && dq > ds) rq = -rr - rs;
+  else if (dr > ds) rr = -rq - rs;
+  return { q: rq, r: rr };
+}
+
+/** One hexagonal prism (pointy-top, matching the patch cells) for shards and tiles. */
+export function hexPrismGeometry(radius = HEX_RADIUS, depth = HEX_DEPTH): THREE.BufferGeometry {
+  const geometry = new THREE.CylinderGeometry(radius, radius, depth * 2, 6, 1, false);
+  // CylinderGeometry stands along Y; laid into the XY plane its corners fall on ±30°, ±90°,
+  // ±150° — exactly the pointy-top cells of the patch.
+  geometry.rotateX(Math.PI / 2);
+  return geometry;
+}
+/** Jagged crack lines radiating from a strike point, in patch-local coordinates. */
+export function crackSegments(x: number, y: number, reach: number, seed: number): number[] {
+  const random = seededRandom(seed),
+    out: number[] = [],
+    branches = 3 + Math.floor(random() * 2);
+  for (let b = 0; b < branches; b++) {
+    let ax = x,
+      ay = y,
+      angle = random() * Math.PI * 2;
+    const steps = 2 + Math.floor(random() * 2);
+    for (let i = 0; i < steps; i++) {
+      const length = (reach / steps) * (0.6 + random() * 0.8);
+      angle += (random() - 0.5) * 1.1;
+      const bx = ax + Math.cos(angle) * length,
+        by = ay + Math.sin(angle) * length;
+      out.push(ax, ay, HEX_DEPTH + 0.004, bx, by, HEX_DEPTH + 0.004);
+      ax = bx;
+      ay = by;
+    }
+  }
+  return out;
+}
+
 /** Connected polyhex pieces: different cell counts/layouts, always the same hexagonal prism. */
 export function shieldLayout(serial: number): HexCell[] {
   const random = seededRandom(7411 + serial * 127),
@@ -46,12 +104,10 @@ export function shieldPattern(serial: number) {
 
 export function makeShieldPatch(serial: number): THREE.Group {
   const cells = shieldLayout(serial),
-    radius = 0.29,
-    depth = 0.05,
-    centers = cells.map(
-      (c) => new THREE.Vector2(Math.sqrt(3) * radius * (c.q + c.r / 2), 1.5 * radius * c.r),
-    );
-  const center = centers.reduce((a, b) => a.add(b), new THREE.Vector2()).divideScalar(cells.length);
+    radius = HEX_RADIUS,
+    depth = HEX_DEPTH,
+    centers = cells.map((c) => cellPoint(c.q, c.r, radius));
+  const center = layoutCentroid(cells, radius);
   const fill: number[] = [],
     wires: number[] = [],
     glow: number[] = [],
@@ -187,6 +243,7 @@ export function makeShieldPatch(serial: number): THREE.Group {
   );
   group.userData.pattern = shieldPattern(serial);
   group.userData.cells = cells;
+  group.userData.centroid = [center.x, center.y];
   group.userData.count = cells.length;
   group.userData.serial = serial;
   group.userData.kind = 'shield-echo';

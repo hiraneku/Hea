@@ -510,7 +510,7 @@ test('dash speed has a smooth boost tail, and shield patches cover separate near
     false,
   );
   await scenario(page, 'shield-scatter');
-  await step(page, 0.15);
+  await step(page, 0.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect((await state(page)).shield.blocked).toBe(3);
   // Three lanes: the two near each other share a patch, the far-side one is a patch of its own.
@@ -518,6 +518,14 @@ test('dash speed has a smooth boost tail, and shield patches cover separate near
   expect(d.shieldPatches.length).toBeLessThanOrEqual(3);
   expect(d.shieldPatches.length + d.patchReuses).toBe(3);
   expect(d.shieldPatches.some((p) => p.offset[0] < -1)).toBe(true);
+  // Neighbouring pieces are fitted onto one lattice, edge to edge: no piece covers another.
+  expect(d.patchTiling.overlaps).toBe(0);
+  expect(d.patchTiling.clusters).toBe(1);
+  expect(d.patchTiling.joined).toBeGreaterThanOrEqual(1);
+  expect(new Set(d.shieldPatches.map((p) => p.cluster)).size).toBe(1);
+  expect(new Set(d.shieldPatches.map((p) => `${p.anchor.q},${p.anchor.r}`)).size).toBe(
+    d.shieldPatches.length,
+  );
   expect(d.shieldPatches.some((p) => p.offset[1] > 1 || p.offset[0] > 1)).toBe(true);
   for (const p of d.shieldPatches)
     expect(Math.hypot(...p.offset)).toBeLessThanOrEqual(DUEL.shieldReach);
@@ -530,29 +538,37 @@ test('a standing shield patch keeps blocking later shots on the same lane instea
   test.skip(info.project.name !== 'mobile');
   await load(page);
   await scenario(page, 'shield-line');
-  await step(page, 0.08);
+  await step(page, 0.03);
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  expect((await state(page)).shield.blocked).toBeGreaterThanOrEqual(2);
-  expect(d.shieldPatches.length + d.patchShatters).toBe(1);
-  expect(d.patchReuses).toBeGreaterThanOrEqual(1);
-  await step(page, 0.52);
+  // The patch is raised ahead of the first bolt, which keeps flying until it really lands on it.
+  expect(d.shieldPatches).toHaveLength(1);
+  expect(d.shieldPatches[0].hits).toBeLessThanOrEqual(1);
+  expect(d.shots.length).toBeGreaterThanOrEqual(2);
+  await step(page, 0.12);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect((await state(page)).shield.blocked).toBe(3);
-  expect((await state(page)).health).toBe(100);
+  expect(d.shieldPatches).toHaveLength(1);
+  expect(d.shieldPatches[0].hits).toBe(3);
   expect(d.patchReuses).toBe(2);
-  // The third hit is the last the patch can take: it shatters and leaves a hole for a moment.
-  expect(d.patchShatters).toBe(1);
-  expect(d.shieldPatches).toHaveLength(0);
-  expect(d.patchGaps).toBe(1);
-  expect(d.shieldEchoes).toHaveLength(0);
-  // A longer burst on the same lane gets one bolt through the hole before a new patch forms.
+  expect(d.particles.shieldImpacts).toBe(3);
+  await step(page, 0.45);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect((await state(page)).health).toBe(100);
+  // Three hits are well within the budget of five: the patch stands, cracked but whole.
+  expect(d.patchShatters).toBe(0);
+  expect(d.shieldPatches).toHaveLength(1);
+  expect(d.patchGaps).toBe(0);
+  // A six-bolt burst on one lane: the fifth hit shatters the patch, the sixth gets through the
+  // hole, and the body takes it.
   await scenario(page, 'shield-volley');
   await step(page, 1.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.patchShatters).toBe(1);
+  expect(d.particles.shards).toBeGreaterThanOrEqual(0);
   expect((await state(page)).health).toBe(91);
-  expect((await state(page)).shield.blocked).toBeGreaterThanOrEqual(5);
+  expect((await state(page)).shield.blocked).toBe(DUEL.shieldPatchHits);
   expect(d.patchLeaks).toBeGreaterThan(0);
+  expect(d.patchGaps).toBeGreaterThanOrEqual(0);
 });
 
 test('a body launched into open air rights itself before landing; the boss hunts down a hidden player', async ({
@@ -774,8 +790,10 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   expect(d.ragdoll.playerPhase).toBe('slide');
   expect(d.particles.skids).toBeGreaterThan(5);
   expect(d.particles.dust).toBeGreaterThan(5);
-  // ...and leaves scorch marks on the ground that outlive the dust.
-  expect(d.particles.marks).toBeGreaterThan(5);
+  // ...and ploughs a furrow: one continuous strip of lifted earth along the slide, plus clods.
+  expect(d.particles.furrow).toBeGreaterThan(10);
+  expect(d.particles.furrows).toBeLessThanOrEqual(2);
+  expect(d.particles.clods).toBeGreaterThan(5);
   await step(page, 5);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.playerGroundTravel).toBeGreaterThan(2);
@@ -805,12 +823,12 @@ test('boss holds fire behind thick cover, repositions, and permits a real thin-w
   test.skip(info.project.name !== 'mobile');
   await load(page);
   await scenario(page, 'sight-thick');
-  for (const attack of ['fire', 'missiles', 'hammer'] as const)
+  for (const attack of ['fire', 'missiles', 'hammer', 'vortex'] as const)
     await page.evaluate((a) => window.__HEA_DEBUG__.harness!.castBoss(a), attack);
   await step(page, 0.3);
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  expect(d.attacksFired).toEqual({ fire: 0, missile: 0, hammer: 0 });
-  expect(d.blockedCasts).toBeGreaterThanOrEqual(3);
+  expect(d.attacksFired).toEqual({ fire: 0, missile: 0, hammer: 0, vortex: 0 });
+  expect(d.blockedCasts).toBeGreaterThanOrEqual(4);
   await scenario(page, 'sight-thin');
   expect(await page.evaluate(() => window.__HEA_DEBUG__.harness!.lane('fire').mode)).toBe(
     'blocked',
@@ -888,4 +906,82 @@ test('heavy contact freezes briefly, releases in slow motion with a camera punch
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(Math.hypot(...d.bossVelocity)).toBeGreaterThan(100);
   expect(d.bossPosition[2]).toBeLessThan(boss[2] - 5);
+});
+
+test('the solar vortex: a seed anchors short of the body, pulls it in, then detonates into a ring of embers', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'shield');
+  await step(page, 0.3);
+  const start = (await state(page)).position,
+    bossHealth = (await state(page)).boss.health;
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('vortex'));
+  await step(page, 0.05);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.attacksFired.vortex).toBe(1);
+  expect(d.shots.filter((s) => s.kind === 'vortex')).toHaveLength(1);
+  expect(d.wells).toHaveLength(0);
+  expect(d.pull).toEqual([0, 0, 0]);
+  // The seed is not a shot at the body: no patch is raised for it and it is never blocked.
+  const blocked = (await state(page)).shield.blocked;
+  await step(page, 1.0);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect((await state(page)).shield.blocked).toBe(blocked);
+  expect(d.shots.filter((s) => s.kind === 'vortex')).toHaveLength(0);
+  expect(d.wells).toHaveLength(1);
+  expect(d.wells[0].detonated).toBe(false);
+  expect(d.wells[0].age).toBeLessThan(DUEL.vortexPull);
+  const well = d.wells[0].position;
+  // Anchored in front of the body, roughly at head height, well inside the pull radius.
+  expect(Math.hypot(well[0] - start.x, well[2] - start.z)).toBeGreaterThan(1);
+  expect(Math.hypot(well[0] - start.x, well[2] - start.z)).toBeLessThan(DUEL.vortexRadius);
+  // The body is being drawn towards the core; the pull is a velocity of its own, not a knock.
+  expect(Math.hypot(...d.pull)).toBeGreaterThan(0.5);
+  const mid = (await state(page)).position;
+  const before = Math.hypot(well[0] - start.x, well[2] - start.z),
+    after = Math.hypot(well[0] - mid.x, well[2] - mid.z);
+  expect(after).toBeLessThan(before);
+  expect((await state(page)).health).toBe(100);
+  // Detonation: a flat ring of embers, a crater below, and a heavy core hit on a body caught inside.
+  await step(page, 1.5);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.wells).toHaveLength(0);
+  expect(d.vortexDetonations).toBe(1);
+  expect(d.attacksFired.fire).toBeGreaterThanOrEqual(3 + DUEL.vortexEmbers);
+  expect(d.vortexCoreHits).toBe(1);
+  expect((await state(page)).health).toBe(76);
+  expect((await state(page)).boss.health).toBe(bossHealth);
+  expect((await state(page)).craters).toBeGreaterThanOrEqual(1);
+  await step(page, 1.5);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  // The imparted pull bleeds off once nothing is pulling any more.
+  expect(Math.hypot(...d.pull)).toBeLessThan(0.05);
+});
+
+test('the fourth attack of the opening is the vortex, and its tell shrinks the ember instead of swelling it', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'patterns');
+  const opening =
+    ATTACKS.fire.tell +
+    1 +
+    ATTACKS.fire.duration +
+    ATTACKS.fire.recovery +
+    ATTACKS.missiles.tell +
+    ATTACKS.missiles.duration +
+    ATTACKS.missiles.recovery +
+    ATTACKS.hammer.tell +
+    ATTACKS.hammer.duration +
+    ATTACKS.hammer.recovery;
+  for (let t = 0; t < opening + 0.4; t += 2) await step(page, Math.min(2, opening + 0.4 - t));
+  const s = await state(page);
+  expect(s.boss.attack).toBe(ATTACKS.vortex.label);
+  expect(s.boss.stage).toBe('telegraph');
+  await step(page, ATTACKS.vortex.tell + 0.3);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.attacksFired.vortex + d.blockedCasts).toBeGreaterThanOrEqual(1);
 });

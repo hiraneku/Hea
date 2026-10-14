@@ -8,6 +8,8 @@ import {
   rangeCorrection,
   steerMissile,
   threatTime,
+  ATTACK_ORDER,
+  PROJECTILES,
 } from '../../src/game/combat';
 import { DestructibleVolume, TerrainDeformation } from '../../src/game/destruction';
 import { groundHeight, resolveCircle, segmentBox } from '../../src/game/math';
@@ -92,6 +94,32 @@ describe('one boss, deliberate attack patterns', () => {
     expect(shots[0].attack).toBe('fire');
     expect(shots[ATTACKS.fire.shots].attack).toBe('missiles');
     expect(shots[ATTACKS.fire.shots + ATTACKS.missiles.shots].attack).toBe('hammer');
+  });
+  it('closes the learnable opening with a single solar vortex seed', () => {
+    const d = new BossDirector(),
+      opening =
+        ATTACKS.fire.tell +
+        1 +
+        ATTACKS.fire.duration +
+        ATTACKS.fire.recovery +
+        ATTACKS.missiles.tell +
+        ATTACKS.missiles.duration +
+        ATTACKS.missiles.recovery +
+        ATTACKS.hammer.tell +
+        ATTACKS.hammer.duration +
+        ATTACKS.hammer.recovery;
+    d.step(opening + 0.01);
+    expect(d.attack).toBe('vortex');
+    expect(d.stage).toBe('telegraph');
+    const shots = d
+      .step(ATTACKS.vortex.tell + ATTACKS.vortex.duration)
+      .filter((c) => c.type === 'shot');
+    expect(shots).toHaveLength(1);
+    expect(shots[0].attack).toBe('vortex');
+    expect(ATTACK_ORDER).toEqual(['fire', 'missiles', 'hammer', 'vortex']);
+    expect(PROJECTILES.vortex.speed).toBeLessThan(PROJECTILES.fire.speed);
+    expect(DUEL.vortexPull).toBeGreaterThan(1);
+    expect(DUEL.vortexCoreRadius).toBeLessThan(DUEL.vortexRadius);
   });
   it('does not skip or duplicate attacks at low frame rates', () => {
     const a = new BossDirector(),

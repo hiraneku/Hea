@@ -240,9 +240,18 @@ export class Boss {
         ? 1.05 + (this.director.stage === 'telegraph' ? charge : 1) * 0.4
         : 0.52 + charge * 0.14,
     );
-    const heavy = this.director.attack === 'hammer' && this.director.stage === 'telegraph';
-    this.ember.scale.setScalar(1 + charge * (heavy ? 5.8 : 1.8) + Math.sin(time * 5) * 0.1);
+    const heavy = this.director.attack === 'hammer' && this.director.stage === 'telegraph',
+      vortex = this.director.attack === 'vortex' && this.director.stage === 'telegraph';
+    // The vortex tell is the opposite of the hammer's swell: the ember shrinks to a dense,
+    // dark-red bead while the charge ring collapses in on it.
+    this.ember.scale.setScalar(
+      vortex
+        ? Math.max(0.35, 1 - charge * 0.6) + Math.sin(time * 14) * 0.05 * charge
+        : 1 + charge * (heavy ? 5.8 : 1.8) + Math.sin(time * 5) * 0.1,
+    );
     this.ember.position.z = 0.75 + (heavy ? charge * 0.9 : 0);
+    if (vortex) this.chargeRing.scale.setScalar(1.3 - charge * 0.75);
+    this.chargeRing.rotation.z -= vortex ? dt * charge * 6 : 0;
     this.gates.forEach((g) => {
       g.age += dt;
       g.object.visible = g.age < 0.66;

@@ -124,9 +124,31 @@ export class AudioEngine {
     this.air(0.35, 1800, 0.5);
     this.tone(95, 42, 0.3, 0.2);
   }
-  block() {
+  /** An Aegis piece snapping up in front of the body: quiet, the hit itself comes later. */
+  raise() {
+    this.tone(1500, 1900, 0.07, 0.05, 'sine');
+  }
+  /** A shot striking a standing patch: a glassy chime, with a thud underneath for heavy shots. */
+  block(kind: 'fire' | 'missile' | 'hammer' | 'vortex' | 'player' = 'fire') {
     this.tone(1200, 500, 0.2, 0.18);
     this.tone(1700, 700, 0.3, 0.1);
+    if (kind === 'hammer') {
+      this.tone(90, 38, 0.4, 0.4);
+      this.air(0.3, 1400, 0.35);
+    } else if (kind === 'missile') this.air(0.12, 2600, 0.18);
+    else this.air(0.08, 4200, 0.12);
+  }
+  /** A solar vortex opening: a rising hum that keeps climbing while it pulls. */
+  vortex() {
+    this.tone(70, 190, 1.7, 0.22, 'sawtooth');
+    this.tone(140, 380, 1.7, 0.08, 'triangle');
+    this.air(1.6, 900, 0.14);
+  }
+  /** The vortex bursting into its ring of embers. */
+  detonate() {
+    this.tone(180, 30, 0.5, 0.5, 'triangle');
+    this.tone(900, 160, 0.25, 0.2);
+    this.air(0.55, 2600, 0.5);
   }
   /** A spent shield patch breaking up: a glassy crack falling into a short hiss. */
   shatter() {
