@@ -6,10 +6,10 @@ export const ARENA = {
   ceiling: 42,
 } as const;
 export const FLIGHT = {
-  speed: 12.5,
-  verticalSpeed: 9,
-  acceleration: 6.5,
-  braking: 4.2,
+  speed: 14.5,
+  verticalSpeed: 10,
+  acceleration: 10.5,
+  braking: 7,
   hoverHeight: 0.85,
-  dashSpeed: 43,
+  dashSpeed: 48.5,
 } as const;

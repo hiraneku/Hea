@@ -51,6 +51,7 @@ export interface Snapshot {
     charge: number;
     distance: number;
     enraged: boolean;
+    maneuver: 'strafe' | 'flank' | 'press' | 'low-pass' | 'rise' | 'recover';
   };
   dash: number;
   spell: SpellId;
@@ -60,7 +61,11 @@ export interface Snapshot {
   wallsBroken: number;
   craters: number;
   launched: boolean;
-  flight: { altitude: number; speed: number; phase: 'hover' | 'flying' | 'contact' | 'launch' };
+  flight: {
+    altitude: number;
+    speed: number;
+    phase: 'hover' | 'flying' | 'contact' | 'launch' | 'dash' | 'ragdoll';
+  };
   lockedOn: boolean;
   fps: number;
   elapsed: number;

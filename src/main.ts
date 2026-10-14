@@ -60,7 +60,7 @@ app.innerHTML = `
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.3</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.4</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -259,16 +259,16 @@ function renderPanel(type: Exclude<typeof panel, null>) {
   }[type];
   let content = '';
   if (type === 'help') {
-    content = `<p class="panel-description">Hadapi satu boss terbang, IGNIS. Terbang bebas dengan joystick/WASD, naik-turun, dan melayang saat input dilepas. IGNIS memberondong api menyebar, melantunkan mantra homing dari lingkaran sihirnya, lalu melepas bola surya besar. Nova dapat menghempaskan boss; serangan beratnya juga bisa melontarkanmu menembus dinding atau menghantam tanah.</p>
+    content = `<p class="panel-description">Hadapi satu boss terbang, IGNIS. Terbang, belok, dan dash dengan momentum. IGNIS berganti posisi serta ketinggian, menembak lewat lingkaran di sekelilingnya, melepas 12 orb homing, dan mengisi bola surya besar. Nova dapat menghempaskan boss; serangan beratnya juga bisa melontarkanmu menembus dinding atau menghantam tanah.</p>
       <div class="control-tabs"><button id="desktop-tab" class="${!isTouch ? 'active' : ''}">KEYBOARD + MOUSE</button><button id="mobile-tab" class="${isTouch ? 'active' : ''}">LAYAR SENTUH</button></div>
       <div id="desktop-guide" class="control-guide" ${isTouch ? 'hidden' : ''}>
-        <div><span>Bergerak</span><b><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></b></div><div><span>Arahkan kamera / serang</span><b>MOUSE / KLIK KIRI</b></div><div><span>Terbang naik / turun</span><b>TAHAN <kbd>SPACE</kbd> / <kbd>C</kbd></b></div><div><span>Dash · kebal saat melesat</span><b><kbd>SHIFT</kbd></b></div><div><span>Kunci / lepas pandangan boss</span><b><kbd>E</kbd> / KLIK KANAN</b></div><div><span>Perisai Aegis maksimum</span><b>DEPAN + SAMPING</b></div><div><span>Pilih sihir</span><b><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> / <kbd>Q</kbd></b></div><div><span>Jeda / ulangi arena</span><b><kbd>ESC</kbd> / <kbd>R</kbd></b></div>
+        <div><span>Bergerak</span><b><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></b></div><div><span>Arahkan kamera / serang</span><b>MOUSE / KLIK KIRI</b></div><div><span>Terbang naik / turun</span><b>TAHAN <kbd>SPACE</kbd> / <kbd>C</kbd></b></div><div><span>Dash · kebal pada awal luncuran</span><b><kbd>SHIFT</kbd></b></div><div><span>Kunci / lepas pandangan boss</span><b><kbd>E</kbd> / KLIK KANAN</b></div><div><span>Perisai Aegis maksimum</span><b>DEPAN + SAMPING</b></div><div><span>Pilih sihir</span><b><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> / <kbd>Q</kbd></b></div><div><span>Jeda / ulangi arena</span><b><kbd>ESC</kbd> / <kbd>R</kbd></b></div>
       </div>
       <div id="mobile-guide" class="control-guide" ${!isTouch ? 'hidden' : ''}>
         <div><span>Bergerak</span><b>JOYSTICK KIRI</b></div><div><span>Arahkan kamera</span><b>GESER AREA KANAN</b></div><div><span>Serang berulang</span><b>TAHAN TOMBOL SERANG</b></div><div><span>Ganti sihir</span><b>SENTUH SLOT SIHIR</b></div><div><span>Terbang naik / turun</span><b>TAHAN NAIK / TURUN</b></div><div><span>Menghindar / kunci kamera</span><b>DASH / FOKUS</b></div><div><span>Perisai Aegis maksimum</span><b>DEPAN + SAMPING</b></div><div><span>Bantuan bidik</span><b>OTOMATIS AKTIF</b></div>
       </div>
       <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${['Proyektil cepat. Ikuti target dengan crosshair.', 'Sinar instan. Tepat untuk target yang bergerak.', 'Ledakan kuat. Hempaskan boss dan hancurkan penghalang.'][i]}</span></div>`).join('')}</div>
-      <p class="panel-note">Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Proyektil di sektor terlindungi diblokir selama ${DUEL.shieldWindow} detik, lalu cooldown ${DUEL.shieldCooldown} detik. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat, lalu hempasan cepat. Nova memberi reaksi yang sama pada boss. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Dash dapat membantu pemulihan. Seret kamera untuk melepas fokus.</p>
+      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Proyektil di sektor terlindungi diblokir selama ${DUEL.shieldWindow} detik, lalu cooldown ${DUEL.shieldCooldown} detik. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat, lalu hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Dash dapat membantu pemulihan. Seret kamera untuk melepas fokus.</p>
       <button class="primary-button full-width" id="panel-done"><span>MENGERTI</span>${icons.arrow}</button>`;
   } else if (type === 'settings') {
     content = `<p class="panel-description">Preferensimu tersimpan di perangkat ini.</p>
@@ -370,7 +370,16 @@ function updateHud(s: Snapshot) {
     'aria-valuenow',
     String(Math.ceil((s.boss.health / s.boss.maxHealth) * 100)),
   );
-  $('#boss-phase').textContent = s.boss.enraged ? 'OVERDRIVE' : 'SOLAR WARDEN';
+  $('#boss-phase').textContent = s.boss.enraged
+    ? 'OVERDRIVE'
+    : {
+        strafe: 'MENGITARI',
+        flank: 'MEMUTAR SAYAP',
+        press: 'MENDEKAT',
+        'low-pass': 'LINTAS RENDAH',
+        rise: 'MENANJAK',
+        recover: 'MEMULIHKAN POSISI',
+      }[s.boss.maneuver];
   $('#boss-action').textContent = !s.boss.alive
     ? 'DITAKLUKKAN'
     : s.boss.stage === 'stagger'
@@ -412,7 +421,7 @@ function updateHud(s: Snapshot) {
   $('#menu-fps').textContent = String(s.fps);
   $('#speed-lines').classList.toggle(
     'active',
-    (s.dash < 0.12 || s.launched) && s.mode === 'playing' && !settings.reducedEffects,
+    (s.flight.speed > 23 || s.launched) && s.mode === 'playing' && !settings.reducedEffects,
   );
   document.querySelectorAll<HTMLElement>('.spell-slot').forEach((button, i) => {
     button.classList.toggle('selected', i === s.spell);
@@ -433,11 +442,15 @@ function updateHud(s: Snapshot) {
   $('#flight-state').textContent =
     s.flight.phase === 'contact'
       ? 'KONTAK'
-      : s.flight.phase === 'launch'
-        ? 'TERHEMPAS'
-        : s.flight.phase === 'hover'
-          ? 'MELAYANG'
-          : 'TERBANG';
+      : s.flight.phase === 'ragdoll'
+        ? 'TERPUTAR'
+        : s.flight.phase === 'dash'
+          ? 'MELAJU'
+          : s.flight.phase === 'launch'
+            ? 'TERHEMPAS'
+            : s.flight.phase === 'hover'
+              ? 'MELAYANG'
+              : 'TERBANG';
   $('#flight-altitude').textContent = `${s.flight.altitude.toFixed(1)} M`;
 }
 

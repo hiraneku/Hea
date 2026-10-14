@@ -290,6 +290,7 @@ test('boss uses all patterns, missile guidance, victory and defeat end the duel 
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.attacksFired.fire).toBe(ATTACKS.fire.shots);
   expect(d.attacksFired.missile).toBeGreaterThan(0);
+  expect((await state(page)).boss.distance).toBeGreaterThan(12);
   expect(d.missiles.length).toBeGreaterThan(0);
   const velocity = d.missiles[0].velocity;
   await step(page, 0.2);
@@ -461,4 +462,105 @@ test('a fatal Nova still pauses and launches the boss before the victory result'
   await step(page, 2);
   expect((await state(page)).mode).toBe('victory');
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossVisible).toBe(false);
+});
+
+test('dash speed has a smooth boost tail, and shield patches cover separate nearby trajectories', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'flight');
+  await page.locator('#touch-dash').tap();
+  await step(page, 0.016);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.dashMotion.strength).toBeLessThan(0.3);
+  await step(page, 0.12);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.dashMotion.strength).toBeGreaterThan(0.9);
+  await step(page, 0.3);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.dashMotion.strength).toBeGreaterThan(0);
+  expect(d.dashMotion.strength).toBeLessThan(0.2);
+  expect(d.dashMotion.invulnerable).toBe(false);
+  await step(page, 0.1);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).dashMotion.active).toBe(
+    false,
+  );
+  await scenario(page, 'shield-scatter');
+  await step(page, 0.15);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect((await state(page)).shield.blocked).toBe(3);
+  expect(d.shieldPatches).toHaveLength(3);
+  expect(d.shieldPatches.some((p) => p.offset[0] < -1)).toBe(true);
+  expect(d.shieldPatches.some((p) => p.offset[0] > 1)).toBe(true);
+  expect(d.shieldPatches.some((p) => p.offset[1] > 1)).toBe(true);
+  for (const p of d.shieldPatches) expect(Math.hypot(...p.offset)).toBeLessThanOrEqual(2.75);
+});
+
+test('fire comes from warmed satellite gates, seekers double, and boss altitude choices vary', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'flight');
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('fire'));
+  await step(page, 0.03);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.pendingFire).toBe(1);
+  expect(d.fireGates.length).toBeGreaterThan(0);
+  expect(d.attacksFired.fire).toBe(0);
+  await step(page, 0.05);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.attacksFired.fire).toBe(1);
+  expect(d.shots.find((s) => s.kind === 'fire')!.origin).toEqual(d.fireOrigins[0].origin);
+  await scenario(page, 'patterns');
+  await step(page, 1 + ATTACKS.fire.tell + ATTACKS.fire.duration + 0.15);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.attacksFired.fire).toBe(44);
+  expect(new Set(d.fireOrigins.map((g) => g.side)).size).toBe(4);
+  for (const g of d.fireOrigins)
+    expect(Math.hypot(g.local[0], g.local[1] - 0.1)).toBeGreaterThan(2.3);
+  await step(page, ATTACKS.fire.recovery + ATTACKS.missiles.tell + ATTACKS.missiles.duration);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.attacksFired.missile).toBe(12);
+  expect(d.bossDecisions).toBeGreaterThanOrEqual(3);
+});
+
+test('heavy hit and Nova drive real body tumbling, recover smoothly and cancel interrupted casts', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'ragdoll');
+  await step(page, 0.18);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.player).toBe(true);
+  const orientation = d.ragdoll.playerOrientation;
+  await step(page, 0.36);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.playerOrientation).not.toEqual(orientation);
+  expect(d.ragdoll.player).toBe(true);
+  await step(page, 3);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).ragdoll.player).toBe(
+    false,
+  );
+  await scenario(page, 'nova');
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('fire'));
+  await page.locator('#touch-fire').tap();
+  await step(page, 0.04);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.boss).toBe(true);
+  expect(d.pendingFire).toBe(0);
+  expect(d.fireGates).toHaveLength(0);
+  const pose = d.ragdoll.bossOrientation;
+  await step(page, 0.45);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.bossOrientation).not.toEqual(pose);
+  expect(d.attacksFired.fire).toBe(0);
+  await page.locator('#pause-button').tap();
+  await page.locator('#restart-button').tap();
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.boss).toBe(false);
+  expect(d.ragdoll.player).toBe(false);
+  expect(d.pendingFire).toBe(0);
 });

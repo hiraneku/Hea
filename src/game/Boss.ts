@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { BossDirector, DUEL } from './combat';
 import { Effects, makeSigil, Ribbon } from './Effects';
+import { BodyTumble, LaunchRelease, ease } from './motion';
+import { BossTactics, fireGateOffset } from './BossTactics';
 
 /** A single floating spellcaster: dark blockout body and an animated, front-facing solar sigil. */
 export class Boss {
@@ -10,6 +12,12 @@ export class Boss {
   readonly impulse = new THREE.Vector3();
   readonly lockedTarget = new THREE.Vector3();
   readonly director = new BossDirector();
+  readonly tactics = new BossTactics();
+  readonly tumble = new BodyTumble();
+  readonly release = new LaunchRelease();
+  private gates: { object: THREE.Group; age: number }[] = [];
+  private gateCursor = 0;
+  readonly gateHistory: { side: number; origin: number[]; boss: number[]; local: number[] }[] = [];
   readonly ribbon = new Ribbon(70, 0.034, '#ffd1a0');
   health: number = DUEL.bossHealth;
   knockTime = 0;
@@ -69,6 +77,12 @@ export class Boss {
     this.light.position.set(0, 0.3, 1.3);
     this.group.add(this.light);
     scene.add(this.group, this.ribbon.mesh);
+    for (let i = 0; i < 8; i++) {
+      const object = makeSigil(fx.sigilMap, 0.68, '#ffac55');
+      object.visible = false;
+      scene.add(object);
+      this.gates.push({ object, age: 10 });
+    }
     this.reset();
   }
   get alive() {
@@ -79,6 +93,9 @@ export class Boss {
   }
   setQuality(low: boolean) {
     this.light.visible = !low;
+    this.gates.forEach((g) => {
+      g.object.children[1].visible = !low;
+    });
   }
   reset() {
     this.health = DUEL.bossHealth;
@@ -90,6 +107,12 @@ export class Boss {
     this.deathDelay = -1;
     this.castRotation = 0;
     this.director.reset();
+    this.tactics.reset();
+    this.tumble.reset();
+    this.release.cancel();
+    this.clearGates();
+    this.gateHistory.length = 0;
+    this.gateCursor = 0;
     this.group.visible = true;
     this.group.scale.setScalar(1);
     this.ribbon.reset(this.position);
@@ -98,6 +121,37 @@ export class Boss {
   muzzle(radius = 0) {
     this.group.updateMatrixWorld(true);
     return this.group.localToWorld(new THREE.Vector3(0, 0.1, 1.05 + radius * 0.8));
+  }
+  clearGates() {
+    this.gates.forEach((g) => {
+      g.age = 10;
+      g.object.visible = false;
+    });
+  }
+  get activeGates() {
+    return this.gates
+      .filter((g) => g.object.visible)
+      .map((g) => ({ position: g.object.position.toArray(), age: g.age }));
+  }
+  fireGate(index: number, target: THREE.Vector3, floor: (x: number, z: number) => number) {
+    const { local, side } = fireGateOffset(index, this.director.pattern);
+    this.group.updateMatrixWorld(true);
+    const origin = this.group.localToWorld(local.clone());
+    origin.y = Math.max(origin.y, floor(origin.x, origin.z) + 0.9);
+    const gate = this.gates[this.gateCursor++ % this.gates.length];
+    gate.object.position.copy(origin);
+    gate.object.lookAt(target);
+    gate.object.scale.setScalar(0.2);
+    gate.object.visible = true;
+    gate.age = 0;
+    this.gateHistory.push({
+      side,
+      origin: origin.toArray(),
+      boss: this.position.toArray(),
+      local: local.toArray(),
+    });
+    if (this.gateHistory.length > 48) this.gateHistory.shift();
+    return origin;
   }
   private seedPosition(index: number) {
     const angle = this.castRotation + (index / 6) * Math.PI * 2;
@@ -111,6 +165,7 @@ export class Boss {
   present(time: number, dt: number, target: THREE.Vector3, camera: THREE.Vector3) {
     this.group.position.copy(this.position);
     this.group.lookAt(target);
+    this.group.quaternion.copy(this.tumble.step(dt, this.group.quaternion.clone()));
     this.group.updateMatrixWorld(true);
     this.flash = Math.max(0, this.flash - dt);
     this.plate.material.emissiveIntensity = this.flash > 0 ? 2.1 : 0.025;
@@ -125,6 +180,17 @@ export class Boss {
     const heavy = this.director.attack === 'hammer' && this.director.stage === 'telegraph';
     this.ember.scale.setScalar(1 + charge * (heavy ? 5.8 : 1.8) + Math.sin(time * 5) * 0.1);
     this.ember.position.z = 0.75 + (heavy ? charge * 0.9 : 0);
+    this.gates.forEach((g) => {
+      g.age += dt;
+      g.object.visible = g.age < 0.46;
+      if (!g.object.visible) return;
+      g.object.scale.setScalar(0.2 + ease(g.age / 0.06) * 0.8);
+      g.object.rotateZ(dt * 0.5);
+      g.object.children.forEach((o) => {
+        if (o instanceof THREE.Mesh)
+          (o.material as THREE.Material).opacity = (1 - ease((g.age - 0.24) / 0.22)) * 0.92;
+      });
+    });
     this.castRotation = time * 0.55;
     this.spellSeeds.forEach((seed, i) => {
       seed.visible = this.director.attack === 'missiles' && this.director.stage !== 'recover';

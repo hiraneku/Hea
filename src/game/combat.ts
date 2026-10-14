@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { clamp, segmentSphere, type Point3 } from './math';
+import { clamp, segmentSphere, seededRandom, type Point3 } from './math';
 
 /** Main duel timings and thresholds; deliberately tunable against additional reference footage. */
 export const DUEL = {
@@ -13,7 +13,9 @@ export const DUEL = {
   shieldPrediction: 0.13,
   bodyRadius: 0.72,
   shieldArcDegrees: 210,
-  novaLaunch: 62,
+  shieldShell: 1.3,
+  shieldReach: 2.75,
+  novaLaunch: 70,
   novaPause: 0.105,
   wallBreakSpeed: 12,
   groundBreakSpeed: 10,
@@ -90,19 +92,19 @@ export const ATTACKS = {
     label: 'RENTETAN API',
     warning: 'SALVO API',
     tell: 0.9,
-    duration: 3.65,
+    duration: 4.8,
     recovery: 0.95,
-    shots: 30,
-    interval: 0.12,
+    shots: 44,
+    interval: 0.11,
   },
   missiles: {
     label: 'MANTRA PEMBURU',
     warning: 'SIGIL MENGUNCI',
     tell: 1.05,
-    duration: 1.0,
+    duration: 1.75,
     recovery: 1.25,
-    shots: 3,
-    interval: 0.3,
+    shots: 6,
+    interval: 0.28,
   },
   hammer: {
     label: 'HEMPASAN SURYA',
@@ -130,8 +132,12 @@ export class BossDirector {
   elapsed = 0;
   reset() {
     this.index = this.fired = this.elapsed = 0;
+    this.sequence = ['fire', 'missiles', 'hammer'];
     this.stage = 'telegraph';
     this.opening = true;
+  }
+  get pattern() {
+    return this.index;
   }
   get attack(): AttackId {
     return this.sequence[this.index % this.sequence.length];
@@ -168,7 +174,18 @@ export class BossDirector {
           this.opening = false;
         } else if (this.stage === 'attack') this.stage = 'recover';
         else {
+          const previous = this.attack;
           this.index++;
+          if (this.index % 3 === 0) {
+            const random = seededRandom(this.index * 997 + 71);
+            this.sequence = ['fire', 'missiles', 'hammer'];
+            for (let i = 2; i > 0; i--) {
+              const j = Math.floor(random() * (i + 1));
+              [this.sequence[i], this.sequence[j]] = [this.sequence[j], this.sequence[i]];
+            }
+            if (this.sequence[0] === previous)
+              [this.sequence[0], this.sequence[1]] = [this.sequence[1], this.sequence[0]];
+          }
           this.stage = 'telegraph';
           commands.push({ type: 'tell', attack: this.attack, index: 0 });
         }
@@ -209,9 +226,9 @@ export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer';
 /** The same radius drives the visible core, shield size and swept collision. */
 export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, stagger: 0 },
-  fire: { radius: 0.32, speed: 30, life: 4, launch: 30, pause: 0.075, stagger: 0.75 },
-  missile: { radius: 0.34, speed: 28, life: 5.5, launch: 52, pause: 0.095, stagger: 1.1 },
-  hammer: { radius: 1.25, speed: 31, life: 5, launch: 76, pause: 0.12, stagger: 1.35 },
+  fire: { radius: 0.32, speed: 30, life: 4, launch: 36, pause: 0.065, stagger: 0.85 },
+  missile: { radius: 0.34, speed: 28, life: 5.5, launch: 60, pause: 0.08, stagger: 1.2 },
+  hammer: { radius: 1.25, speed: 31, life: 5, launch: 84, pause: 0.105, stagger: 1.5 },
 } as const;
 
 /** Front and peripheral vision in 3D; the rear cone is a genuine blind spot, even while active. */
@@ -272,4 +289,33 @@ export function guideMissile(
   const desired = offset.addScaledVector(targetVelocity, lead * (distance < 2 ? 0.35 : 0.85));
   const turnRate = 3.2 + close * 10.8;
   return steerMissile(velocity, desired, turnRate, dt, speed);
+}
+
+/** Project a patch onto the ACTUAL nearby trajectory, retaining off-centre X/Y offsets. */
+export function shieldIntercept(
+  projectile: Vector3,
+  projectileVelocity: Vector3,
+  center: Vector3,
+  playerVelocity: Vector3,
+  facing: Vector3,
+  radius: number,
+  horizon: number,
+) {
+  const relative = projectile.clone().sub(center),
+    velocity = projectileVelocity.clone().sub(playerVelocity);
+  if (!shieldCovers(facing, relative)) return null;
+  if (relative.dot(velocity) >= 0 && relative.length() > DUEL.bodyRadius + radius) return null;
+  const time = threatTime(
+    projectile,
+    projectileVelocity,
+    center,
+    playerVelocity,
+    horizon,
+    DUEL.shieldShell + radius,
+  );
+  if (time === null) return null;
+  const offset = relative.addScaledVector(velocity, time);
+  if (offset.lengthSq() < 1e-6) offset.copy(projectileVelocity).negate().normalize();
+  offset.clampLength(0.9, DUEL.shieldReach);
+  return { time, offset, normal: projectileVelocity.clone().negate().normalize() };
 }

@@ -12,15 +12,14 @@ import {
   AutoShield,
   ATTACKS,
   DUEL,
-  rangeCorrection,
   guideMissile,
   shieldCovers,
   shieldScale,
+  shieldIntercept,
   salvoSpread,
   HitPause,
   PROJECTILES,
   type ProjectileKind,
-  threatTime,
   type AttackId,
 } from './combat';
 import {
@@ -42,7 +41,8 @@ import {
 } from './types';
 
 import { ARENA, FLIGHT } from './config';
-import { flightWish, smoothFlight } from './flight';
+import { flightWish, advanceFlight } from './flight';
+import { AirDash, BodyTumble, LaunchRelease, recoveryBlend, springVector } from './motion';
 interface Projectile {
   mesh: THREE.Mesh;
   ribbon: Ribbon;
@@ -86,9 +86,16 @@ export class Game {
   private previousPlayer = START.clone();
   private velocity = new THREE.Vector3();
   private impulse = new THREE.Vector3();
-  private dashDirection = new THREE.Vector3();
+  private airDash = new AirDash();
+  private flightAcceleration = new THREE.Vector3();
+  private cameraSpringVelocity = new THREE.Vector3();
+  private playerTumble = new BodyTumble();
+  private playerRelease = new LaunchRelease();
+  private bank = new THREE.Vector3();
+  private pendingFire: { origin: THREE.Vector3; delay: number; index: number }[] = [];
+  private shieldPatches: { offset: number[]; position: number[]; normal: number[] }[] = [];
   private avatar: THREE.Mesh;
-  private playerTrail = new Ribbon(110, 0.07);
+  private playerTrail = new Ribbon(150, 0.085);
   private shadows: THREE.InstancedMesh;
   private stamp = new THREE.Object3D();
   private yaw = 0;
@@ -122,6 +129,7 @@ export class Game {
   private renderTime = 0;
   private renderNeeded = true;
   private lowQuality = false;
+  private autoResolution = 1;
   private useBloom = true;
   private shake = 0;
   private damageTimer = 10;
@@ -282,6 +290,7 @@ export class Game {
         charge: this.boss.director.charge,
         distance: this.boss.position.distanceTo(this.player),
         enraged: this.boss.enraged,
+        maneuver: this.boss.tactics.maneuver,
       },
       dash: clamp(1 - this.dashCooldown / 1.65, 0, 1),
       spell: this.spell,
@@ -296,14 +305,18 @@ export class Game {
           0,
           this.player.y - this.world.surfaceHeight(this.player.x, this.player.z),
         ),
-        speed: this.velocity.clone().add(this.impulse).length(),
+        speed: this.velocity.clone().add(this.impulse).add(this.airDash.velocity).length(),
         phase: this.pendingPlayerImpulse
           ? 'contact'
-          : this.knockTime > 0
-            ? 'launch'
-            : this.velocity.length() > 1
-              ? 'flying'
-              : 'hover',
+          : this.playerTumble.active
+            ? 'ragdoll'
+            : this.knockTime > 0
+              ? 'launch'
+              : this.airDash.active
+                ? 'dash'
+                : this.velocity.length() > 1
+                  ? 'flying'
+                  : 'hover',
       },
       lockedOn: this.lockedOn,
       fps: this.fps,
@@ -335,6 +348,28 @@ export class Game {
           ? 'launch'
           : 'idle',
       lastBlock: this.lastBlock,
+      shieldPatches: this.shieldPatches,
+      playerVelocity: this.velocity.clone().add(this.impulse).add(this.airDash.velocity).toArray(),
+      dashMotion: {
+        active: this.airDash.active,
+        strength: this.airDash.strength,
+        age: this.airDash.age,
+        invulnerable: this.airDash.invulnerable,
+      },
+      ragdoll: {
+        player: this.playerTumble.active,
+        boss: this.boss.tumble.active,
+        playerWeight: this.playerTumble.weight,
+        bossWeight: this.boss.tumble.weight,
+        playerOrientation: this.avatar.quaternion.toArray(),
+        bossOrientation: this.boss.group.quaternion.toArray(),
+      },
+      bossTactic: this.boss.tactics.maneuver,
+      bossGoal: this.boss.tactics.goal.toArray(),
+      bossDecisions: this.boss.tactics.decisions,
+      fireGates: this.boss.activeGates,
+      fireOrigins: this.boss.gateHistory,
+      pendingFire: this.pendingFire.length,
       contacts: this.contacts,
       arena: { size: ARENA.halfSize * 2, buildings: this.world.buildingCount },
       bossCount: this.scene.children.filter((o) => o.name === 'sole-boss').length,
@@ -371,6 +406,14 @@ export class Game {
     this.previousPlayer.copy(START);
     this.velocity.set(0, 0, 0);
     this.impulse.set(0, 0, 0);
+    this.airDash.reset();
+    this.flightAcceleration.set(0, 0, 0);
+    this.cameraSpringVelocity.set(0, 0, 0);
+    this.playerTumble.reset();
+    this.playerRelease.cancel();
+    this.bank.set(0, 0, 0);
+    this.pendingFire = [];
+    this.shieldPatches = [];
     this.health = this.energy = 100;
     this.dashCooldown = this.dashTime = this.knockTime = 0;
     this.spell = 0;
@@ -441,6 +484,7 @@ export class Game {
     this.audio.apply(settings);
     if (!changed) return;
     this.settingsApplied = true;
+    this.autoResolution = 1;
     this.lowQuality =
       settings.quality === 'low' || (settings.quality === 'auto' && this.controls.touch);
     this.configureQuality();
@@ -466,7 +510,7 @@ export class Game {
       height = innerHeight,
       ratio = Math.min(
         devicePixelRatio || 1,
-        this.lowQuality ? 1 : this.settings.quality === 'high' ? 2 : 1.5,
+        this.lowQuality ? this.autoResolution : this.settings.quality === 'high' ? 2 : 1.5,
       );
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(width, height, false);
@@ -489,6 +533,14 @@ export class Game {
     if (this.frameTime >= 0.75) {
       this.fps = Math.round(this.frames / this.frameTime);
       this.frames = this.frameTime = 0;
+      if (this.settings.quality === 'auto' && this.lowQuality && this.renderTime > 5) {
+        this.slowFrames = this.fps < 26 ? this.slowFrames + 1 : 0;
+        if (this.slowFrames >= 4 && this.autoResolution > 0.75) {
+          this.autoResolution = Math.max(0.75, this.autoResolution - 0.125);
+          this.slowFrames = 0;
+          this.resize();
+        }
+      }
       if (this.settings.quality === 'auto' && !this.lowQuality && this.renderTime > 4) {
         this.slowFrames = this.fps < 28 ? this.slowFrames + 1 : 0;
         if (this.slowFrames >= 3) {
@@ -507,20 +559,22 @@ export class Game {
     if (['paused', 'gameover', 'victory'].includes(this.mode)) return;
     this.flashTimer = Math.max(0, this.flashTimer - realDt);
     // Pause uses wall-clock time. Physics still has a cap, so slow renderers cannot tunnel.
-    let left = Math.min(0.05, this.hitPause.consume(realDt));
+    let left = Math.min(0.1, this.hitPause.consume(realDt));
     while (left > 1e-8) {
       left = this.hitPause.consume(left);
       if (left <= 1e-8) break;
       if (this.pendingPlayerImpulse) {
-        this.impulse.copy(this.pendingPlayerImpulse);
+        this.playerRelease.start(this.pendingPlayerImpulse);
         this.pendingPlayerImpulse = null;
       }
       if (this.boss.pendingImpulse) {
-        this.boss.impulse.copy(this.boss.pendingImpulse);
+        this.boss.release.start(this.boss.pendingImpulse);
         this.boss.pendingImpulse = null;
       }
       const dt = Math.min(left, 1 / 120);
       left -= dt;
+      this.playerRelease.step(dt, this.impulse);
+      this.boss.release.step(dt, this.boss.impulse);
       this.time += dt;
       this.modeTime += dt;
       if (this.mode === 'playing' && !this.outcome) this.elapsed += dt;
@@ -532,6 +586,7 @@ export class Game {
       this.updatePlayer(dt, this.mode !== 'playing');
       if (this.hitPause.remaining === 0) this.updateBoss(dt);
       if (this.hitPause.remaining === 0) {
+        this.updateFireGates(dt);
         if (!this.outcome) this.updateProjectiles(dt);
         else this.clearProjectiles();
       }
@@ -550,7 +605,7 @@ export class Game {
   private updatePlayer(dt: number, showcase: boolean) {
     this.knockTime = Math.max(0, this.knockTime - dt);
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
-    this.dashTime = Math.max(0, this.dashTime - dt);
+
     this.cooldowns = this.cooldowns.map((c) => Math.max(0, c - dt));
     this.energy = Math.min(100, this.energy + dt * 12);
     if (this.damageTimer > 9 && !this.outcome) this.health = Math.min(100, this.health + dt * 3);
@@ -587,14 +642,14 @@ export class Game {
       this.world.surfaceHeight(this.player.x, this.player.z),
     );
     const grounded = this.player.y <= floor + 0.045;
-    if (this.knockTime > 0) {
-      wish.multiplyScalar(this.damageTimer < 0.35 ? 0.035 : 0.23);
-      this.impulse.y -= 14 * dt;
-    } else {
-      this.impulse.y = damp(this.impulse.y, 0, 8, dt);
-      if (move.lift >= 0 && this.player.y < floor + FLIGHT.hoverHeight)
-        wish.y = Math.max(wish.y, (floor + FLIGHT.hoverHeight - this.player.y) * 4);
+    const recovery = recoveryBlend(this.knockTime);
+    if (this.knockTime > 0 || this.outcome === 'gameover') {
+      wish.multiplyScalar(this.outcome ? 0 : 0.05 + recovery * 0.95);
+      this.impulse.y -= 14 * (1 - recovery) * dt;
+    } else if (move.lift >= 0 && this.player.y < floor + FLIGHT.hoverHeight) {
+      wish.y = Math.max(wish.y, (floor + FLIGHT.hoverHeight - this.player.y) * 4);
     }
+    this.impulse.y = damp(this.impulse.y, 0, recovery * 6, dt);
     if (wish.y > 0) wish.y *= clamp((ARENA.ceiling - this.player.y) / 3, 0, 1);
     if (this.player.y > ARENA.ceiling && this.knockTime === 0)
       wish.y = Math.min(wish.y, (ARENA.ceiling - this.player.y) * 2);
@@ -603,24 +658,33 @@ export class Game {
         wish[axis] *= clamp((ARENA.halfSize - Math.abs(this.player[axis])) / 4, 0, 1);
     if (this.controls.dashRequested) {
       this.controls.dashRequested = false;
-      if (this.dashCooldown === 0 && this.damageTimer > 0.22 && !this.outcome) {
-        this.dashTime = 0.22;
+      if (this.dashCooldown === 0 && this.damageTimer > 0.25 && !this.outcome) {
         this.dashCooldown = 1.65;
-        this.impulse.multiplyScalar(0.14);
-        this.knockTime *= 0.45;
-        this.dashDirection.copy(wish);
-        if (this.dashDirection.lengthSq() < 0.01) this.dashDirection.copy(this.facing);
-        this.dashDirection.normalize();
+        this.airDash.start(wish.lengthSq() > 0.01 ? wish : this.facing);
+        this.knockTime = Math.min(this.knockTime, 0.55);
         this.audio.dash();
         this.fx.burst(this.player.clone().add(UP), '#effaff', 16, 3, 0.25, 2);
       }
     }
-    this.velocity.copy(smoothFlight(this.velocity, wish, dt));
-    const motor = this.velocity.clone();
-    if (this.dashTime > 0) motor.copy(this.dashDirection).multiplyScalar(FLIGHT.dashSpeed);
-    this.moveBody(this.player, motor, this.impulse, dt, this.knockTime > 0, 'player', 0.38, 1.65);
-    if (this.dashTime === 0) this.velocity.copy(motor);
-    const drag = Math.exp(-dt * (this.knockTime > 0 ? (grounded ? 1.6 : 0.85) : 6));
+    this.airDash.step(dt, wish);
+    this.dashTime = this.airDash.active ? AirDash.duration - this.airDash.age : 0;
+    advanceFlight(this.velocity, this.flightAcceleration, wish, dt);
+    const motor = this.velocity.clone().add(this.airDash.velocity);
+    this.moveBody(
+      this.player,
+      motor,
+      this.impulse,
+      dt,
+      this.knockTime > 0,
+      'player',
+      0.38 + this.playerTumble.weight * 0.4,
+      1.7,
+    );
+    if (motor.y === 0 && this.velocity.y < 0) {
+      this.velocity.y = 0;
+      this.flightAcceleration.y = 0;
+    }
+    const drag = Math.exp(-dt * ((grounded ? 1.1 : 0.55) * (1 - recovery) + recovery * 5));
     this.impulse.x *= drag;
     this.impulse.z *= drag;
     this.skidTimer -= dt;
@@ -771,19 +835,43 @@ export class Game {
       .addScaledVector(UP, 0.95);
     const wall = this.trace(pivot, desired, false);
     if (wall) desired.lerpVectors(pivot, desired, Math.max(0.1, wall.t - 0.06));
-    if (snap) this.camera.position.copy(desired);
-    else this.camera.position.lerp(desired, 1 - Math.exp(-dt * (this.knockTime > 0 ? 10 : 15)));
+    if (snap) {
+      this.camera.position.copy(desired);
+      this.cameraSpringVelocity.set(0, 0, 0);
+    } else
+      springVector(
+        this.camera.position,
+        this.cameraSpringVelocity,
+        desired,
+        this.knockTime > 0 ? 18 : 23,
+        dt,
+      );
+    const obstruction = this.trace(pivot, this.camera.position, false, 0.12);
+    if (obstruction) {
+      this.camera.position.lerpVectors(
+        pivot,
+        this.camera.position,
+        Math.max(0.08, obstruction.t - 0.03),
+      );
+      this.cameraSpringVelocity.multiplyScalar(0.2);
+    }
     this.shake = damp(this.shake, 0, 11, dt);
     const shake = this.settings.reducedEffects ? 0 : this.shake;
-    this.camera.rotation.set(
-      this.pitch + (Math.random() - 0.5) * shake,
-      this.yaw + (Math.random() - 0.5) * shake,
-      this.roll,
+    const targetRotation = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        this.pitch + Math.sin(this.time * 49) * shake * 0.4,
+        this.yaw + Math.sin(this.time * 37 + 1.3) * shake * 0.4,
+        this.roll,
+        'YXZ',
+      ),
     );
+    if (snap) this.camera.quaternion.copy(targetRotation);
+    else this.camera.quaternion.slerp(targetRotation, 1 - Math.exp(-dt * 22));
+    const speed = this.velocity.clone().add(this.impulse).add(this.airDash.velocity).length();
     this.camera.fov = damp(
       this.camera.fov,
-      this.settings.reducedEffects ? 74 : this.dashTime > 0 || this.knockTime > 0.5 ? 87 : 74,
-      9,
+      this.settings.reducedEffects ? 74 : 74 + clamp((speed - 14) * 0.25, 0, 11),
+      8,
       dt,
     );
     this.camera.updateProjectionMatrix();
@@ -812,11 +900,29 @@ export class Game {
     this.camera.updateMatrixWorld();
   }
   private presentActors(dt: number) {
-    this.avatar.position.copy(this.player).y += 0.75;
-    this.avatar.quaternion.copy(this.facingQuaternion);
-    this.avatar.rotateZ(
-      -this.roll * 2.5 + (this.knockTime > 0 ? Math.sin(this.time * 10) * 0.13 : 0),
+    this.avatar.position.copy(this.player).y += 0.85;
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.facingQuaternion);
+    this.bank.z = damp(
+      this.bank.z,
+      clamp(
+        (-this.velocity.dot(right) / FLIGHT.speed) * 0.24 -
+          this.flightAcceleration.dot(right) * 0.0015,
+        -0.32,
+        0.32,
+      ),
+      8,
+      dt,
     );
+    this.bank.x = damp(
+      this.bank.x,
+      (this.velocity.dot(this.facing) / FLIGHT.speed) * 0.09 + this.airDash.strength * 0.13,
+      8,
+      dt,
+    );
+    const pose = this.facingQuaternion
+      .clone()
+      .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.bank.x, 0, this.bank.z)));
+    this.avatar.quaternion.copy(this.playerTumble.step(dt, pose));
     this.playerTrail.push(this.avatar.position, this.camera.position);
     this.boss.present(
       this.time,
@@ -844,38 +950,78 @@ export class Game {
         return;
       }
     }
+    const wasKnocked = b.knockTime > 0;
     b.knockTime = Math.max(0, b.knockTime - dt);
-    const toward = this.player.clone().sub(b.position);
-    toward.y = 0;
-    const distance = toward.length();
-    toward.normalize();
-    const tangent = new THREE.Vector3(-toward.z, 0, toward.x),
-      orbit = Math.sin(this.time * 0.3) > 0 ? 1 : -1;
-    const motor = toward
-      .clone()
-      .multiplyScalar(rangeCorrection(distance))
-      .addScaledVector(tangent, orbit * (b.director.stage === 'recover' ? 4.2 : 2.2));
-    let height = clamp(this.player.y + 3.6, 4.5, ARENA.ceiling) + Math.sin(this.time * 1.1) * 0.45;
-    if (b.director.attack === 'hammer' && b.director.stage !== 'recover') height += 5;
-    const cover = this.trace(b.position, this.player.clone().add(UP), false);
-    if (cover?.obstacle && distance > 9)
-      height = Math.min(ARENA.ceiling + 4, Math.max(height, cover.obstacle.top + 3));
-    motor.y = clamp((height - b.position.y) * 2.4, -10, 12);
-    if (b.knockTime > 0) {
-      motor.multiplyScalar(0.035);
-      b.impulse.y -= 14 * dt;
+    if (wasKnocked && b.knockTime === 0) b.tactics.displaced(b.position, this.player);
+    const recovery = recoveryBlend(b.knockTime);
+    const motor = b.tactics.step(
+      dt,
+      b.position,
+      this.player,
+      b.director.attack,
+      b.director.stage,
+      b.director.pattern,
+    );
+    const blocked = this.trace(
+      b.position,
+      b.position.clone().addScaledVector(motor, 0.65),
+      false,
+      0.55,
+    );
+    if (blocked?.obstacle && b.knockTime === 0) {
+      const side = new THREE.Vector3(-motor.z, 0, motor.x).normalize();
+      for (const sign of [1, -1]) {
+        const escape = side.clone().multiplyScalar(sign * 7);
+        if (!this.trace(b.position, b.position.clone().add(escape), false, 0.4)) {
+          motor.x = escape.x * 1.5;
+          motor.z = escape.z * 1.5;
+          break;
+        }
+      }
+      if (this.trace(b.position, b.position.clone().addScaledVector(motor, 0.5), false, 0.4))
+        motor.y = Math.max(motor.y, 8);
     }
-    b.velocity.lerp(motor, 1 - Math.exp(-dt * 5));
-    const feet = b.position.clone().addScaledVector(UP, -1.4);
-    this.moveBody(feet, b.velocity, b.impulse, dt, b.knockTime > 0, 'boss', 1.15, 2.8);
-    b.position.copy(feet).addScaledVector(UP, 1.4);
-    b.impulse.x *= Math.exp(-dt * (b.knockTime > 0 ? 0.9 : 6));
-    b.impulse.z *= Math.exp(-dt * (b.knockTime > 0 ? 0.9 : 6));
-    if (b.knockTime <= 0) b.impulse.y = damp(b.impulse.y, 0, 7, dt);
+    // Obstacle avoidance must never override the duel's minimum standoff.
+    const away = b.position.clone().sub(this.player);
+    away.y = 0;
+    const distance = away.length();
+    if (distance > 0.001 && distance < DUEL.nearRange) {
+      away.divideScalar(distance);
+      const outward = motor.dot(away),
+        retreat = Math.min(12, (DUEL.nearRange - distance) * 2.5);
+      if (outward < retreat) motor.addScaledVector(away, retreat - outward);
+    }
+    motor.clampLength(0, 19);
+    motor.multiplyScalar(0.035 + recovery * 0.965);
+    b.impulse.y -= 14 * (1 - recovery) * dt;
+    b.velocity.lerp(motor, 1 - Math.exp(-dt * 4.5));
+    const extent = 1.4 + b.tumble.weight * 0.8,
+      feet = b.position.clone().addScaledVector(UP, -extent);
+    this.moveBody(
+      feet,
+      b.velocity,
+      b.impulse,
+      dt,
+      b.knockTime > 0,
+      'boss',
+      1.15 + b.tumble.weight * 0.75,
+      extent * 2,
+    );
+    b.position.copy(feet).addScaledVector(UP, extent);
+    b.impulse.x *= Math.exp(-dt * (0.55 + recovery * 4.45));
+    b.impulse.z *= Math.exp(-dt * (0.55 + recovery * 4.45));
+    b.impulse.y = damp(b.impulse.y, 0, recovery * 6, dt);
     b.group.position.copy(b.position);
     b.group.lookAt(this.player.clone().add(UP));
     b.group.updateMatrixWorld(true);
-    if (!b.alive || b.knockTime > 0.15 || this.testIdleBoss || this.hitPause.remaining > 0) return;
+    if (
+      !b.alive ||
+      b.knockTime > 0.15 ||
+      b.tumble.weight > 0.25 ||
+      this.testIdleBoss ||
+      this.hitPause.remaining > 0
+    )
+      return;
     if (b.director.stage === 'telegraph' && b.director.charge < 0.78)
       b.lockedTarget
         .copy(this.player)
@@ -900,23 +1046,9 @@ export class Game {
   private bossAttack(attack: AttackId, index: number) {
     const muzzle = this.boss.muzzle(attack === 'hammer' ? PROJECTILES.hammer.radius : 0);
     if (attack === 'fire') {
-      const aim = this.player
-        .clone()
-        .add(
-          new THREE.Vector3(
-            this.velocity.x * 0.12,
-            0.95 + this.velocity.y * 0.12,
-            this.velocity.z * 0.12,
-          ),
-        )
-        .sub(muzzle)
-        .normalize();
-      const spread = salvoSpread(index),
-        right = new THREE.Vector3().crossVectors(aim, UP).normalize();
-      aim.applyAxisAngle(UP, spread.yaw).applyAxisAngle(right, spread.pitch);
-      this.spawn(muzzle, aim.clone().multiplyScalar(PROJECTILES.fire.speed), 'fire', 9);
-      if (index % 2 === 0) this.fx.glyph(muzzle, aim, '#ff9d48', 0.45, 0.19);
-      if (this.mode !== 'menu' && index % 3 === 0) this.audio.cast(0);
+      const target = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
+      const origin = this.boss.fireGate(index, target, (x, z) => this.world.surfaceHeight(x, z));
+      this.pendingFire.push({ origin, delay: 0.065, index });
     } else if (attack === 'missiles') {
       for (const side of [0, 3]) {
         const port = this.boss.spellPort(index + side),
@@ -941,6 +1073,34 @@ export class Game {
       this.fx.glyph(muzzle, aim, '#fff0b8', 2.3, 0.55);
       this.fx.burst(muzzle, '#ffe7ae', 40, 5, 0.8, 1);
       if (this.mode !== 'menu') this.audio.cast(2);
+    }
+  }
+  private updateFireGates(dt: number) {
+    if (!this.boss.alive || this.outcome) {
+      this.pendingFire = [];
+      return;
+    }
+    for (let i = this.pendingFire.length - 1; i >= 0; i--) {
+      const shot = this.pendingFire[i];
+      shot.delay -= dt;
+      if (shot.delay > 0) continue;
+      this.pendingFire.splice(i, 1);
+      const aim = this.player
+        .clone()
+        .add(
+          new THREE.Vector3(
+            this.velocity.x * 0.12,
+            0.95 + this.velocity.y * 0.12,
+            this.velocity.z * 0.12,
+          ),
+        )
+        .sub(shot.origin)
+        .normalize();
+      const spread = salvoSpread(shot.index),
+        right = new THREE.Vector3().crossVectors(aim, UP).normalize();
+      aim.applyAxisAngle(UP, spread.yaw).applyAxisAngle(right, spread.pitch);
+      this.spawn(shot.origin, aim.multiplyScalar(PROJECTILES.fire.speed), 'fire', 9);
+      if (this.mode !== 'menu' && shot.index % 3 === 0) this.audio.cast(0);
     }
   }
   private aimsAtBoss(forward: THREE.Vector3) {
@@ -1094,34 +1254,42 @@ export class Game {
       const worldHit = this.trace(p.last, p.mesh.position, p.kind === 'player', p.radius);
       if (p.kind !== 'player') {
         const horizon = dt + DUEL.shieldPrediction;
-        const threat = threatTime(
+        const shieldFacing = this.playerTumble.active
+          ? new THREE.Vector3(0, 0, -1).applyQuaternion(this.playerTumble.orientation)
+          : this.facing;
+        const covered = shieldCovers(shieldFacing, p.last.clone().sub(previousCenter));
+        const guard = shieldIntercept(
           p.last,
           p.velocity,
           previousCenter,
           motion,
+          shieldFacing,
+          p.radius,
           horizon,
-          DUEL.bodyRadius + p.radius,
         );
-        const covered = shieldCovers(this.facing, p.last.clone().sub(previousCenter));
-        if (threat !== null && covered) {
+        if (guard) {
           const futureEnd = p.last.clone().addScaledVector(p.velocity, horizon),
             cover = this.trace(p.last, futureEnd, false, p.radius);
-          if ((!cover || cover.t * horizon > threat + 0.001) && this.aegis.intercept()) {
-            const incoming = p.velocity.clone().normalize(),
-              intercept = center
-                .clone()
-                .addScaledVector(incoming, -(DUEL.bodyRadius + p.radius + 0.28));
-            const scale = shieldScale(p.radius);
-            this.lastBlock = {
-              scale,
-              radius: p.radius,
-              direction: incoming.clone().negate().toArray(),
-            };
+          const intercept = center.clone().add(guard.offset);
+          if (
+            (!cover || cover.t * horizon > guard.time + 0.001) &&
+            this.clearSight(center, intercept) &&
+            this.aegis.intercept()
+          ) {
+            const incoming = guard.normal.clone().negate(),
+              scale = shieldScale(p.radius);
+            this.lastBlock = { scale, radius: p.radius, direction: guard.normal.toArray() };
+            this.shieldPatches.push({
+              position: intercept.toArray(),
+              offset: guard.offset.toArray(),
+              normal: guard.normal.toArray(),
+            });
+            if (this.shieldPatches.length > 20) this.shieldPatches.shift();
             this.fx.block(intercept, incoming, scale);
             if (this.mode !== 'menu') this.audio.block();
             this.emit({
               type: 'block',
-              direction: { x: -incoming.x, y: -incoming.y, z: -incoming.z },
+              direction: { x: guard.normal.x, y: guard.normal.y, z: guard.normal.z },
             });
             this.removeProjectile(i);
             continue;
@@ -1136,7 +1304,7 @@ export class Game {
           DUEL.bodyRadius + p.radius,
         );
         if (hitPlayer !== null && (!worldHit || hitPlayer <= worldHit.t)) {
-          if (this.dashTime <= 0) this.damagePlayer(p.damage, p.velocity, p.kind, !covered);
+          if (!this.airDash.invulnerable) this.damagePlayer(p.damage, p.velocity, p.kind, !covered);
           this.fx.burst(p.mesh.position, '#ff9a62', 18, 3.5, 0.36);
           this.removeProjectile(i);
           if (this.hitPause.remaining > 0) break;
@@ -1211,7 +1379,11 @@ export class Game {
     this.boss.flash = 0.14;
     const heavy = impulse.length() > 10;
     if (heavy) {
-      this.boss.pendingImpulse = impulse.clone();
+      this.boss.pendingImpulse = impulse.clone().addScaledVector(this.boss.velocity, 0.25);
+      this.boss.release.cancel();
+      this.boss.tumble.kick(this.boss.group.quaternion, impulse);
+      this.pendingFire = [];
+      this.boss.clearGates();
       this.boss.impulse.set(0, 0, 0);
       this.boss.velocity.set(0, 0, 0);
       this.boss.knockTime = 1.25;
@@ -1248,9 +1420,17 @@ export class Game {
       this.health = Math.max(0, this.health - amount);
     const tuning = PROJECTILES[kind],
       vector = incoming.clone().normalize().multiplyScalar(tuning.launch);
-    if (kind === 'hammer') vector.y = Math.min(-9, vector.y);
+    if (kind === 'hammer') vector.y = vector.y < -10 ? vector.y : clamp(vector.y + 4, -10, 18);
     else vector.y = Math.max(kind === 'missile' ? 5 : 2.5, vector.y * 0.6 + 3);
+    vector
+      .addScaledVector(this.velocity, 0.25)
+      .addScaledVector(this.impulse, 0.2)
+      .clampLength(0, 112);
     this.pendingPlayerImpulse = vector;
+    this.playerRelease.cancel();
+    this.flightAcceleration.set(0, 0, 0);
+    this.airDash.reset();
+    if (kind === 'hammer') this.playerTumble.kick(this.avatar.quaternion, vector);
     this.velocity.set(0, 0, 0);
     this.impulse.set(0, 0, 0);
     this.dashTime = 0;
@@ -1271,6 +1451,11 @@ export class Game {
     surface: 'wall' | 'ground',
     actor: 'player' | 'boss',
   ) {
+    const tumble = actor === 'player' ? this.playerTumble : this.boss.tumble;
+    const velocity = actor === 'player' ? this.impulse : this.boss.impulse;
+    const normal = surface === 'ground' ? UP : velocity.clone().negate().setY(0).normalize();
+    tumble.collide(normal, velocity);
+    (actor === 'player' ? this.playerRelease : this.boss.release).cancel();
     this.impactGate[actor] = 0.22;
     this.impacts++;
     this.lastImpact = { surface, actor };
@@ -1328,11 +1513,12 @@ export class Game {
         this.renderNeeded = true;
       },
       face: orient,
+      castBoss: (attack: AttackId, index = 0) => this.bossAttack(attack, index),
       incoming,
       scenario: (name: string) => {
         this.start(false);
         this.testIdleBoss = true;
-        if (['wall', 'ground', 'contact', 'missile-near', 'defeat'].includes(name)) {
+        if (['wall', 'ground', 'contact', 'missile-near', 'defeat', 'ragdoll'].includes(name)) {
           this.aegis.phase = 'cooldown';
           this.aegis.remaining = DUEL.shieldCooldown;
         }
@@ -1359,6 +1545,9 @@ export class Game {
             'fire',
             9,
           );
+        } else if (name === 'ragdoll') {
+          this.player.set(0, 12, 24);
+          this.spawn(new THREE.Vector3(0, 12.9, 30), new THREE.Vector3(0, 0, -34), 'hammer', 29);
         } else if (name === 'missile-near') {
           this.player.set(0, 5, 24);
           this.spawn(
@@ -1394,6 +1583,22 @@ export class Game {
         }
         if (name === 'shield-large') incoming('front', 'hammer');
         if (name === 'flight') orient(0, 0);
+        if (name === 'shield-scatter') {
+          orient(0, 0);
+          const center = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
+          for (const [x, y] of [
+            [-1.1, 0],
+            [1.1, 0.5],
+            [0, 1.25],
+            [3.6, 0],
+          ])
+            this.spawn(
+              center.clone().add(new THREE.Vector3(x, y, -3)),
+              new THREE.Vector3(0, 0, 30),
+              'fire',
+              9,
+            );
+        }
         this.updateCamera(1, true);
         this.presentActors(0);
         this.renderNeeded = true;
