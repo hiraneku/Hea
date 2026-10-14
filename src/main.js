@@ -18,8 +18,8 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x91ced9);
-scene.fog = new THREE.Fog(0x91ced9, 22, 67);
+scene.background = new THREE.Color(0x6db3e8);
+scene.fog = new THREE.Fog(0x9fcdf2, 34, 95);
 
 const camera = new THREE.PerspectiveCamera(68, innerWidth / innerHeight, 0.08, 110);
 camera.rotation.order = 'YXZ';
@@ -109,12 +109,13 @@ scene.add(sun);
 const world = new THREE.Group();
 scene.add(world);
 const colliders = [];
+const boxColliders = []; // gedung balok: {x,z,hw,hd} sumbu-sejajar, untuk tabrakan nyata
 const swayers = []; // objects that sway gently in the wind (tree crowns, etc.)
 
 // --- Gradient sky dome + sun disc (kept fog-free so the horizon stays soft) ---
 const skyUniforms = {
-  topColor: { value: new THREE.Color(0x5fb2cf) },
-  horizonColor: { value: new THREE.Color(0xd9eec9) },
+  topColor: { value: new THREE.Color(0x3d8bd4) },
+  horizonColor: { value: new THREE.Color(0xd9eefb) },
 };
 const skyDome = new THREE.Mesh(
   new THREE.SphereGeometry(92, 24, 14),
@@ -136,62 +137,73 @@ sunGlow.lookAt(0, 4, 0);
 scene.add(sunGlow);
 
 function createWorld() {
-  const ground = mesh(new THREE.PlaneGeometry(92, 92), mat.ground, { rx: -Math.PI / 2, shadow: false });
-  ground.receiveShadow = true;
+  // Tanah abu terang ber-grid halus membentang ke horizon (seperti arena uji di video).
+  const gc = document.createElement('canvas'); gc.width = gc.height = 256;
+  const g = gc.getContext('2d');
+  g.fillStyle = '#c9ced2'; g.fillRect(0, 0, 256, 256);
+  g.strokeStyle = 'rgba(120,130,138,0.55)'; g.lineWidth = 2;
+  for (let i = 0; i <= 4; i++) { g.beginPath(); g.moveTo(i * 64, 0); g.lineTo(i * 64, 256); g.stroke(); g.beginPath(); g.moveTo(0, i * 64); g.lineTo(256, i * 64); g.stroke(); }
+  const gridTex = new THREE.CanvasTexture(gc);
+  gridTex.wrapS = gridTex.wrapT = THREE.RepeatWrapping; gridTex.repeat.set(72, 72);
+  gridTex.colorSpace = THREE.SRGBColorSpace;
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(180, 180), new THREE.MeshToonMaterial({ map: gridTex }));
+  ground.rotation.x = -Math.PI / 2; ground.receiveShadow = true;
   world.add(ground);
+  // Garis laut biru tua di horizon.
+  const sea = new THREE.Mesh(new THREE.CircleGeometry(420, 40), new THREE.MeshBasicMaterial({ color: 0x1d4e89, fog: false }));
+  sea.rotation.x = -Math.PI / 2; sea.position.y = -0.25;
+  world.add(sea);
 
-  // Soft terrain patches and a winding path.
-  const patchGeo = new THREE.CircleGeometry(1, 20);
-  for (let i = 0; i < 26; i++) {
-    const patch = mesh(patchGeo, i % 3 ? mat.grassDark : toon(0x88b778), {
-      x: seeded(i * 9.7, -36, 36), y: 0.006, z: seeded(i * 3.1, -36, 36), rx: -Math.PI / 2,
-      scale: seeded(i * 1.9, 1.2, 4.2), shadow: false,
-    });
-    patch.material.transparent = true;
-    patch.material.opacity = 0.32;
-    world.add(patch);
+  const blockMats = [toon(0x939ca4), toon(0x848e97), toon(0x9aa3ab), toon(0x7e8891)];
+  function block(x, z, w, h, d, collide = true, mi = 0) {
+    const b = mesh(new THREE.BoxGeometry(w, h, d), blockMats[mi % blockMats.length], { x, y: h / 2, z });
+    world.add(b);
+    if (collide) boxColliders.push({ x, z, hw: w / 2, hd: d / 2 });
+    return b;
   }
-  for (let i = 0; i < 15; i++) {
-    const z = 16 - i * 2.25;
-    const path = mesh(new THREE.CircleGeometry(1, 18), mat.path, {
-      x: Math.sin(i * 0.55) * 1.05, y: 0.012, z, rx: -Math.PI / 2,
-      scale: 1.25 + (i % 3) * 0.13, shadow: false,
-    });
-    world.add(path);
+  // Menara target di belakang roh: papan segel emas menyala seperti di video.
+  block(0, -20.5, 8, 15, 5, true, 1);
+  const board = mesh(new THREE.BoxGeometry(3.6, 3.6, 0.3), toon(0x2c3138), { x: 0, y: 5.2, z: -17.8, shadow: false });
+  world.add(board);
+  const sealRing = mesh(new THREE.TorusGeometry(1.25, 0.13, 10, 40), toon(0xffb52e, { emissive: 0xff9500, emissiveIntensity: 2.2 }), { x: 0, y: 5.2, z: -17.6, shadow: false });
+  world.add(sealRing);
+  const sealCore = mesh(new THREE.CircleGeometry(0.55, 24), new THREE.MeshBasicMaterial({ color: 0xffcf5e }), { x: 0, y: 5.2, z: -17.58, shadow: false });
+  world.add(sealCore);
+  // Gedung-gedung balok abu di sekeliling arena.
+  block(-16, -13, 6, 11, 6, true, 0);
+  block(15.5, -9, 5, 8, 9, true, 2);
+  block(-12, 3, 9, 2.4, 1.6, true, 3);
+  block(12, 5, 4.5, 3.2, 4.5, true, 1);
+  block(-19, -24, 7, 17, 7, true, 0);
+  block(21, -22, 6, 13, 6, true, 2);
+  block(24, 12, 8, 6, 5, true, 3);
+  block(-24, 14, 7, 9, 6, true, 1);
+  block(-7, -26, 4, 6, 4, true, 2);
+  block(8, -27, 5, 4, 4, true, 0);
+  // Piramida abu (ConeGeometry 4 sisi) seperti di video.
+  const pyr = mesh(new THREE.ConeGeometry(5.2, 6, 4), blockMats[1], { x: 20, y: 3, z: -27, ry: Math.PI / 4 });
+  world.add(pyr);
+  boxColliders.push({ x: 20, z: -27, hw: 3.2, hd: 3.2 });
+  // Latar jauh di luar batas main.
+  block(-34, -30, 10, 22, 8, false, 1); block(36, -18, 9, 18, 9, false, 0);
+  block(-38, 6, 8, 14, 8, false, 2); block(38, 26, 10, 20, 8, false, 3);
+  block(0, -44, 16, 24, 8, false, 0); block(-20, -42, 8, 12, 8, false, 2); block(22, -44, 9, 15, 8, false, 1);
+
+  // Tumpukan puing batu gelap di kaki gedung (ciri khas arena video).
+  const rubble = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.32, 0), toon(0x43484e), 130);
+  let ri = 0;
+  const rubbleSpots = [[-12.4, -17], [-3.8, -17.6], [4.2, -17.6], [12.6, -13.5], [-19, -9.6], [18.4, -4.2], [9.8, 2.4], [-16.2, 4.2], [16.8, -25.4], [-22.4, -20.4]];
+  for (const [rx, rz] of rubbleSpots) for (let i = 0; i < 13 && ri < 130; i++) {
+    dummy.position.set(rx + seeded(ri * 3.7, -1.8, 1.8), 0.16, rz + seeded(ri * 5.3, -1, 1));
+    dummy.rotation.set(seeded(ri, 0, 3), seeded(ri * 2, 0, 3), seeded(ri * 3, 0, 3));
+    dummy.scale.setScalar(seeded(ri * 7.1, 0.5, 1.5));
+    dummy.updateMatrix(); rubble.setMatrixAt(ri++, dummy.matrix);
   }
-
-  createHouse(-8, 8, 0.18, 0x5b6e74);
-  createHouse(8.5, 11, -0.18, 0x7d5550);
-  createHouse(-14, 16, 0.4, 0x4f6a70, 0.86);
-  createHouse(15, 18, -0.32, 0x735750, 0.9);
-  createHouse(14, 2.5, -0.58, 0x52696b, 0.75);
-
-  createTree(-15, 3, 1.1);
-  createTree(16, -6, 1.25);
-  createTree(-18, -8, 1.4);
-  createTree(19, 10, 1.15);
-  createTree(-11, 20, 1.25);
-  createTree(10, 23, 1.05);
-  for (let i = 0; i < 11; i++) createTree(seeded(i * 4.1, -32, 32), seeded(i * 8.2, -32, -21), seeded(i * 7.3, 0.8, 1.35));
+  rubble.count = ri; rubble.instanceMatrix.needsUpdate = true;
+  world.add(rubble);
 
   createBell(-5.2, -3.5);
-  createField();
-  createMountains();
   createClouds();
-  createVillageDetails();
-  createPollen();
-  createBirds();
-
-  // Small shrine/marker behind the enemy.
-  const shrine = new THREE.Group();
-  const stone = outlinedMesh(new THREE.BoxGeometry(1.2, 1.65, 0.42), mat.rock, { y: 0.82 }, 1.025);
-  stone.rotation.z = -0.04;
-  shrine.add(stone);
-  const seal = mesh(new THREE.TorusGeometry(0.25, 0.035, 8, 20), mat.gold, { y: 1.03, z: 0.24, rx: Math.PI / 2 });
-  shrine.add(seal);
-  shrine.position.set(0, 0, -17.5);
-  world.add(shrine);
-  colliders.push({ x: 0, z: -17.5, r: 1.0 }); // kuil = permukaan tabrakan knockback
 }
 
 // Village dressing: fences along the path, flowers, rocks and warm lanterns.
@@ -324,10 +336,10 @@ function createTree(x, z, scale = 1) {
 let bell;
 function createBell(x, z) {
   bell = new THREE.Group();
-  const left = outlinedMesh(new THREE.CylinderGeometry(.16, .2, 3.4, 7), mat.wood, { x: -1.05, y: 1.7 }, 1.04);
-  const right = outlinedMesh(new THREE.CylinderGeometry(.16, .2, 3.4, 7), mat.wood, { x: 1.05, y: 1.7 }, 1.04);
-  const top = outlinedMesh(new THREE.CylinderGeometry(.17, .17, 2.45, 7), mat.wood, { y: 3.23, rz: Math.PI / 2 }, 1.04);
-  const bellBody = outlinedMesh(new THREE.ConeGeometry(.47, .8, 12, 1, true), mat.gold, { y: 2.62, rx: Math.PI }, 1.035);
+  const left = outlinedMesh(new THREE.CylinderGeometry(.16, .2, 3.4, 7), mat.rock, { x: -1.05, y: 1.7 }, 1.04);
+  const right = outlinedMesh(new THREE.CylinderGeometry(.16, .2, 3.4, 7), mat.rock, { x: 1.05, y: 1.7 }, 1.04);
+  const top = outlinedMesh(new THREE.CylinderGeometry(.17, .17, 2.45, 7), mat.rock, { y: 3.23, rz: Math.PI / 2 }, 1.04);
+  const bellBody = outlinedMesh(new THREE.ConeGeometry(.47, .8, 12, 1, true), toon(0x3f464e, { emissive: 0xff9500, emissiveIntensity: 0.25 }), { y: 2.62, rx: Math.PI }, 1.035);
   const clapper = mesh(new THREE.SphereGeometry(.11, 8, 6), mat.dark, { y: 2.2 });
   bell.add(left, right, top, bellBody, clapper);
   bell.userData.body = bellBody;
@@ -374,7 +386,7 @@ function createMountains() {
 }
 
 function createClouds() {
-  const cloudMat = toon(0xeaf8ef, { transparent: true, opacity: .72 });
+  const cloudMat = toon(0xffffff, { transparent: true, opacity: .88 });
   for (let i = 0; i < 7; i++) {
     const cloud = new THREE.Group();
     for (let j = 0; j < 4; j++) {
@@ -383,7 +395,8 @@ function createClouds() {
       });
       cloud.add(puff);
     }
-    cloud.position.set(-28 + i * 11, 15 + (i % 3) * 2.2, -25 + (i % 2) * 18);
+    cloud.scale.set(2.6, 1.15, 1.6);
+    cloud.position.set(-38 + i * 12, 17 + (i % 3) * 3, -30 + (i % 2) * 26);
     cloud.userData.speed = .25 + i * .025;
     scene.add(cloud);
     clouds.push(cloud);
@@ -462,6 +475,7 @@ function createEnemy() {
     threads.add(thread);
   }
   g.add(pole, cross, torso, head, hatBrim, hatTop, eye, eye2, strawLeft, strawRight, aura, threads);
+  enemy.armL = strawLeft; enemy.armR = strawRight;
   g.position.copy(enemy.anchor);
   g.scale.setScalar(.92);
   enemy.head = head;
@@ -541,39 +555,106 @@ function spawnProjectile(now) {
   tone(155, .12, 'sawtooth', .035);
 }
 
-function spawnDebris(position, normal, power = 1) {
-  // Puing tanah/batu gelap beterbangan mengikuti arah pantul permukaan.
-  const n = normal.clone();
-  const count = Math.round(16 + power * 10);
-  const positions = new Float32Array(count * 3);
-  const velocities = [];
-  for (let i = 0; i < count; i++) {
-    positions[i * 3] = position.x; positions[i * 3 + 1] = position.y; positions[i * 3 + 2] = position.z;
-    const v = new THREE.Vector3(seeded(i * 3.1, -1, 1), seeded(i * 5.7, 0.2, 1.5), seeded(i * 7.9, -1, 1)).normalize()
-      .multiplyScalar(seeded(i * 9.3, 1, 2.6 + power));
-    v.addScaledVector(n, 1.6 + power * 0.5);
-    velocities.push(v);
+// Tekstur gumpalan debu tidak beraturan (blobby) untuk debu & noda tanah.
+function makeBlobTexture() {
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const x = c.getContext('2d');
+  for (let i = 0; i < 9; i++) {
+    const bx = 34 + seeded(i * 3.1, 0, 60), by = 40 + seeded(i * 5.7, 0, 48), r = seeded(i * 7.9, 16, 34);
+    const gr = x.createRadialGradient(bx, by, 2, bx, by, r);
+    gr.addColorStop(0, 'rgba(255,255,255,0.55)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+    x.fillStyle = gr; x.fillRect(0, 0, 128, 128);
   }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  const material = new THREE.PointsMaterial({ color: 0x35302a, size: 0.21, transparent: true, opacity: 1, depthWrite: false });
-  const points = new THREE.Points(geometry, material);
-  scene.add(points);
-  bursts.push({ points, velocities, age: 0, gravity: 5.5, life: 1.1 });
-  // Debu terang yang menyertainya.
-  spawnBurst(position, 0xd8d2c4, Math.round(10 + power * 5), 1.5 + power * 0.4);
-  const dust = bursts[bursts.length - 1];
-  if (dust) { dust.gravity = 0.4; dust.points.material.size = 0.3; dust.points.material.opacity = 0.55; dust.life = 0.9; dust.baseOpacity = 0.55; }
+  const t = new THREE.CanvasTexture(c); return t;
 }
-function spawnGroundMark(position, radius = 0.6, life = 4) {
-  const mat = new THREE.MeshBasicMaterial({ color: 0x2c2620, transparent: true, opacity: 0.55, depthWrite: false });
-  const mark = new THREE.Mesh(new THREE.CircleGeometry(radius, 14), mat);
-  mark.rotation.x = -Math.PI / 2;
-  mark.position.set(position.x, 0.02 + Math.random() * 0.01, position.z);
-  mark.scale.set(1.4, 0.8, 1);
-  mark.rotation.z = Math.random() * Math.PI;
+const blobTex = makeBlobTexture();
+// Puing = pecahan balok/batu 3D betulan yang beterbangan, menggelinding, lalu menetap.
+const CHUNK_MAX = 150;
+const chunkMesh = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.17, 0), toon(0x42474d), CHUNK_MAX);
+chunkMesh.castShadow = false; chunkMesh.frustumCulled = false;
+{ const d0 = new THREE.Object3D(); d0.scale.setScalar(0); d0.updateMatrix();
+  for (let i = 0; i < CHUNK_MAX; i++) { chunkMesh.setMatrixAt(i, d0.matrix); chunkMesh.setColorAt(i, new THREE.Color().setHex(i % 3 ? 0x42474d : 0x2f3338)); }
+  chunkMesh.instanceMatrix.needsUpdate = true; if (chunkMesh.instanceColor) chunkMesh.instanceColor.needsUpdate = true; }
+scene.add(chunkMesh);
+const chunks = Array.from({ length: CHUNK_MAX }, () => ({ on: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), rot: new THREE.Euler(), av: new THREE.Vector3(), s: 1, age: 0, life: 4 }));
+let chunkIdx = 0;
+function spawnChunks(position, normal, power = 1, count = null) {
+  const n = count ?? Math.round(7 + power * 6);
+  for (let i = 0; i < n; i++) {
+    const ch = chunks[chunkIdx]; chunkIdx = (chunkIdx + 1) % CHUNK_MAX;
+    ch.on = true; ch.age = 0; ch.life = 3.6 + seeded(i * 3.3, 0, 1.6);
+    ch.s = seeded(i * 7.7 + performance.now() * 0.01, 0.45, 1.35) * (0.8 + power * 0.22);
+    ch.pos.copy(position).add(new THREE.Vector3(seeded(i, -.3, .3), seeded(i * 2, 0, .35), seeded(i * 3, -.3, .3)));
+    ch.vel.set(seeded(i * 3.1, -1, 1), seeded(i * 5.7, .35, 1.6), seeded(i * 7.9, -1, 1)).normalize()
+      .multiplyScalar(seeded(i * 9.3, 1.2, 3 + power * 1.7));
+    ch.vel.addScaledVector(normal, 1.8 + power * 0.9);
+    ch.rot.set(seeded(i, 0, 3), seeded(i * 2, 0, 3), seeded(i * 3, 0, 3));
+    ch.av.set(seeded(i * 4, -7, 7), seeded(i * 6, -7, 7), seeded(i * 8, -7, 7));
+  }
+}
+// Debu abu mengepul (sprite gumpalan yang membesar lalu larut).
+const DUST_MAX = 36;
+const dustPool = [];
+for (let i = 0; i < DUST_MAX; i++) {
+  const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: blobTex, color: 0xb7bdc2, transparent: true, opacity: 0, depthWrite: false }));
+  sp.visible = false; scene.add(sp);
+  dustPool.push({ sp, on: false, vel: new THREE.Vector3(), age: 0, life: 1.2, grow: 2 });
+}
+let dustIdx = 0;
+function spawnDust(position, count = 5, base = 1.4, tint = 0xb7bdc2) {
+  for (let i = 0; i < count; i++) {
+    const d = dustPool[dustIdx]; dustIdx = (dustIdx + 1) % DUST_MAX;
+    d.on = true; d.age = 0; d.life = 1 + seeded(i * 3.7, 0, .6); d.grow = 1.6 + seeded(i * 5.1, 0, 1.2);
+    d.sp.visible = true; d.sp.material.color.setHex(tint);
+    d.sp.position.copy(position).add(new THREE.Vector3(seeded(i, -.5, .5), seeded(i * 2, 0, .4), seeded(i * 3, -.5, .5)));
+    d.sp.scale.setScalar(base * seeded(i * 7.3, .7, 1.3));
+    d.vel.set(seeded(i * 9.1, -.5, .5), seeded(i * 4.3, .2, .7), seeded(i * 6.7, -.5, .5));
+  }
+}
+function spawnDebris(position, normal, power = 1) {
+  spawnChunks(position, normal, power);
+  spawnDust(position, Math.round(4 + power * 2), 1.2 + power * 0.5);
+}
+function spawnGroundMark(position, radius = 0.6, life = 5) {
+  // Noda debu/tanah tergeser: gumpalan abu tidak beraturan, bukan lingkaran polos.
+  const m = new THREE.MeshBasicMaterial({ map: blobTex, color: 0x565d63, transparent: true, opacity: 0.55, depthWrite: false });
+  const mark = new THREE.Mesh(new THREE.PlaneGeometry(radius * 3.1, radius * 2.2), m);
+  mark.rotation.x = -Math.PI / 2; mark.rotation.z = Math.random() * Math.PI;
+  mark.position.set(position.x, 0.02 + Math.random() * 0.012, position.z);
   scene.add(mark);
-  wallMarks.push({ group: mark, mat, age: 0, life, grow: 0.06, baseOpacity: 0.55 });
+  wallMarks.push({ group: mark, mat: m, age: 0, life, grow: 0.03, baseOpacity: 0.55 });
+}
+function updateChunksDust(dt) {
+  for (const ch of chunks) {
+    if (!ch.on) { dummy.scale.setScalar(0); }
+    else {
+      ch.age += dt;
+      if (ch.age > ch.life) ch.on = false;
+      ch.vel.y -= 13 * dt;
+      ch.pos.addScaledVector(ch.vel, dt);
+      ch.rot.x += ch.av.x * dt; ch.rot.y += ch.av.y * dt; ch.rot.z += ch.av.z * dt;
+      const floor = 0.1 * ch.s;
+      if (ch.pos.y < floor) {
+        ch.pos.y = floor;
+        if (Math.abs(ch.vel.y) > 1.4) ch.vel.y *= -0.26; else ch.vel.y = 0;
+        ch.vel.x *= Math.max(0, 1 - 5 * dt); ch.vel.z *= Math.max(0, 1 - 5 * dt);
+        ch.av.multiplyScalar(Math.max(0, 1 - 6 * dt));
+      }
+      const shrink = ch.age > ch.life - 0.7 ? Math.max(0, (ch.life - ch.age) / 0.7) : 1;
+      dummy.position.copy(ch.pos); dummy.rotation.copy(ch.rot); dummy.scale.setScalar(ch.s * shrink);
+    }
+    dummy.updateMatrix(); chunkMesh.setMatrixAt(chunks.indexOf(ch), dummy.matrix);
+  }
+  chunkMesh.instanceMatrix.needsUpdate = true;
+  for (const d of dustPool) {
+    if (!d.on) continue;
+    d.age += dt;
+    if (d.age > d.life) { d.on = false; d.sp.visible = false; continue; }
+    const t = d.age / d.life;
+    d.sp.position.addScaledVector(d.vel, dt);
+    d.sp.scale.addScalar(d.grow * dt);
+    d.sp.material.opacity = 0.42 * (1 - t) * Math.min(1, t * 5);
+  }
 }
 function spawnBurst(position, color = 0xffd267, count = 20, force = 1.6) {
   const positions = new Float32Array(count * 3);
@@ -1183,6 +1264,7 @@ function applyHitReaction(formulaKey, dmg, dirVel, weaknessHit, now) {
 
   // Setiap hit harus terasa: impuls diskalakan langsung dari damage serangan.
   const impulse = Math.min(cfg.maxSpeed, 3 + dmg * 0.34 + (f.kind === 'knock' ? 2.5 : 0));
+  enemy.squashV = (enemy.squashV || 0) + 2.6;
   enemy.kbVel.addScaledVector(dir, impulse);
   if (tier === 'heavy') enemy.kbVy = Math.max(enemy.kbVy, 1.9); // hantaman keras sedikit mengangkat
   if (enemy.kbVel.length() > cfg.maxSpeed) enemy.kbVel.setLength(cfg.maxSpeed);
@@ -1426,6 +1508,14 @@ function resolveWorldCollisions(next) {
       next.z = col.z + (dz / dist) * min;
     }
   }
+  for (const b of boxColliders) {
+    const dx = next.x - b.x, dz = next.z - b.z;
+    const px = b.hw + .42 - Math.abs(dx), pz = b.hd + .42 - Math.abs(dz);
+    if (px > 0 && pz > 0) {
+      if (px < pz) next.x = b.x + Math.sign(dx || 1) * (b.hw + .42);
+      else next.z = b.z + Math.sign(dz || 1) * (b.hd + .42);
+    }
+  }
 }
 
 function getMoveInput() {
@@ -1512,8 +1602,13 @@ function onWallImpact(contact, normal, speed, now) {
   enemy.kbWallHitDone = true;
   const n = normal.clone();
   const into = -enemy.kbVel.dot(n);
-  const tangential = enemy.kbVel.clone().addScaledVector(n, into); // vel - (vel.n)n  (into = -vel.n)
-  enemy.kbVel.copy(tangential.multiplyScalar(0.35)).addScaledVector(n, cfg.wallRecoil + speed * cfg.wallRecoilPerSpeed);
+  const tangential = enemy.kbVel.clone().addScaledVector(n, into);
+  // TIDAK memantul: kecepatan menabrak mati di dinding; sisa geser menyusut besar,
+  // tubuh lalu merosot jatuh menempel permukaan (crumple), bukan terpental balik.
+  enemy.kbVel.copy(tangential.multiplyScalar(0.18));
+  enemy.kbVy = Math.min(enemy.kbVy, 0);
+  enemy.crumpleUntil = now + 0.6;
+  enemy.squashV = (enemy.squashV || 0) - 4.2;
   enemy.kbStaggerUntil = Math.max(enemy.kbStaggerUntil, now + cfg.staggerWall);
   enemy.reactUntil = now + 0.6;
   enemy.reactPower = 1;
@@ -1532,10 +1627,8 @@ function onWallImpact(contact, normal, speed, now) {
 }
 
 function spawnWallImpact(contact, normal, speed) {
-  spawnBurst(contact, 0xffffff, Math.round(10 + speed * 2), 2.4);
-  spawnBurst(contact, 0x21333a, Math.round(8 + speed), 1.8);
-  const groundRing = contact.clone(); groundRing.y = 0.09;
-  spawnRing(groundRing, 0xffffff, 3 + speed * 0.35);
+  spawnChunks(contact, normal, Math.min(3.2, speed * 0.35), Math.round(12 + speed * 2.2));
+  spawnDust(contact, 6, 1.6 + speed * 0.12, 0xaeb4b9);
   // Retakan singkat yang menempel mengikuti arah normal permukaan.
   const crackMat = new THREE.MeshBasicMaterial({ color: 0x14202a, transparent: true, opacity: 0.85, depthWrite: false });
   const crack = new THREE.Group();
@@ -1587,6 +1680,26 @@ function resolveKnockbackWalls(now) {
     if (speed > cfg.wallImpactSpeed && !enemy.kbWallHitDone) onWallImpact(contact, normal, speed, now);
     else if (speed > 0) enemy.kbVel.addScaledVector(normal, speed);
   }
+  // Gedung balok (AABB): titik terdekat di kotak menentukan normal tabrakan.
+  for (const b of boxColliders) {
+    const cx = THREE.MathUtils.clamp(pos.x, b.x - b.hw, b.x + b.hw);
+    const cz = THREE.MathUtils.clamp(pos.z, b.z - b.hd, b.z + b.hd);
+    let dx = pos.x - cx, dz = pos.z - cz;
+    let dist = Math.hypot(dx, dz);
+    let normal;
+    if (dist < 0.0001) { // pusat di dalam kotak: dorong lewat sumbu terdekat
+      const px = b.hw - Math.abs(pos.x - b.x), pz = b.hd - Math.abs(pos.z - b.z);
+      if (px < pz) { normal = new THREE.Vector3(Math.sign(pos.x - b.x) || 1, 0, 0); pos.x = b.x + normal.x * (b.hw + r); }
+      else { normal = new THREE.Vector3(0, 0, Math.sign(pos.z - b.z) || 1); pos.z = b.z + normal.z * (b.hd + r); }
+      dist = r;
+    } else normal = new THREE.Vector3(dx / dist, 0, dz / dist);
+    if (dist >= r) continue;
+    pos.x = cx + normal.x * r; pos.z = cz + normal.z * r;
+    const speed = -enemy.kbVel.dot(normal);
+    const contact = new THREE.Vector3(cx, Math.max(1.2, pos.y + 1.6), cz);
+    if (speed > cfg.wallImpactSpeed && !enemy.kbWallHitDone) onWallImpact(contact, normal, speed, now);
+    else if (speed > 0) enemy.kbVel.addScaledVector(normal, speed);
+  }
 }
 
 function updateKnockback(dt, now) {
@@ -1609,6 +1722,7 @@ function updateKnockback(dt, now) {
       enemy.kbY = 0;
       const landingHard = vyBefore < -3.5;
       if (landingHard) {
+        enemy.squashV = (enemy.squashV || 0) - 3.6;
         const at = pos.clone(); at.y = 0.4;
         spawnDebris(at, new THREE.Vector3(0, 1, 0), Math.min(3, speed * 0.3));
         spawnGroundMark(pos, 0.55 + Math.min(1.2, speed * 0.09), 4);
@@ -1638,9 +1752,7 @@ function updateKnockback(dt, now) {
     }
   }
   if (enemy.kbVel.length() < 2) enemy.launched = false;
-  // Reaksi prosedural: tubuh condong & kepala tersentak mengikuti kekuatan
   const react = now < enemy.reactUntil ? enemy.reactPower : 0;
-  enemy.group.rotation.x = -Math.min(0.45, enemy.kbVel.length() * 0.04) - react * 0.12;
   if (enemy.head) enemy.head.rotation.x = -react * 0.55;
   if (enemy.kbVel.length() < 0.45 && enemy.kbY === 0) {
     enemy.kbActive = false;
@@ -1648,6 +1760,24 @@ function updateKnockback(dt, now) {
     enemy.kbVel.set(0, 0, 0);
     enemy.group.rotation.x = 0;
   }
+}
+
+function applyBodyFeel(dt, now) {
+  // Pegas squash & stretch: tubuh memampat saat menghantam, meregang saat terlontar.
+  enemy.squashV = (enemy.squashV || 0) + ((-(enemy.squash || 0)) * 115 - (enemy.squashV || 0) * 11) * dt;
+  enemy.squash = THREE.MathUtils.clamp((enemy.squash || 0) + (enemy.squashV || 0) * dt, -0.55, 0.6);
+  const speed = enemy.kbActive && enemy.kbVel ? enemy.kbVel.length() : 0;
+  const stretch = enemy.kbY > 0 ? Math.min(0.17, speed * 0.012) : 0;
+  enemy.group.scale.set(0.92 * (1 + enemy.squash * 0.17 - stretch * 0.35), 0.92 * (1 - enemy.squash * 0.3 + stretch), 0.92 * (1 + enemy.squash * 0.17 - stretch * 0.35));
+  // Kepak lengan mengikuti momentum; melambai liar selagi melayang.
+  const flail = enemy.kbY > 0 ? Math.sin(now * 13) * 0.4 : enemy.kbActive ? THREE.MathUtils.clamp(-speed * 0.055, -0.75, 0.1) : Math.sin(now * 1.8) * 0.05;
+  enemy.armSwing = THREE.MathUtils.lerp(enemy.armSwing || 0, flail, Math.min(1, dt * 10));
+  if (enemy.armL) { enemy.armL.rotation.x = enemy.armSwing; enemy.armR.rotation.x = enemy.armSwing * 0.92; }
+  // Postur: remuk menempel dinding, condong saat meluncur, tegak lagi perlahan.
+  if (now < (enemy.crumpleUntil || 0)) { enemy.group.rotation.x = -0.52; enemy.group.rotation.z = 0.1; }
+  else if (enemy.kbY > 0 && enemy.kbActive) { enemy.group.rotation.x = -0.42 + Math.sin(now * 11) * 0.26; enemy.group.rotation.z = Math.sin(now * 9) * 0.13; }
+  else if (enemy.kbActive) { enemy.group.rotation.x = -Math.min(0.4, speed * 0.035); enemy.group.rotation.z *= Math.exp(-6 * dt); }
+  else { enemy.group.rotation.x *= Math.exp(-7 * dt); enemy.group.rotation.z *= Math.exp(-7 * dt); }
 }
 
 function updateEnemy(dt, now) {
@@ -1683,6 +1813,7 @@ function updateEnemy(dt, now) {
   const flatTarget = tempV.set(player.position.x, enemy.group.position.y, player.position.z);
   enemy.group.lookAt(flatTarget);
   if (gameState === 'playing' && !modalOpen && enemy.kbActive && !enemyBroken) updateKnockback(dt, now);
+  applyBodyFeel(dt, now);
 
   if (gameState !== 'playing' || modalOpen || !enemy.active || enemyBroken) return;
   if (now < enemy.stunnedUntil) {
@@ -1772,6 +1903,7 @@ function updateEffects(dt, now) {
       playerProjectiles.splice(i, 1);
     }
   }
+  updateChunksDust(dt);
   for (let i = bursts.length - 1; i >= 0; i--) {
     const burst = bursts[i];
     burst.age += dt;
@@ -2098,7 +2230,7 @@ $$('[data-close]').forEach((button) => onTap(button, () => {
 $$('.spell-slot').forEach((el) => onTap(el, () => { selectedSlot = Number(el.dataset.slot); updateSpellBar(); }));
 $$('[data-resolve]').forEach((button) => onTap(button, () => resolveEnemy(button.dataset.resolve)));
 onTap($('#replayBtn'), () => {
-  scene.background.setHex(0x91ced9);
+  scene.background.setHex(0x6db3e8);
   scene.fog.color.setHex(0x91ced9);
   skyUniforms.topColor.value.setHex(0x5fb2cf);
   enemy.group.visible = true;
