@@ -20,6 +20,7 @@ import {
   HitPause,
   PROJECTILES,
   type ProjectileKind,
+  type MissileGuidance,
   type AttackId,
 } from './combat';
 import {
@@ -40,9 +41,18 @@ import {
   type SpellId,
 } from './types';
 
-import { ARENA, FLIGHT } from './config';
+import { ARENA, FLIGHT, GROUND, HEAVY } from './config';
 import { flightWish, advanceFlight } from './flight';
-import { AirDash, BodyTumble, LaunchRelease, recoveryBlend, springVector } from './motion';
+import {
+  AirDash,
+  BodyTumble,
+  LaunchRelease,
+  recoveryBlend,
+  springVector,
+  groundBounce,
+  groundFriction,
+  supportHeight,
+} from './motion';
 interface Projectile {
   mesh: THREE.Mesh;
   ribbon: Ribbon;
@@ -55,6 +65,7 @@ interface Projectile {
   homing: boolean;
   radius: number;
   origin: THREE.Vector3;
+  guidance: MissileGuidance;
 }
 interface TraceHit {
   t: number;
@@ -87,6 +98,17 @@ export class Game {
   private velocity = new THREE.Vector3();
   private impulse = new THREE.Vector3();
   private airDash = new AirDash();
+  private flightEnabled = true;
+  private verticalVelocity = 0;
+  private groundJumps = 0;
+  private heavyPenetrations: {
+    owner: number;
+    thickness: number;
+    entry: number[];
+    exit: number[];
+  }[] = [];
+  private groundReactions: { actor: string; speed: number; bounce: number; position: number[] }[] =
+    [];
   private flightAcceleration = new THREE.Vector3();
   private cameraSpringVelocity = new THREE.Vector3();
   private playerTumble = new BodyTumble();
@@ -269,6 +291,23 @@ export class Game {
     this.renderer.setAnimationLoop((timestamp) => this.tick(timestamp));
   }
 
+  private setFlight(enabled: boolean) {
+    if (this.flightEnabled === enabled) return;
+    this.flightEnabled = enabled;
+    this.controls.jumpRequested = false;
+    if (!this.playerTumble.physical) {
+      if (enabled) {
+        this.velocity.y = this.verticalVelocity;
+        this.verticalVelocity = 0;
+      } else {
+        this.verticalVelocity = this.velocity.y;
+        this.velocity.y = 0;
+        this.groundJumps = 1;
+        this.airDash.direction.y = this.airDash.velocity.y = 0;
+      }
+      this.flightAcceleration.y = 0;
+    }
+  }
   get snapshot(): Snapshot {
     return {
       mode: this.mode,
@@ -276,8 +315,7 @@ export class Game {
       energy: this.energy,
       shield: {
         phase: this.aegis.phase,
-        remaining: this.aegis.remaining,
-        progress: this.aegis.progress,
+        enabled: this.aegis.enabled,
         blocked: this.aegis.blocked,
         blindWarning: this.lastDamageBlind && this.damageTimer < 1.25,
       },
@@ -301,6 +339,7 @@ export class Game {
       craters: this.world.terrain.craters.length,
       launched: this.knockTime > 0.05 && this.impulse.length() > 4,
       flight: {
+        enabled: this.flightEnabled,
         altitude: Math.max(
           0,
           this.player.y - this.world.surfaceHeight(this.player.x, this.player.z),
@@ -314,9 +353,15 @@ export class Game {
               ? 'launch'
               : this.airDash.active
                 ? 'dash'
-                : this.velocity.length() > 1
-                  ? 'flying'
-                  : 'hover',
+                : !this.flightEnabled
+                  ? Math.abs(this.verticalVelocity) > 0.3
+                    ? 'falling'
+                    : this.velocity.length() > 1
+                      ? 'walking'
+                      : 'grounded'
+                  : this.velocity.length() > 1
+                    ? 'flying'
+                    : 'hover',
       },
       lockedOn: this.lockedOn,
       fps: this.fps,
@@ -349,6 +394,13 @@ export class Game {
           : 'idle',
       lastBlock: this.lastBlock,
       shieldPatches: this.shieldPatches,
+      shieldEchoes: this.fx.shieldEchoes,
+      heavyPenetrations: this.heavyPenetrations,
+      groundReactions: this.groundReactions,
+      groundJumps: this.groundJumps,
+      verticalVelocity: this.verticalVelocity,
+      walls: this.world.wallBounds,
+      heavyCircleRadius: this.boss.chargeRadius,
       playerVelocity: this.velocity.clone().add(this.impulse).add(this.airDash.velocity).toArray(),
       dashMotion: {
         active: this.airDash.active,
@@ -360,6 +412,12 @@ export class Game {
         player: this.playerTumble.active,
         boss: this.boss.tumble.active,
         playerWeight: this.playerTumble.weight,
+        playerPhase: this.playerTumble.phase,
+        bossPhase: this.boss.tumble.phase,
+        playerBounces: this.playerTumble.bounces,
+        bossBounces: this.boss.tumble.bounces,
+        playerGroundTravel: this.playerTumble.groundTravel,
+        bossGroundTravel: this.boss.tumble.groundTravel,
         bossWeight: this.boss.tumble.weight,
         playerOrientation: this.avatar.quaternion.toArray(),
         bossOrientation: this.boss.group.quaternion.toArray(),
@@ -384,6 +442,7 @@ export class Game {
           age: p.age,
           radius: p.radius,
           origin: p.origin.toArray(),
+          committed: p.guidance.committed,
         })),
       shots: this.projectiles.map((p) => ({
         kind: p.kind,
@@ -407,6 +466,10 @@ export class Game {
     this.velocity.set(0, 0, 0);
     this.impulse.set(0, 0, 0);
     this.airDash.reset();
+    this.flightEnabled = true;
+    this.verticalVelocity = this.groundJumps = 0;
+    this.heavyPenetrations = [];
+    this.groundReactions = [];
     this.flightAcceleration.set(0, 0, 0);
     this.cameraSpringVelocity.set(0, 0, 0);
     this.playerTumble.reset();
@@ -557,6 +620,14 @@ export class Game {
   }
   private simulate(realDt: number) {
     if (['paused', 'gameover', 'victory'].includes(this.mode)) return;
+    if (this.controls.shieldRequested) {
+      this.controls.shieldRequested = false;
+      this.aegis.toggle();
+    }
+    if (this.controls.flightRequested) {
+      this.controls.flightRequested = false;
+      this.setFlight(!this.flightEnabled);
+    }
     this.flashTimer = Math.max(0, this.flashTimer - realDt);
     // Pause uses wall-clock time. Physics still has a cap, so slow renderers cannot tunnel.
     let left = Math.min(0.1, this.hitPause.consume(realDt));
@@ -603,7 +674,9 @@ export class Game {
     }
   }
   private updatePlayer(dt: number, showcase: boolean) {
-    this.knockTime = Math.max(0, this.knockTime - dt);
+    this.knockTime = this.playerTumble.physical
+      ? Math.max(0.4, this.knockTime - dt)
+      : Math.max(0, this.knockTime - dt);
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
 
     this.cooldowns = this.cooldowns.map((c) => Math.max(0, c - dt));
@@ -625,7 +698,14 @@ export class Game {
     this.facingQuaternion.slerp(desiredFacing, 1 - Math.exp(-dt * 18));
     this.facing.set(0, 0, -1).applyQuaternion(this.facingQuaternion);
     const move = this.outcome ? { x: 0, z: 0, lift: 0 } : this.controls.movement();
-    let wish = flightWish(move.x, move.z, move.lift, this.yaw, this.pitch);
+    let wish = flightWish(
+      move.x,
+      move.z,
+      this.flightEnabled ? move.lift : 0,
+      this.yaw,
+      this.flightEnabled ? this.pitch : 0,
+    );
+    if (!this.flightEnabled) wish.multiplyScalar(GROUND.speed / FLIGHT.speed);
     if (showcase) {
       const target = new THREE.Vector3(
         Math.sin(this.time * 0.46) * 11,
@@ -642,25 +722,46 @@ export class Game {
       this.world.surfaceHeight(this.player.x, this.player.z),
     );
     const grounded = this.player.y <= floor + 0.045;
-    const recovery = recoveryBlend(this.knockTime);
-    if (this.knockTime > 0 || this.outcome === 'gameover') {
-      wish.multiplyScalar(this.outcome ? 0 : 0.05 + recovery * 0.95);
-      this.impulse.y -= 14 * (1 - recovery) * dt;
-    } else if (move.lift >= 0 && this.player.y < floor + FLIGHT.hoverHeight) {
-      wish.y = Math.max(wish.y, (floor + FLIGHT.hoverHeight - this.player.y) * 4);
+    const physical = this.playerTumble.physical;
+    const recovery = physical ? 0 : recoveryBlend(this.knockTime) * (1 - this.playerTumble.weight);
+    if (grounded && this.verticalVelocity <= 0 && !physical) this.groundJumps = 0;
+    if (this.controls.jumpRequested) {
+      this.controls.jumpRequested = false;
+      if (!this.flightEnabled && !physical && this.knockTime <= 0.05 && this.groundJumps < 2) {
+        this.verticalVelocity = this.groundJumps === 0 ? GROUND.jump : GROUND.airJump;
+        this.groundJumps++;
+        this.fx.burst(this.player, '#dff5ff', 8, 2, 0.15, 2);
+      }
     }
-    this.impulse.y = damp(this.impulse.y, 0, recovery * 6, dt);
-    if (wish.y > 0) wish.y *= clamp((ARENA.ceiling - this.player.y) / 3, 0, 1);
-    if (this.player.y > ARENA.ceiling && this.knockTime === 0)
-      wish.y = Math.min(wish.y, (ARENA.ceiling - this.player.y) * 2);
+    if (physical || this.outcome === 'gameover') {
+      wish.set(0, 0, 0);
+      this.verticalVelocity = 0;
+      this.impulse.y -= HEAVY.gravity * dt;
+    } else if (this.knockTime > 0) {
+      wish.multiplyScalar(0.05 + recovery * 0.95);
+      this.impulse.y -= 14 * (1 - recovery) * dt;
+    }
+    if (!physical && this.outcome !== 'gameover') {
+      this.impulse.y = damp(this.impulse.y, 0, recovery * 6, dt);
+      if (!this.flightEnabled) this.verticalVelocity -= GROUND.gravity * dt;
+      else if (move.lift >= 0 && this.player.y < floor + FLIGHT.hoverHeight)
+        wish.y = Math.max(wish.y, (floor + FLIGHT.hoverHeight - this.player.y) * 4 * recovery);
+    }
+    if (this.flightEnabled && !physical) {
+      if (wish.y > 0) wish.y *= clamp((ARENA.ceiling - this.player.y) / 3, 0, 1);
+      if (this.player.y > ARENA.ceiling)
+        wish.y = Math.min(wish.y, (ARENA.ceiling - this.player.y) * 2);
+    }
     for (const axis of ['x', 'z'] as const)
       if (Math.sign(wish[axis]) === Math.sign(this.player[axis]))
         wish[axis] *= clamp((ARENA.halfSize - Math.abs(this.player[axis])) / 4, 0, 1);
     if (this.controls.dashRequested) {
       this.controls.dashRequested = false;
-      if (this.dashCooldown === 0 && this.damageTimer > 0.25 && !this.outcome) {
+      if (this.dashCooldown === 0 && this.damageTimer > 0.25 && !this.outcome && !physical) {
         this.dashCooldown = 1.65;
-        this.airDash.start(wish.lengthSq() > 0.01 ? wish : this.facing);
+        const dashAim = wish.lengthSq() > 0.01 ? wish.clone() : this.facing.clone();
+        if (!this.flightEnabled) dashAim.y = 0;
+        this.airDash.start(dashAim.normalize());
         this.knockTime = Math.min(this.knockTime, 0.55);
         this.audio.dash();
         this.fx.burst(this.player.clone().add(UP), '#effaff', 16, 3, 0.25, 2);
@@ -670,28 +771,38 @@ export class Game {
     this.dashTime = this.airDash.active ? AirDash.duration - this.airDash.age : 0;
     advanceFlight(this.velocity, this.flightAcceleration, wish, dt);
     const motor = this.velocity.clone().add(this.airDash.velocity);
+    if (!this.flightEnabled && !physical) motor.y = this.verticalVelocity;
     this.moveBody(
       this.player,
       motor,
       this.impulse,
       dt,
-      this.knockTime > 0,
+      this.knockTime > 0 || physical,
       'player',
       0.38 + this.playerTumble.weight * 0.4,
-      1.7,
+      1.7 * (1 - this.playerTumble.weight) +
+        2 *
+          (supportHeight(this.playerTumble.orientation, new THREE.Vector3(0.325, 0.65, 0.325)) +
+            0.025) *
+          this.playerTumble.weight,
     );
     if (motor.y === 0 && this.velocity.y < 0) {
       this.velocity.y = 0;
       this.flightAcceleration.y = 0;
     }
-    const drag = Math.exp(-dt * ((grounded ? 1.1 : 0.55) * (1 - recovery) + recovery * 5));
-    this.impulse.x *= drag;
-    this.impulse.z *= drag;
+    if (!this.flightEnabled && motor.y === 0 && this.verticalVelocity < 0)
+      this.verticalVelocity = 0;
+    if (physical && this.playerTumble.grounded) groundFriction(this.impulse, dt);
+    else {
+      const drag = Math.exp(-dt * (physical ? 0.42 : 0.55 * (1 - recovery) + recovery * 5));
+      this.impulse.x *= drag;
+      this.impulse.z *= drag;
+    }
     this.skidTimer -= dt;
     if (
-      this.knockTime > 0 &&
-      this.impulse.length() > 10 &&
-      this.player.y < this.world.surfaceHeight(this.player.x, this.player.z) + 0.4 &&
+      (this.knockTime > 0 || physical) &&
+      this.impulse.length() > 4 &&
+      this.player.y < floor + 0.35 &&
       this.skidTimer <= 0
     ) {
       this.skidTimer = 0.055;
@@ -713,7 +824,8 @@ export class Game {
       const shoot = this.controls.shooting || this.controls.shotRequested;
       if (this.hitPause.remaining === 0) {
         this.controls.shotRequested = false;
-        if (shoot && !this.outcome && this.damageTimer > 0.18) this.cast();
+        if (shoot && !this.outcome && this.damageTimer > 0.18 && !this.playerTumble.physical)
+          this.cast();
       }
     }
   }
@@ -727,6 +839,9 @@ export class Game {
     radius: number,
     height: number,
   ) {
+    const tumble = actor === 'player' ? this.playerTumble : this.boss.tumble;
+    tumble.beginStep();
+    const before = position.clone();
     const speed = motor.clone().add(impulse).length(),
       steps = Math.max(1, Math.ceil((speed * dt) / 0.22));
     const sub = dt / steps;
@@ -756,6 +871,8 @@ export class Game {
         }
       }
       const resolved = resolveCircle(nx, nz, previousFeet, radius, this.world.obstacles, height);
+      if (Math.abs(nx) > ARENA.halfSize) motor.x = impulse.x = 0;
+      if (Math.abs(nz) > ARENA.halfSize) motor.z = impulse.z = 0;
       nx = resolved.x;
       nz = resolved.z;
       position.x = nx;
@@ -768,7 +885,9 @@ export class Game {
         this.world.surfaceHeight(nx, nz),
       );
       if (total.y < 0 && ny <= floor) {
-        const force = Math.abs(total.y);
+        const force = Math.abs(total.y),
+          contactFloor = floor;
+        let throughRoof = false;
         if (knocked && force >= DUEL.groundBreakSpeed && this.impactGate[actor] <= 0) {
           const at = new THREE.Vector3(nx, floor, nz);
           const support = this.world.obstacles.find(
@@ -779,7 +898,7 @@ export class Game {
               nz >= b.minZ - radius &&
               nz <= b.maxZ + radius,
           );
-          if (support) this.world.damageWall(support, at, total, 2.4);
+          if (support) this.world.damageWall(support, at, total, 2.8);
           else this.world.crater(at, force);
           this.worldImpact(at, force, support ? 'wall' : 'ground', actor);
           floor = groundHeight(
@@ -789,11 +908,30 @@ export class Game {
             this.world.obstacles,
             this.world.surfaceHeight(nx, nz),
           );
-          impulse.x *= 0.87;
-          impulse.z *= 0.87;
+          throughRoof = !!support && floor < contactFloor - 0.4;
         }
-        position.y = floor;
-        motor.y = impulse.y = 0;
+        if (throughRoof) position.y = Math.max(ny, floor);
+        else {
+          const bounce = tumble.physical ? groundBounce(force) : 0;
+          position.y =
+            (bounce > 0 ? Math.max(floor, contactFloor) : floor) + (bounce > 0 ? 0.012 : 0);
+          motor.y = 0;
+          impulse.y = bounce;
+          if (bounce > 0) {
+            impulse.x *= 0.88;
+            impulse.z *= 0.88;
+          }
+          tumble.ground(impulse.clone().add(motor), bounce, actor === 'player' ? 0.55 : 1.4);
+          if (force > HEAVY.bounceThreshold) {
+            this.groundReactions.push({
+              actor,
+              speed: force,
+              bounce,
+              position: position.toArray(),
+            });
+            if (this.groundReactions.length > 24) this.groundReactions.shift();
+          }
+        }
       } else {
         // A preserved ceiling above a punched opening still collides when jumping upward.
         const ceiling = this.world.obstacles.find(
@@ -812,6 +950,8 @@ export class Game {
       }
       if (this.hitPause.remaining > 0) break;
     }
+    if (tumble.grounded)
+      tumble.groundTravel += Math.hypot(position.x - before.x, position.z - before.z);
   }
   private aimAtBoss(amount: number) {
     const delta = this.boss.position.clone().sub(this.player);
@@ -846,6 +986,12 @@ export class Game {
         this.knockTime > 0 ? 18 : 23,
         dt,
       );
+    // Keep a backwards launch from pushing the avatar through the chase camera.
+    const behind = this.camera.position.clone().sub(pivot).dot(forward.clone().negate());
+    if (behind < 3.8) {
+      this.camera.position.addScaledVector(forward, behind - 3.8);
+      this.cameraSpringVelocity.copy(this.velocity).add(this.impulse).add(this.airDash.velocity);
+    }
     const obstruction = this.trace(pivot, this.camera.position, false, 0.12);
     if (obstruction) {
       this.camera.position.lerpVectors(
@@ -900,7 +1046,7 @@ export class Game {
     this.camera.updateMatrixWorld();
   }
   private presentActors(dt: number) {
-    this.avatar.position.copy(this.player).y += 0.85;
+    this.avatar.position.copy(this.player);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.facingQuaternion);
     this.bank.z = damp(
       this.bank.z,
@@ -923,6 +1069,11 @@ export class Game {
       .clone()
       .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.bank.x, 0, this.bank.z)));
     this.avatar.quaternion.copy(this.playerTumble.step(dt, pose));
+    const restingPivot = this.flightEnabled ? 0.85 : 0.66;
+    this.avatar.position.y +=
+      restingPivot * (1 - this.playerTumble.weight) +
+      (supportHeight(this.avatar.quaternion, new THREE.Vector3(0.325, 0.65, 0.325)) + 0.025) *
+        this.playerTumble.weight;
     this.playerTrail.push(this.avatar.position, this.camera.position);
     this.boss.present(
       this.time,
@@ -951,9 +1102,11 @@ export class Game {
       }
     }
     const wasKnocked = b.knockTime > 0;
-    b.knockTime = Math.max(0, b.knockTime - dt);
+    b.knockTime = b.tumble.physical
+      ? Math.max(0.4, b.knockTime - dt)
+      : Math.max(0, b.knockTime - dt);
     if (wasKnocked && b.knockTime === 0) b.tactics.displaced(b.position, this.player);
-    const recovery = recoveryBlend(b.knockTime);
+    const recovery = b.tumble.physical ? 0 : recoveryBlend(b.knockTime) * (1 - b.tumble.weight);
     const motor = b.tactics.step(
       dt,
       b.position,
@@ -993,9 +1146,12 @@ export class Game {
     }
     motor.clampLength(0, 19);
     motor.multiplyScalar(0.035 + recovery * 0.965);
-    b.impulse.y -= 14 * (1 - recovery) * dt;
+    b.impulse.y -= (b.tumble.physical ? HEAVY.gravity : 14 * (1 - recovery)) * dt;
     b.velocity.lerp(motor, 1 - Math.exp(-dt * 4.5));
-    const extent = 1.4 + b.tumble.weight * 0.8,
+    const extent =
+        2.05 * (1 - b.tumble.weight) +
+        supportHeight(b.tumble.orientation, new THREE.Vector3(1.85, 1.7, 0.575), -0.3375) *
+          b.tumble.weight,
       feet = b.position.clone().addScaledVector(UP, -extent);
     this.moveBody(
       feet,
@@ -1008,9 +1164,13 @@ export class Game {
       extent * 2,
     );
     b.position.copy(feet).addScaledVector(UP, extent);
-    b.impulse.x *= Math.exp(-dt * (0.55 + recovery * 4.45));
-    b.impulse.z *= Math.exp(-dt * (0.55 + recovery * 4.45));
-    b.impulse.y = damp(b.impulse.y, 0, recovery * 6, dt);
+    if (b.tumble.physical && b.tumble.grounded) groundFriction(b.impulse, dt);
+    else {
+      const drag = Math.exp(-dt * (b.tumble.physical ? 0.42 : 0.55 + recovery * 4.45));
+      b.impulse.x *= drag;
+      b.impulse.z *= drag;
+    }
+    if (!b.tumble.physical) b.impulse.y = damp(b.impulse.y, 0, recovery * 6, dt);
     b.group.position.copy(b.position);
     b.group.lookAt(this.player.clone().add(UP));
     b.group.updateMatrixWorld(true);
@@ -1048,7 +1208,7 @@ export class Game {
     if (attack === 'fire') {
       const target = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
       const origin = this.boss.fireGate(index, target, (x, z) => this.world.surfaceHeight(x, z));
-      this.pendingFire.push({ origin, delay: 0.065, index });
+      this.pendingFire.push({ origin, delay: 0.12, index });
     } else if (attack === 'missiles') {
       for (const side of [0, 3]) {
         const port = this.boss.spellPort(index + side),
@@ -1060,7 +1220,7 @@ export class Game {
         const radial = port.clone().sub(this.boss.muzzle()).normalize();
         const launch = forward
           .multiplyScalar(0.88)
-          .addScaledVector(radial, 0.3)
+          .addScaledVector(radial, 0.3 * Math.min(1, port.distanceTo(this.player) / 12))
           .normalize()
           .multiplyScalar(15);
         this.spawn(port, launch, 'missile', 16);
@@ -1219,6 +1379,7 @@ export class Game {
       life: PROJECTILES[kind].life,
       radius,
       origin: at.clone(),
+      guidance: { committed: false },
       age: 0,
     });
     if (kind !== 'player') this.attacksFired[kind]++;
@@ -1238,7 +1399,7 @@ export class Game {
       }
       if (p.kind === 'missile') {
         p.velocity.copy(
-          guideMissile(p.mesh.position, p.velocity, previousCenter, motion, p.age, dt),
+          guideMissile(p.mesh.position, p.velocity, previousCenter, motion, p.age, dt, p.guidance),
         );
       } else if (p.kind === 'player' && p.homing && this.boss.alive)
         p.velocity.lerp(
@@ -1251,22 +1412,45 @@ export class Game {
       p.mesh.children.forEach((o, index) => {
         o.rotation.z += dt * (index ? -3 : 4);
       });
-      const worldHit = this.trace(p.last, p.mesh.position, p.kind === 'player', p.radius);
+      let worldHit = this.trace(p.last, p.mesh.position, p.kind === 'player', p.radius);
+      // Carve only the measured thin material span, then re-run CCD for the remaining path.
+      if (p.kind === 'hammer')
+        for (let n = 0; n < 4 && worldHit?.obstacle; n++) {
+          const contact = p.last.clone().lerp(p.mesh.position, worldHit.t);
+          const result = this.world.pierceThin(
+            worldHit.obstacle,
+            p.last,
+            p.velocity.clone().normalize(),
+            contact,
+          );
+          if (!result) break;
+          this.heavyPenetrations.push({
+            owner: worldHit.obstacle.owner!,
+            thickness: result.thickness,
+            entry: result.entry.toArray(),
+            exit: result.exit.toArray(),
+          });
+          if (this.heavyPenetrations.length > 32) this.heavyPenetrations.shift();
+          this.fx.burst(result.entry, '#ffdfad', 18, 5, 0.35, 2);
+          worldHit = this.trace(p.last, p.mesh.position, false, p.radius);
+        }
       if (p.kind !== 'player') {
         const horizon = dt + DUEL.shieldPrediction;
         const shieldFacing = this.playerTumble.active
           ? new THREE.Vector3(0, 0, -1).applyQuaternion(this.playerTumble.orientation)
           : this.facing;
         const covered = shieldCovers(shieldFacing, p.last.clone().sub(previousCenter));
-        const guard = shieldIntercept(
-          p.last,
-          p.velocity,
-          previousCenter,
-          motion,
-          shieldFacing,
-          p.radius,
-          horizon,
-        );
+        const guard = this.aegis.enabled
+          ? shieldIntercept(
+              p.last,
+              p.velocity,
+              previousCenter,
+              motion,
+              shieldFacing,
+              p.radius,
+              horizon,
+            )
+          : null;
         if (guard) {
           const futureEnd = p.last.clone().addScaledVector(p.velocity, horizon),
             cover = this.trace(p.last, futureEnd, false, p.radius);
@@ -1426,6 +1610,8 @@ export class Game {
       .addScaledVector(this.velocity, 0.25)
       .addScaledVector(this.impulse, 0.2)
       .clampLength(0, 112);
+    vector.y += this.verticalVelocity * 0.2;
+    this.verticalVelocity = 0;
     this.pendingPlayerImpulse = vector;
     this.playerRelease.cancel();
     this.flightAcceleration.set(0, 0, 0);
@@ -1519,10 +1705,29 @@ export class Game {
         this.start(false);
         this.testIdleBoss = true;
         if (['wall', 'ground', 'contact', 'missile-near', 'defeat', 'ragdoll'].includes(name)) {
-          this.aegis.phase = 'cooldown';
-          this.aegis.remaining = DUEL.shieldCooldown;
+          this.aegis.setEnabled(false);
         }
-        if (name === 'wall') {
+        if (['pierce-player', 'pierce-ground', 'thick-cover'].includes(name)) {
+          this.aegis.setEnabled(false);
+          if (name === 'pierce-player') {
+            this.player.set(-2, 6, -15);
+            this.spawn(new THREE.Vector3(-2, 6.9, -5), new THREE.Vector3(0, 0, -31), 'hammer', 29);
+          } else if (name === 'pierce-ground') {
+            this.player.set(60, 8, 60);
+            this.spawn(new THREE.Vector3(-2, 3, -5), new THREE.Vector3(0, -8, -31), 'hammer', 29);
+          } else {
+            this.player.set(-24, 2.1, 12);
+            this.spawn(new THREE.Vector3(-3, 3, 12), new THREE.Vector3(-31, 0, 0), 'hammer', 29);
+          }
+        } else if (name === 'ground-skid') {
+          this.aegis.setEnabled(false);
+          this.player.set(0, 5, 65);
+          this.spawn(new THREE.Vector3(0, 12, 70), new THREE.Vector3(0, -28, -20), 'hammer', 29);
+        } else if (name === 'walk') {
+          this.player.set(0, 0, 24);
+          this.setFlight(false);
+          this.groundJumps = 0;
+        } else if (name === 'wall') {
           this.player.set(-7, 1.5, 12);
           this.spawn(new THREE.Vector3(-3, 2.4, 12), new THREE.Vector3(-38, 0, 0), 'hammer', 29);
         } else if (name === 'ground') {
@@ -1536,7 +1741,7 @@ export class Game {
           if (name === 'nova-finish') this.boss.health = 1;
         } else if (name === 'cover') {
           this.player.set(-6.5, 0, 12);
-          this.spawn(new THREE.Vector3(-20, 0.95, 12), new THREE.Vector3(30, 0, 0), 'fire', 9);
+          this.spawn(new THREE.Vector3(-25, 0.95, 12), new THREE.Vector3(30, 0, 0), 'fire', 9);
         } else if (name === 'contact') {
           this.player.set(0, 4, 24);
           this.spawn(
@@ -1552,7 +1757,7 @@ export class Game {
           this.player.set(0, 5, 24);
           this.spawn(
             this.player.clone().add(new THREE.Vector3(2.4, 0.9, 0)),
-            new THREE.Vector3(15, 0, 0),
+            new THREE.Vector3(-15, 0, 0),
             'missile',
             16,
           );
@@ -1582,7 +1787,7 @@ export class Game {
           incoming('right');
         }
         if (name === 'shield-large') incoming('front', 'hammer');
-        if (name === 'flight') orient(0, 0);
+        if (name === 'flight' || name === 'walk') orient(0, 0);
         if (name === 'shield-scatter') {
           orient(0, 0);
           const center = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));

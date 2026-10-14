@@ -13,37 +13,36 @@ import { DestructibleVolume, TerrainDeformation } from '../../src/game/destructi
 import { groundHeight, resolveCircle, segmentBox } from '../../src/game/math';
 
 describe('maximum automatic Aegis', () => {
-  it('starts ready and protects against every projectile, not just the first hit', () => {
-    const s = new AutoShield();
-    expect(s.phase).toBe('ready');
-    for (let i = 0; i < 60; i++) expect(s.intercept()).toBe(true);
-    expect(s.blocked).toBe(60);
-    expect(s.phase).toBe('active');
-    expect(s.remaining).toBe(DUEL.shieldWindow);
+  it('blocks indefinitely while ON, with no hidden window or cooldown', () => {
+    const shield = new AutoShield();
+    expect(shield.enabled).toBe(true);
+    for (let i = 0; i < 500; i++) {
+      shield.update(0.17);
+      expect(shield.intercept()).toBe(true);
+    }
+    expect(shield.blocked).toBe(500);
+    shield.update(100);
+    expect(shield.intercept()).toBe(true);
   });
-  it('has a bounded window that cannot be refreshed indefinitely by impacts', () => {
-    const s = new AutoShield();
-    s.intercept();
-    s.update(1);
-    s.intercept();
-    expect(s.remaining).toBeCloseTo(DUEL.shieldWindow - 1);
-    s.update(DUEL.shieldWindow - 1);
-    expect(s.phase).toBe('cooldown');
-    expect(s.intercept()).toBe(false);
-    expect(s.blocked).toBe(2);
-    s.update(DUEL.shieldCooldown);
-    expect(s.phase).toBe('ready');
-    expect(s.intercept()).toBe(true);
+  it('OFF disables interception immediately; ON is immediately ready again', () => {
+    const shield = new AutoShield();
+    shield.intercept();
+    shield.toggle();
+    expect(shield.phase).toBe('off');
+    expect(shield.intercept()).toBe(false);
+    shield.update(10);
+    expect(shield.intercept()).toBe(false);
+    shield.toggle();
+    expect(shield.intercept()).toBe(true);
+    expect(shield.blocked).toBe(2);
   });
-  it('handles a long frame across both timers and resets cleanly', () => {
-    const s = new AutoShield();
-    s.intercept();
-    s.update(10);
-    expect(s.phase).toBe('ready');
-    s.intercept();
-    s.reset();
-    expect(s.remaining).toBe(0);
-    expect(s.blocked).toBe(0);
+  it('reset restores ON and clears the counter', () => {
+    const shield = new AutoShield();
+    shield.intercept();
+    shield.setEnabled(false);
+    shield.reset();
+    expect(shield.enabled).toBe(true);
+    expect(shield.blocked).toBe(0);
   });
   it('predicts an actual hit shortly before contact, from any direction', () => {
     for (const side of [

@@ -8,13 +8,11 @@ export const DUEL = {
   nearRange: 15,
   farRange: 27,
   bossSpeed: 12,
-  shieldWindow: 1.65,
-  shieldCooldown: 3.2,
-  shieldPrediction: 0.13,
+  shieldPrediction: 0.15,
   bodyRadius: 0.72,
   shieldArcDegrees: 210,
-  shieldShell: 1.3,
-  shieldReach: 2.75,
+  shieldShell: 2.35,
+  shieldReach: 4.15,
   novaLaunch: 70,
   novaPause: 0.105,
   wallBreakSpeed: 12,
@@ -22,48 +20,34 @@ export const DUEL = {
   impactInterval: 0.65,
 } as const;
 
-export type ShieldPhase = 'ready' | 'active' | 'cooldown';
+export type ShieldPhase = 'off' | 'ready' | 'active';
 export class AutoShield {
-  phase: ShieldPhase = 'ready';
-  remaining = 0;
+  enabled = true;
   blocked = 0;
+  private pulse = 0;
+  get phase(): ShieldPhase {
+    return !this.enabled ? 'off' : this.pulse > 0 ? 'active' : 'ready';
+  }
   reset() {
-    this.phase = 'ready';
-    this.remaining = this.blocked = 0;
+    this.enabled = true;
+    this.blocked = this.pulse = 0;
+  }
+  setEnabled(enabled: boolean) {
+    this.enabled = enabled;
+    this.pulse = 0;
+  }
+  toggle() {
+    this.setEnabled(!this.enabled);
   }
   update(dt: number) {
-    let left = Math.max(0, dt);
-    while (left > 0 && this.phase !== 'ready') {
-      const step = Math.min(left, this.remaining);
-      this.remaining = Math.max(0, this.remaining - step);
-      left -= step;
-      if (this.remaining < 1e-8) {
-        if (this.phase === 'active') {
-          this.phase = 'cooldown';
-          this.remaining = DUEL.shieldCooldown;
-        } else {
-          this.phase = 'ready';
-          this.remaining = 0;
-        }
-      }
-    }
+    this.pulse = Math.max(0, this.pulse - dt);
   }
-  /** Unlimited interceptions in the window, but the caller must check facing and occlusion first. */
+  /** Always ready while ON. The pulse is feedback only, never a protection window/cooldown. */
   intercept(): boolean {
-    if (this.phase === 'cooldown') return false;
-    if (this.phase === 'ready') {
-      this.phase = 'active';
-      this.remaining = DUEL.shieldWindow;
-    }
+    if (!this.enabled) return false;
     this.blocked++;
+    this.pulse = 0.22;
     return true;
-  }
-  get progress() {
-    return this.phase === 'ready'
-      ? 1
-      : this.phase === 'active'
-        ? this.remaining / DUEL.shieldWindow
-        : 1 - this.remaining / DUEL.shieldCooldown;
   }
 }
 
@@ -99,7 +83,7 @@ export const ATTACKS = {
   },
   missiles: {
     label: 'MANTRA PEMBURU',
-    warning: 'SIGIL MENGUNCI',
+    warning: 'MANTRA MENYEBAR',
     tell: 1.05,
     duration: 1.75,
     recovery: 1.25,
@@ -227,7 +211,7 @@ export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer';
 export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, stagger: 0 },
   fire: { radius: 0.32, speed: 30, life: 4, launch: 36, pause: 0.065, stagger: 0.85 },
-  missile: { radius: 0.34, speed: 28, life: 5.5, launch: 60, pause: 0.08, stagger: 1.2 },
+  missile: { radius: 0.34, speed: 25, life: 4.5, launch: 60, pause: 0.08, stagger: 1.2 },
   hammer: { radius: 1.25, speed: 31, life: 5, launch: 84, pause: 0.105, stagger: 1.5 },
 } as const;
 
@@ -267,7 +251,10 @@ export function salvoSpread(index: number): { yaw: number; pitch: number } {
   return { yaw: Math.cos(angle) * 0.105 * radius, pitch: Math.sin(angle) * 0.06 * radius };
 }
 
-/** Adaptive terminal guidance: no dead zone/delayed lock near the player and no endless orbit. */
+export interface MissileGuidance {
+  committed: boolean;
+}
+/** Soft pursuit, then a committed straight run: dodging does not trigger a near-range U-turn. */
 export function guideMissile(
   position: Vector3,
   velocity: Vector3,
@@ -275,20 +262,17 @@ export function guideMissile(
   targetVelocity: Vector3,
   age: number,
   dt: number,
+  state: MissileGuidance = { committed: false },
 ): Vector3 {
   const offset = target.clone().sub(position),
     distance = offset.length();
-  const toward = offset.clone().normalize(),
-    current = velocity.clone().normalize();
-  const alignment = current.dot(toward);
-  const close = 1 - clamp(distance / 10, 0, 1);
-  const cruise = Math.min(PROJECTILES.missile.speed, 15 + age * 9);
-  // Brake into tight bends instead of circling a target faster than the seeker can turn.
-  const speed = cruise * (alignment < 0.45 ? clamp((alignment + 1) * 0.5, 0.38, 1) : 1);
-  const lead = Math.min(0.48, distance / Math.max(10, cruise));
-  const desired = offset.addScaledVector(targetVelocity, lead * (distance < 2 ? 0.35 : 0.85));
-  const turnRate = 3.2 + close * 10.8;
-  return steerMissile(velocity, desired, turnRate, dt, speed);
+  const alignment = velocity.clone().normalize().dot(offset.clone().normalize());
+  if (distance <= 5.2 || age >= 1.35 || alignment < 0.05) state.committed = true;
+  const speed = Math.min(PROJECTILES.missile.speed, 15 + age * 8);
+  if (state.committed) return velocity.clone().normalize().multiplyScalar(speed);
+  const lead = Math.min(0.18, distance / 60);
+  const desired = offset.addScaledVector(targetVelocity, lead * 0.25);
+  return steerMissile(velocity, desired, 1.25, dt, speed);
 }
 
 /** Project a patch onto the ACTUAL nearby trajectory, retaining off-centre X/Y offsets. */
@@ -316,6 +300,6 @@ export function shieldIntercept(
   if (time === null) return null;
   const offset = relative.addScaledVector(velocity, time);
   if (offset.lengthSq() < 1e-6) offset.copy(projectileVelocity).negate().normalize();
-  offset.clampLength(0.9, DUEL.shieldReach);
+  offset.clampLength(1.8, DUEL.shieldReach);
   return { time, offset, normal: projectileVelocity.clone().negate().normalize() };
 }

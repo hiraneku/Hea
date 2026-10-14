@@ -63,6 +63,8 @@ export class BossTactics {
     const distance = away.length();
     if (distance < 10) motor.addScaledVector(away.normalize(), (10 - distance) * 2);
     if (distance > 37) motor.addScaledVector(away.normalize(), -(distance - 37) * 0.8);
+    if (attack === 'hammer' && stage === 'telegraph' && position.y < 6)
+      motor.y = Math.max(motor.y, (6 - position.y) * 2);
     return motor.clampLength(0, 19);
   }
   private choose(position: Vector3, player: Vector3, kind: Maneuver) {

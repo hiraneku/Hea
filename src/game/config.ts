@@ -13,3 +13,12 @@ export const FLIGHT = {
   hoverHeight: 0.85,
   dashSpeed: 48.5,
 } as const;
+
+export const GROUND = { speed: 8.5, gravity: 25, jump: 9.6, airJump: 8.6 } as const;
+export const HEAVY = {
+  thinDepth: 3.2,
+  tunnelRadius: 1.8,
+  gravity: 27,
+  bounceThreshold: 12,
+  maxBounce: 13,
+} as const;

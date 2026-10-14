@@ -4,6 +4,9 @@ export class Controls {
   shooting = false;
   shotRequested = false;
   focusRequested = false;
+  shieldRequested = false;
+  flightRequested = false;
+  jumpRequested = false;
   private riseHeld = false;
   private descendHeld = false;
   dashRequested = false;
@@ -89,6 +92,7 @@ export class Controls {
   }
   reset() {
     this.keys.clear();
+    this.shieldRequested = this.flightRequested = this.jumpRequested = false;
     this.shooting = this.shotRequested = this.focusRequested = this.mouseDown = false;
     this.riseHeld = this.descendHeld = this.dashRequested = false;
     document
@@ -167,6 +171,9 @@ export class Controls {
     }
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.dashRequested = true;
     if (e.code === 'KeyE') this.focusRequested = true;
+    if (e.code === 'KeyG') this.shieldRequested = true;
+    if (e.code === 'KeyF') this.flightRequested = true;
+    if (e.code === 'Space') this.jumpRequested = true;
     if (e.code === 'KeyQ' || e.code === 'Tab') this.onCycle();
     if (['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.onSpell(Number(e.code.at(-1)) - 1);
   }
@@ -247,10 +254,21 @@ export class Controls {
     });
     hold('#touch-rise', (value) => {
       this.riseHeld = value;
+      if (value) this.jumpRequested = true;
     });
     hold('#touch-descend', (value) => {
       this.descendHeld = value;
     });
+    for (const [id, request] of [
+      ['#shield-toggle', 'shieldRequested'],
+      ['#flight-toggle', 'flightRequested'],
+    ] as const)
+      document.querySelector(id)!.addEventListener('pointerdown', (e) => {
+        if (!this.enabled) return;
+        e.preventDefault();
+        e.stopPropagation();
+        this[request] = true;
+      });
     document.querySelector('#touch-dash')!.addEventListener('pointerdown', (e) => {
       if (!this.enabled) return;
       e.preventDefault();

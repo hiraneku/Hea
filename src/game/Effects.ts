@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { seededRandom } from './math';
+import { makeShieldPatch, shieldPattern } from './ShieldVisual';
 
 const UP = new THREE.Vector3(0, 1, 0);
 const v1 = new THREE.Vector3();
@@ -96,6 +97,7 @@ export function makeSigil(
     map: texture,
     color: new THREE.Color(color).multiplyScalar(2),
     side: THREE.DoubleSide,
+    forceSinglePass: true,
     transparent: true,
     blending: THREE.NormalBlending,
     depthWrite: false,
@@ -279,6 +281,17 @@ export class Effects {
   private sparks: Particle[] = [];
   private rocks: Debris[] = [];
   private timed: TimedEffect[] = [];
+  private shieldSerial = 0;
+  get shieldEchoes() {
+    return this.timed
+      .filter((e) => e.object.userData.kind === 'shield-echo')
+      .map((e) => ({
+        serial: e.object.userData.serial as number,
+        pattern: e.object.userData.pattern as string,
+        position: e.object.position.toArray(),
+        remaining: e.life,
+      }));
+  }
   private sparkMesh: THREE.Points;
   private rockMesh: THREE.InstancedMesh;
   private position: Float32Array;
@@ -419,12 +432,16 @@ export class Effects {
     }
   }
   block(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1) {
-    const patch = makeHexField(0.27 * scale, 2);
+    const serial = this.shieldSerial++,
+      patch = makeShieldPatch(serial);
     patch.position.copy(at);
     patch.lookAt(at.clone().sub(incoming.clone().normalize()));
-    this.add(patch, scale > 2 ? 0.52 : 0.34, 0.1);
-    this.burst(at, '#7af1ff', scale > 2 ? 34 : 18, 3, 0.28 * Math.sqrt(scale), 0.5);
-    if (scale > 2) this.glyph(at, incoming.clone().negate(), '#b8f6ff', scale * 0.55, 0.42);
+    patch.rotateZ((serial * 2.39996) % (Math.PI * 2));
+    patch.scale.setScalar(scale);
+    // This remains in WORLD space. It is a visual afterimage, never a moving player attachment.
+    this.add(patch, scale > 2 ? 1.45 : 1.25, 0, 0);
+    this.burst(at, '#7af1ff', scale > 2 ? 26 : 12, 3, 0.24 * Math.sqrt(scale), 0.5);
+    return { serial, pattern: shieldPattern(serial) };
   }
   contact(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1) {
     const points: number[] = [];
@@ -671,12 +688,17 @@ export class Effects {
       e.object.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
           const material = o.material as THREE.Material & { opacity: number };
-          material.opacity = (o.userData.baseOpacity ?? 1) * Math.min(1, (e.life / e.max) * 1.6);
+          const fade =
+            e.object.userData.kind === 'shield-echo'
+              ? Math.min(1, e.life / 0.65)
+              : Math.min(1, (e.life / e.max) * 1.6);
+          material.opacity = (o.userData.baseOpacity ?? 1) * fade;
         }
       });
     }
   }
   clear() {
+    this.shieldSerial = 0;
     this.dustClouds.forEach((p) => {
       p.life = 0;
     });

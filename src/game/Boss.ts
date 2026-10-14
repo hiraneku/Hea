@@ -52,7 +52,7 @@ export class Boss {
     this.sigil = makeSigil(fx.sigilMap, 1.22, '#ff9e37');
     this.sigil.position.set(0, 0.1, 0.45);
     this.group.add(this.sigil);
-    this.chargeRing = makeSigil(fx.sigilMap, 1.8, '#ffd495');
+    this.chargeRing = makeSigil(fx.sigilMap, 3.4, '#ffc25c');
     this.chargeRing.position.set(0, 0.1, 0.52);
     this.chargeRing.visible = false;
     this.group.add(this.chargeRing);
@@ -78,7 +78,39 @@ export class Boss {
     this.group.add(this.light);
     scene.add(this.group, this.ribbon.mesh);
     for (let i = 0; i < 8; i++) {
-      const object = makeSigil(fx.sigilMap, 0.68, '#ffac55');
+      const object = makeSigil(fx.sigilMap, 1.12, '#ffb94e');
+      const backing = new THREE.Mesh(
+        new THREE.CircleGeometry(1.02, 48),
+        new THREE.MeshBasicMaterial({
+          color: '#4d230e',
+          transparent: true,
+          opacity: 0.28,
+          side: THREE.DoubleSide,
+          forceSinglePass: true,
+          depthWrite: false,
+          toneMapped: false,
+        }),
+      );
+      backing.position.z = -0.018;
+      const rim = new THREE.Mesh(
+        new THREE.TorusGeometry(1.03, 0.028, 4, 56),
+        new THREE.MeshBasicMaterial({
+          color: '#ffbf60',
+          transparent: true,
+          opacity: 1,
+          depthWrite: false,
+          toneMapped: false,
+        }),
+      );
+      rim.position.z = 0.015;
+      (
+        object.children[0] as THREE.Mesh<THREE.PlaneGeometry, THREE.MeshBasicMaterial>
+      ).material.toneMapped = false;
+      object.add(backing, rim);
+      object.children.forEach((o) => {
+        if (o instanceof THREE.Mesh)
+          o.userData.baseOpacity = (o.material as THREE.Material).opacity;
+      });
       object.visible = false;
       scene.add(object);
       this.gates.push({ object, age: 10 });
@@ -128,16 +160,25 @@ export class Boss {
       g.object.visible = false;
     });
   }
+  get chargeRadius() {
+    return this.director.attack === 'hammer' && this.chargeRing.visible
+      ? 3.4 * this.chargeRing.scale.x
+      : 0;
+  }
   get activeGates() {
     return this.gates
       .filter((g) => g.object.visible)
-      .map((g) => ({ position: g.object.position.toArray(), age: g.age }));
+      .map((g) => ({
+        position: g.object.position.toArray(),
+        age: g.age,
+        radius: 1.12 * g.object.scale.x,
+      }));
   }
   fireGate(index: number, target: THREE.Vector3, floor: (x: number, z: number) => number) {
     const { local, side } = fireGateOffset(index, this.director.pattern);
     this.group.updateMatrixWorld(true);
     const origin = this.group.localToWorld(local.clone());
-    origin.y = Math.max(origin.y, floor(origin.x, origin.z) + 0.9);
+    origin.y = Math.max(origin.y, floor(origin.x, origin.z) + 1.2);
     const gate = this.gates[this.gateCursor++ % this.gates.length];
     gate.object.position.copy(origin);
     gate.object.lookAt(target);
@@ -175,20 +216,23 @@ export class Boss {
     this.chargeRing.visible = this.director.stage !== 'recover' && this.director.attack !== 'fire';
     this.chargeRing.rotation.z -= dt * 0.8;
     this.chargeRing.scale.setScalar(
-      this.director.attack === 'hammer' ? 1.1 + charge * 0.5 : 0.82 + charge * 0.25,
+      this.director.attack === 'hammer'
+        ? 1.05 + (this.director.stage === 'telegraph' ? charge : 1) * 0.4
+        : 0.52 + charge * 0.14,
     );
     const heavy = this.director.attack === 'hammer' && this.director.stage === 'telegraph';
     this.ember.scale.setScalar(1 + charge * (heavy ? 5.8 : 1.8) + Math.sin(time * 5) * 0.1);
     this.ember.position.z = 0.75 + (heavy ? charge * 0.9 : 0);
     this.gates.forEach((g) => {
       g.age += dt;
-      g.object.visible = g.age < 0.46;
+      g.object.visible = g.age < 0.66;
       if (!g.object.visible) return;
-      g.object.scale.setScalar(0.2 + ease(g.age / 0.06) * 0.8);
+      g.object.scale.setScalar(0.45 + ease(g.age / 0.1) * 0.55);
       g.object.rotateZ(dt * 0.5);
       g.object.children.forEach((o) => {
         if (o instanceof THREE.Mesh)
-          (o.material as THREE.Material).opacity = (1 - ease((g.age - 0.24) / 0.22)) * 0.92;
+          (o.material as THREE.Material).opacity =
+            (1 - ease((g.age - 0.43) / 0.23)) * (o.userData.baseOpacity ?? 1);
       });
     });
     this.castRotation = time * 0.55;

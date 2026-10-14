@@ -124,6 +124,8 @@ test('mobile: simultaneous movement and casting, camera focus, landscape and res
     '#touch-rise',
     '#touch-descend',
     '#touch-focus',
+    '#shield-toggle',
+    '#flight-toggle',
   ]) {
     const b = (await page.locator(id).boundingBox())!;
     expect(b.x).toBeGreaterThanOrEqual(0);
@@ -194,40 +196,41 @@ test('mobile: simultaneous movement and casting, camera focus, landscape and res
   expect(errors).toEqual([]);
 });
 
-test('Aegis covers front and sides, never the rear, and respects cooldown and cover', async ({
-  page,
-}, info) => {
+test('Aegis toggles without cooldown and keeps rear/cover exclusions', async ({ page }, info) => {
   test.skip(info.project.name !== 'mobile');
   await load(page);
   await scenario(page, 'shield');
-  await step(page, 0.25);
-  let s = await state(page);
-  expect(s.shield.blocked).toBe(3);
-  expect(s.health).toBe(100);
-  expect(s.shield.phase).toBe('active');
-  expect(s.energy).toBe(100);
-  await expect(page.locator('#shield-state')).toContainText('AKTIF');
+  await step(page, 0.12);
+  expect((await state(page)).shield.blocked).toBe(3);
+  expect((await state(page)).health).toBe(100);
+  await expect(page.locator('#shield-state')).toHaveText('ON');
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.incoming('back'));
   await step(page, 0.25);
   expect((await state(page)).health).toBeLessThan(100);
   expect((await state(page)).shield.blocked).toBe(3);
-  expect((await state(page)).shield.phase).toBe('active');
-  expect((await state(page)).shield.blindWarning).toBe(true);
-  await step(page, DUEL.shieldWindow);
-  s = await state(page);
-  expect(s.shield.phase).toBe('cooldown');
+  await scenario(page, 'flight');
+  await page.locator('#shield-toggle').tap();
+  await step(page, 0.01);
+  expect((await state(page)).shield.enabled).toBe(false);
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.incoming());
-  await step(page, 0.25);
+  await step(page, 0.3);
   expect((await state(page)).health).toBeLessThan(100);
-  expect((await state(page)).shield.blocked).toBe(3);
-  await step(page, DUEL.shieldCooldown);
-  expect((await state(page)).shield.phase).toBe('ready');
-  expect(await page.locator('#touch-shield').count()).toBe(0);
+  expect((await state(page)).shield.blocked).toBe(0);
+  await page.locator('#shield-toggle').tap();
+  await step(page, 0.01);
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.incoming());
+  // The player is still recoiling away faster than this shot; wait for actual danger, not a shield timer.
+  expect((await state(page)).shield.enabled).toBe(true);
+  await step(page, 0.7);
+  expect((await state(page)).shield.blocked).toBe(1);
+  await step(page, 5);
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.incoming());
+  await step(page, 0.2);
+  expect((await state(page)).shield.blocked).toBe(2);
   await scenario(page, 'cover');
   await step(page, 0.7);
-  expect((await state(page)).shield.blocked).toBe(0);
-  expect((await state(page)).shield.phase).toBe('ready');
   expect((await state(page)).health).toBe(100);
+  expect((await state(page)).shield.blocked).toBe(0);
 });
 
 test('a hit launches the player through real wall collision; reset restores the arena', async ({
@@ -268,7 +271,9 @@ test('ground slam deforms terrain, produces collision impact, respects comfort m
   const s = await state(page);
   expect(s.craters).toBeGreaterThan(0);
   expect(s.impacts).toBeGreaterThan(0);
-  expect(s.position.y).toBeLessThan(0);
+  expect(s.position.y).toBeGreaterThanOrEqual(
+    await page.evaluate(() => window.__HEA_DEBUG__.harness!.groundAt(0, 24)),
+  );
   expect(await page.evaluate(() => window.__HEA_DEBUG__.harness!.groundAt(0, 24))).toBeLessThan(
     -0.3,
   );
@@ -494,7 +499,8 @@ test('dash speed has a smooth boost tail, and shield patches cover separate near
   expect(d.shieldPatches.some((p) => p.offset[0] < -1)).toBe(true);
   expect(d.shieldPatches.some((p) => p.offset[0] > 1)).toBe(true);
   expect(d.shieldPatches.some((p) => p.offset[1] > 1)).toBe(true);
-  for (const p of d.shieldPatches) expect(Math.hypot(...p.offset)).toBeLessThanOrEqual(2.75);
+  for (const p of d.shieldPatches)
+    expect(Math.hypot(...p.offset)).toBeLessThanOrEqual(DUEL.shieldReach);
 });
 
 test('fire comes from warmed satellite gates, seekers double, and boss altitude choices vary', async ({
@@ -509,7 +515,7 @@ test('fire comes from warmed satellite gates, seekers double, and boss altitude 
   expect(d.pendingFire).toBe(1);
   expect(d.fireGates.length).toBeGreaterThan(0);
   expect(d.attacksFired.fire).toBe(0);
-  await step(page, 0.05);
+  await step(page, 0.12);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.attacksFired.fire).toBe(1);
   expect(d.shots.find((s) => s.kind === 'fire')!.origin).toEqual(d.fireOrigins[0].origin);
@@ -540,7 +546,7 @@ test('heavy hit and Nova drive real body tumbling, recover smoothly and cancel i
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.ragdoll.playerOrientation).not.toEqual(orientation);
   expect(d.ragdoll.player).toBe(true);
-  await step(page, 3);
+  await step(page, 8);
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).ragdoll.player).toBe(
     false,
   );
@@ -563,4 +569,118 @@ test('heavy hit and Nova drive real body tumbling, recover smoothly and cancel i
   expect(d.ragdoll.boss).toBe(false);
   expect(d.ragdoll.player).toBe(false);
   expect(d.pendingFire).toBe(0);
+});
+
+test('shield echoes stay in world space, vary shape, fade, and do not shield when OFF', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'shield');
+  await step(page, 0.1);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.shieldEchoes).toHaveLength(3);
+  expect(new Set(d.shieldEchoes.map((e) => e.pattern)).size).toBe(3);
+  const poses = d.shieldEchoes.map((e) => e.position);
+  expect(d.shieldPatches.every((p) => Math.hypot(...p.offset) > 2.3)).toBe(true);
+  await page.keyboard.down('KeyD');
+  await page.locator('#shield-toggle').tap();
+  await step(page, 0.55);
+  await page.keyboard.up('KeyD');
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.shieldEchoes.map((e) => e.position)).toEqual(poses);
+  expect((await state(page)).position.x).toBeGreaterThan(2);
+  expect((await state(page)).shield.enabled).toBe(false);
+  await step(page, 1.2);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).shieldEchoes).toHaveLength(
+    0,
+  );
+});
+
+test('walk mode restores gravity, double jump and landing; toggles also work on keyboard', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'walk');
+  expect((await state(page)).flight.enabled).toBe(false);
+  await expect(page.locator('#touch-rise small')).toHaveText('LOMPAT ×2');
+  await expect(page.locator('#touch-descend')).toBeHidden();
+  await page.locator('#touch-rise').tap();
+  await step(page, 0.22);
+  const first = (await state(page)).position.y;
+  expect(first).toBeGreaterThan(1);
+  await page.locator('#touch-rise').tap();
+  await step(page, 0.18);
+  expect((await state(page)).position.y).toBeGreaterThan(first + 0.8);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).groundJumps).toBe(2);
+  await page.locator('#touch-rise').tap();
+  await step(page, 0.04);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).groundJumps).toBe(2);
+  await step(page, 2);
+  expect((await state(page)).position.y).toBeCloseTo(0, 1);
+  await page.keyboard.press('KeyF');
+  await step(page, 0.6);
+  expect((await state(page)).flight.enabled).toBe(true);
+  expect((await state(page)).position.y).toBeGreaterThan(0.3);
+  await page.keyboard.press('KeyG');
+  await step(page, 0.01);
+  expect((await state(page)).shield.enabled).toBe(false);
+  await page.locator('#flight-toggle').tap();
+  await step(page, 1);
+  expect((await state(page)).flight.enabled).toBe(false);
+  expect((await state(page)).position.y).toBeCloseTo(0, 1);
+});
+
+test('solar sphere bores thin slabs, continues into player/ground, but thick walls stop it', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'pierce-player');
+  await step(page, 0.6);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.heavyPenetrations.length).toBeGreaterThan(0);
+  expect((await state(page)).health).toBe(71);
+  expect((await state(page)).wallsBroken).toBeGreaterThan(0);
+  expect(d.heavyPenetrations[0].thickness).toBeLessThanOrEqual(3.2);
+  await scenario(page, 'pierce-ground');
+  await step(page, 0.7);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.heavyPenetrations.length).toBeGreaterThan(0);
+  expect((await state(page)).craters).toBeGreaterThan(0);
+  expect(d.shots.filter((s) => s.kind === 'hammer')).toHaveLength(0);
+  await scenario(page, 'thick-cover');
+  await step(page, 0.8);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.heavyPenetrations).toHaveLength(0);
+  expect((await state(page)).health).toBe(100);
+  expect(d.shots.filter((s) => s.kind === 'hammer')).toHaveLength(0);
+});
+
+test('heavy ragdoll bounces, rolls and drags before recovering; walls and sigils are enlarged', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'ground-skid');
+  await step(page, 1.4);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.playerBounces).toBeGreaterThan(0);
+  expect(d.groundReactions.some((r) => r.actor === 'player' && r.bounce > 0)).toBe(true);
+  await step(page, 5);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.playerGroundTravel).toBeGreaterThan(2);
+  await step(page, 5);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).ragdoll.player).toBe(
+    false,
+  );
+  await scenario(page, 'patterns');
+  await step(page, 2.3);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.fireGates.some((g) => g.radius >= 1)).toBe(true);
+  expect(d.walls.filter((w) => w.maxX - w.minX >= 10 && w.top >= 15).length).toBeGreaterThan(45);
+  await step(page, 10.8);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.heavyCircleRadius).toBeGreaterThan(3.4);
 });

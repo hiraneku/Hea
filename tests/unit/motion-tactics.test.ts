@@ -97,7 +97,11 @@ describe('torque-driven blockout ragdoll', () => {
     for (let i = 0; i < 24; i++) body.step(1 / 120, base);
     expect(body.orientation.angleTo(base)).toBeGreaterThan(1);
     expect(body.orientation.length()).toBeCloseTo(1);
-    for (let i = 0; i < 420; i++) body.step(1 / 120, base);
+    for (let i = 0; i < 420; i++) {
+      body.beginStep();
+      body.ground(new Vector3(), 0, 0.55);
+      body.step(1 / 120, base);
+    }
     expect(body.active).toBe(false);
     expect(body.orientation.angleTo(base)).toBeLessThan(0.001);
   });
@@ -107,8 +111,11 @@ describe('torque-driven blockout ragdoll', () => {
     const before = body.angularVelocity.clone();
     body.collide(new Vector3(0, 1, 0), new Vector3(40, -12, 0));
     expect(body.angularVelocity.distanceTo(before)).toBeGreaterThan(1);
-    for (let i = 0; i < 420; i++)
+    for (let i = 0; i < 420; i++) {
+      body.beginStep();
+      body.ground(new Vector3(), 0, 0.55);
       body.step(1 / 120, new Quaternion().setFromAxisAngle(new Vector3(0, 1, 0), i * 0.003));
+    }
     expect(body.active).toBe(false);
     body.reset();
     expect(body.weight).toBe(0);
@@ -194,7 +201,7 @@ describe('local shield patches on actual trajectories', () => {
     expect(a.offset.x).toBeCloseTo(-1.1);
     expect(b.offset.x).toBeCloseTo(1.1);
     expect(b.offset.y).toBeCloseTo(0.5);
-    expect(a.offset.length()).toBeLessThan(2);
+    expect(a.offset.length()).toBeLessThan(3);
     expect(a.offset.distanceTo(b.offset)).toBeGreaterThan(2);
   });
   it('ignores distant grazes and the blind spot, and bounds large patches close to the body', () => {
@@ -223,6 +230,6 @@ describe('local shield patches on actual trajectories', () => {
       1.25,
       0.13,
     )!;
-    expect(large.offset.length()).toBeLessThanOrEqual(2.75);
+    expect(large.offset.length()).toBeLessThanOrEqual(4.15);
   });
 });

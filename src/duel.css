@@ -125,10 +125,10 @@
   letter-spacing: 0.75px;
   color: #c3dee0;
 }
-.aegis-hud[data-phase='cooldown'] {
+.aegis-hud[data-phase='off'] {
   color: #b8c4c7;
 }
-.aegis-hud[data-phase='cooldown'] .aegis-meter i {
+.aegis-hud[data-phase='off'] .aegis-meter i {
   background: #97afb4;
 }
 .aegis-hud[data-phase='active'] .aegis-title {
@@ -460,8 +460,8 @@
 .aegis-title strong {
   color: #ddfaff;
 }
-.aegis-hud[data-phase='cooldown'] .aegis-title,
-.aegis-hud[data-phase='cooldown'] .aegis-title strong {
+.aegis-hud[data-phase='off'] .aegis-title,
+.aegis-hud[data-phase='off'] .aegis-title strong {
   color: #edf1e8;
 }
 @media (max-width: 480px) and (orientation: portrait) {
@@ -564,4 +564,112 @@
     left: calc(50% - 16px);
     width: clamp(180px, 60vw, 218px);
   }
+}
+/* 0.5: explicit ability/movement toggles. Echoes are not a cooldown meter. */
+.aegis-hud {
+  width: 226px;
+  padding-right: 82px;
+}
+.aegis-toggle {
+  pointer-events: auto;
+  position: absolute;
+  top: -8px;
+  right: 0;
+  min-width: 72px;
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid #99e3ed9e;
+  border-radius: 5px;
+  background: #27454ee0;
+  color: #d5fcff;
+  font: 10px var(--mono);
+}
+.aegis-toggle[aria-pressed='false'] {
+  background: #303e45df;
+  border-color: #94a2a8;
+  color: #d1d8db;
+}
+.aegis-toggle kbd,
+.movement-toggle kbd {
+  font: 8px var(--mono);
+  opacity: 0.7;
+}
+.aegis-toggle strong {
+  margin: 0;
+}
+.aegis-hud[data-phase='off'] .aegis-title {
+  color: #c1c9cd;
+}
+.movement-toggle {
+  pointer-events: auto;
+  position: absolute;
+  left: 48px;
+  bottom: 180px;
+  width: 144px;
+  height: 44px;
+  padding: 6px 10px;
+  border: 1px solid #a0dee77c;
+  border-radius: 5px;
+  background: #304a54df;
+  color: #dff7f7;
+  text-align: left;
+}
+.movement-toggle > span:first-child {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font: 9px var(--mono);
+  letter-spacing: 0.8px;
+}
+.movement-toggle small {
+  margin-left: auto;
+  font-size: 14px;
+}
+.movement-toggle[aria-pressed='false'] {
+  border-color: #c5cbbc80;
+  color: #edf1d9;
+}
+.flight-telemetry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  font: 6.5px var(--mono);
+  letter-spacing: 0.4px;
+}
+.flight-telemetry strong {
+  font-weight: 400;
+}
+@media (max-width: 720px) and (orientation: portrait) {
+  .aegis-hud {
+    width: auto;
+  }
+  .movement-toggle {
+    left: 24px;
+    bottom: 153px;
+    width: 134px;
+  }
+  .has-touch .spell-dock {
+    bottom: 219px;
+  }
+}
+@media (max-height: 540px) and (orientation: landscape) {
+  .aegis-hud {
+    width: 208px;
+  }
+  .movement-toggle {
+    left: 29px;
+    bottom: 143px;
+    width: 136px;
+  }
+}
+.has-touch .aegis-toggle kbd,
+.has-touch .movement-toggle kbd {
+  display: none;
+}
+.aegis-toggle strong {
+  font: 600 12px var(--mono);
 }

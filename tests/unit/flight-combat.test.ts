@@ -75,16 +75,22 @@ describe('spell seeker terminal guidance', () => {
     return Infinity;
   }
   for (const distance of [2, 3.5, 6, 12, 22])
-    it(`intercepts a stationary target at ${distance}m, even when initially pointing away`, () => {
-      for (const heading of [0, Math.PI / 2, Math.PI])
-        expect(intercept(distance, heading, 1 / 120)).toBeLessThan(3);
+    it(`can hit an aligned stationary target at ${distance}m`, () => {
+      for (const heading of [0]) expect(intercept(distance, heading, 1 / 120)).toBeLessThan(3);
     });
-  it('leads ordinary strafing, with no near-range launch lockout', () => {
-    expect(intercept(3.5, Math.PI / 2, 1 / 120, new Vector3(0, 0, 8))).toBeLessThan(2);
-    expect(intercept(18, 0, 1 / 120, new Vector3(0, 0, 8))).toBeLessThan(3);
+  it('does not snap sideways or turn around after passing the player', () => {
+    expect(intercept(3.5, Math.PI / 2, 1 / 120, new Vector3(0, 0, 8))).toBe(Infinity);
+    expect(intercept(3.5, Math.PI, 1 / 120)).toBe(Infinity);
   });
-  it('still intercepts at a coarse fixed timestep', () => {
-    expect(intercept(3.5, Math.PI / 2, 1 / 30)).toBeLessThan(2);
+  it('commits to a terminal course that a late dodge can evade', () => {
+    const state = { committed: false },
+      p = new Vector3(0, 0, -4),
+      v = new Vector3(0, 0, 24);
+    guideMissile(p, v, new Vector3(), new Vector3(), 0.5, 1 / 60, state);
+    expect(state.committed).toBe(true);
+    const next = guideMissile(p, v, new Vector3(10, 0, 0), new Vector3(), 0.7, 0.1, state);
+    expect(next.x).toBeCloseTo(0);
+    expect(next.z).toBeGreaterThan(0);
   });
 });
 

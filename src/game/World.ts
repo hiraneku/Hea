@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { Effects } from './Effects';
-import { ARENA } from './config';
-import { DestructibleVolume, TerrainDeformation } from './destruction';
-import { seededRandom, type Obstacle } from './math';
+import { ARENA, HEAVY } from './config';
+import { DestructibleVolume, TerrainDeformation, type Cell } from './destruction';
+import { seededRandom, firstSolidSpan, type Obstacle } from './math';
 
 function gridTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -226,26 +226,27 @@ export class World {
         top: box.max.y,
         owner: this.buildings.length,
       };
-      const volume = new DestructibleVolume(bounds, this.buildings.length);
+      const volume = new DestructibleVolume(bounds, this.buildings.length, 1.6);
       this.buildings.push({ mesh, volume });
       this.obstacles.push(bounds);
       return mesh;
     };
-    block(-2, -10, 6.5, 13, 2.8, dark);
-    block(-2, -10, 7.4, 0.25, 4, light);
-    block(-10, -22, 7.5, 23, 7, light);
-    block(13, -23, 7, 21, 6, dark, -0.12);
-    block(-23, -5, 9, 14, 8, material);
-    block(24, 5, 8, 19, 7, material);
-    block(-12, 12, 8, 7, 8, dark);
-    block(10.5, -3.7, 6.5, 6, 4, dark);
-    block(3, -35, 11, 9, 8, material);
-    block(-34, -27, 8, 24, 8, dark);
-    block(36, -15, 8, 14, 9, material);
-    block(28, 30, 12, 8, 9, dark);
-    block(-30, 29, 8, 15, 9, light);
-    block(9, 37, 7, 20, 6, material);
-    block(-30, -45, 11, 8, 7, dark);
+    // Broad monoliths and thin slabs: deliberately different material depths for solar piercing.
+    block(-2, -10, 11, 19, 2.4, dark);
+    block(-2, -10, 12, 0.3, 5, light);
+    block(-12, -24, 12, 34, 9, light);
+    block(16, -25, 12, 31, 8, dark, -0.1);
+    block(-27, -5, 15, 22, 11, material);
+    block(29, 6, 14, 29, 10, material);
+    block(-14, 12, 12, 12, 10, dark);
+    block(12, -3.7, 10, 10, 5, dark);
+    block(3, -38, 17, 15, 11, material);
+    block(-38, -30, 13, 36, 11, dark);
+    block(40, -16, 14, 23, 12, material);
+    block(31, 32, 18, 15, 12, dark);
+    block(-33, 32, 14, 25, 12, light);
+    block(12, 39, 12, 31, 8, material);
+    block(-30, -48, 17, 15, 9, dark);
     // Two staggered rings of large, destructible blocks, with generous aerial/ground corridors.
     const layout = seededRandom(714);
     for (let ring = 0; ring < 2; ring++) {
@@ -255,9 +256,9 @@ export class World {
         const angle = ((i + (ring ? 0.4 : 0.15)) / count) * Math.PI * 2;
         const x = Math.cos(angle) * radius,
           z = Math.sin(angle) * radius;
-        const width = 7.5 + layout() * 5.5,
-          height = 9 + layout() * 19,
-          depth = 5 + layout() * 5;
+        const width = 12 + layout() * 6.5,
+          height = 16 + layout() * 23,
+          depth = i % 5 === 0 ? 2.4 : 8 + layout() * 4;
         block(
           x,
           z,
@@ -294,8 +295,8 @@ export class World {
     for (let i = 0; i < 30; i++) {
       const a = (i / 30) * Math.PI * 2,
         r = 132 + random() * 38,
-        h = 14 + random() * 25;
-      tower.scale.set(7 + random() * 8, h, 7 + random() * 8);
+        h = 24 + random() * 30;
+      tower.scale.set(12 + random() * 12, h, 10 + random() * 10);
       tower.position.set(Math.cos(a) * r, h * 0.5, Math.sin(a) * r);
       tower.updateMatrix();
       skyline.setMatrixAt(i, tower.matrix);
@@ -502,11 +503,47 @@ export class World {
     this.updateContactShadows();
     this.wallLabel.visible = !this.buildings[4].volume.damaged;
   }
+  get wallBounds() {
+    return this.buildings.map((b) => ({ ...b.volume.bounds }));
+  }
+  pierceThin(
+    obstacle: Obstacle,
+    from: THREE.Vector3,
+    direction: THREE.Vector3,
+    contact: THREE.Vector3,
+  ) {
+    if (obstacle.owner === undefined) return null;
+    const b = this.buildings[obstacle.owner],
+      span = firstSolidSpan(from, direction, b.volume.colliders());
+    const thickness = span ? span.exit - span.enter : 0;
+    if (thickness > HEAVY.thinDepth) return null;
+    const entry = span ? from.clone().addScaledVector(direction, span.enter) : contact.clone();
+    const exit = span
+      ? from.clone().addScaledVector(direction, span.exit)
+      : contact.clone().addScaledVector(direction, 0.25);
+    const removed = b.volume.breakSegment(
+      entry.clone().addScaledVector(direction, -0.12),
+      exit.clone().addScaledVector(direction, 0.12),
+      HEAVY.tunnelRadius,
+    );
+    if (!removed.length) return null;
+    this.showDamage(b, removed, entry, direction.clone().multiplyScalar(30));
+    return { thickness, entry, exit };
+  }
   damageWall(obstacle: Obstacle, at: THREE.Vector3, force: THREE.Vector3, radius = 2.05): boolean {
     if (obstacle.owner === undefined) return false;
     const b = this.buildings[obstacle.owner];
     const removed = b.volume.breakAt(at, radius);
     if (!removed.length) return false;
+    this.showDamage(b, removed, at, force);
+    return true;
+  }
+  private showDamage(
+    b: { mesh: THREE.Mesh; volume: DestructibleVolume; fragments?: THREE.InstancedMesh },
+    removed: Cell[],
+    at: THREE.Vector3,
+    force: THREE.Vector3,
+  ) {
     b.mesh.visible = false;
     if (!b.fragments) {
       b.fragments = new THREE.InstancedMesh(
@@ -538,7 +575,6 @@ export class World {
       .forEach((c) => this.fx.debris(new THREE.Vector3(c.x, c.y, c.z), 1, 7, 3.2, force));
     this.fx.dust(at, 15, 2.1, force);
     this.rebuildColliders();
-    return true;
   }
   crater(at: THREE.Vector3, speed: number) {
     this.terrain.add(

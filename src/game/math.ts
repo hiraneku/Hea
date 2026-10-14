@@ -134,3 +134,46 @@ export function segmentBox(start: Point3, end: Point3, b: Obstacle, padding = 0)
   }
   return near >= 0 && near <= 1 ? near : null;
 }
+
+/** A ray's entry/exit distances through an AABB, measured in world metres. */
+export function rayBoxSpan(
+  origin: Point3,
+  direction: Point3,
+  box: Obstacle,
+  limit = 250,
+): { enter: number; exit: number } | null {
+  let enter = 0,
+    exit = limit;
+  for (const [p, d, min, max] of [
+    [origin.x, direction.x, box.minX, box.maxX],
+    [origin.y, direction.y, box.bottom ?? 0, box.top],
+    [origin.z, direction.z, box.minZ, box.maxZ],
+  ]) {
+    if (Math.abs(d) < 1e-9) {
+      if (p < min || p > max) return null;
+      continue;
+    }
+    let a = (min - p) / d,
+      b = (max - p) / d;
+    if (a > b) [a, b] = [b, a];
+    enter = Math.max(enter, a);
+    exit = Math.min(exit, b);
+    if (enter > exit) return null;
+  }
+  return { enter, exit };
+}
+
+/** Merge touching cells first: a thick fractured wall is NOT a set of penetrable thin voxels. */
+export function firstSolidSpan(origin: Point3, direction: Point3, boxes: Obstacle[]) {
+  const spans = boxes
+    .map((b) => rayBoxSpan(origin, direction, b))
+    .filter((s): s is { enter: number; exit: number } => s !== null)
+    .sort((a, b) => a.enter - b.enter);
+  if (!spans.length) return null;
+  const first = { ...spans[0] };
+  for (let i = 1; i < spans.length; i++) {
+    if (spans[i].enter > first.exit + 0.04) break;
+    first.exit = Math.max(first.exit, spans[i].exit);
+  }
+  return first;
+}

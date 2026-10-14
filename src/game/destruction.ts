@@ -1,4 +1,4 @@
-import { clamp, type Obstacle, type Point3 } from './math';
+import { clamp, segmentBox, type Obstacle, type Point3 } from './math';
 
 export interface Cell {
   x: number;
@@ -67,6 +67,26 @@ export class DestructibleVolume {
       if (dx * dx + dy * dy + dz * dz <= radius * radius) {
         cell.alive = false;
         removed.push(cell);
+      }
+    }
+    this.damaged ||= removed.length > 0;
+    return removed;
+  }
+  breakSegment(start: Point3, end: Point3, radius: number): Cell[] {
+    const removed: Cell[] = [];
+    for (const c of this.cells) {
+      if (!c.alive) continue;
+      const box = {
+        minX: c.x - c.w / 2,
+        maxX: c.x + c.w / 2,
+        minZ: c.z - c.d / 2,
+        maxZ: c.z + c.d / 2,
+        bottom: c.y - c.h / 2,
+        top: c.y + c.h / 2,
+      };
+      if (segmentBox(start, end, box, radius) !== null) {
+        c.alive = false;
+        removed.push(c);
       }
     }
     this.damaged ||= removed.length > 0;

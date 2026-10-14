@@ -36,9 +36,8 @@ export interface Snapshot {
   health: number;
   energy: number;
   shield: {
-    phase: 'ready' | 'active' | 'cooldown';
-    remaining: number;
-    progress: number;
+    phase: 'off' | 'ready' | 'active';
+    enabled: boolean;
     blocked: number;
     blindWarning: boolean;
   };
@@ -62,9 +61,19 @@ export interface Snapshot {
   craters: number;
   launched: boolean;
   flight: {
+    enabled: boolean;
     altitude: number;
     speed: number;
-    phase: 'hover' | 'flying' | 'contact' | 'launch' | 'dash' | 'ragdoll';
+    phase:
+      | 'hover'
+      | 'flying'
+      | 'contact'
+      | 'launch'
+      | 'dash'
+      | 'ragdoll'
+      | 'walking'
+      | 'grounded'
+      | 'falling';
   };
   lockedOn: boolean;
   fps: number;
