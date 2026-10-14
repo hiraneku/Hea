@@ -4,6 +4,8 @@ export interface Obstacle {
   minZ: number;
   maxZ: number;
   top: number;
+  bottom?: number;
+  owner?: number;
 }
 export interface Point3 {
   x: number;
@@ -32,10 +34,11 @@ export function resolveCircle(
   feet: number,
   radius: number,
   obstacles: Obstacle[],
+  height = 1.65,
 ): { x: number; z: number } {
   for (let pass = 0; pass < 3; pass++) {
     for (const b of obstacles) {
-      if (feet >= b.top - 0.06) continue;
+      if (feet >= b.top - 0.06 || feet + height <= (b.bottom ?? 0) + 0.02) continue;
       const nx = clamp(x, b.minX, b.maxX);
       const nz = clamp(z, b.minZ, b.maxZ);
       const dx = x - nx,
@@ -59,8 +62,14 @@ export function resolveCircle(
   return { x: clamp(x, -47, 47), z: clamp(z, -47, 47) };
 }
 
-export function groundHeight(x: number, z: number, feet: number, obstacles: Obstacle[]): number {
-  let y = 0;
+export function groundHeight(
+  x: number,
+  z: number,
+  feet: number,
+  obstacles: Obstacle[],
+  base = 0,
+): number {
+  let y = base;
   for (const b of obstacles) {
     if (
       x > b.minX - 0.2 &&
@@ -103,7 +112,7 @@ export function segmentBox(start: Point3, end: Point3, b: Obstacle, padding = 0)
     far = 1;
   const axes = [
     [start.x, end.x - start.x, b.minX - padding, b.maxX + padding],
-    [start.y, end.y - start.y, -padding, b.top + padding],
+    [start.y, end.y - start.y, (b.bottom ?? 0) - padding, b.top + padding],
     [start.z, end.z - start.z, b.minZ - padding, b.maxZ + padding],
   ];
   for (const [origin, direction, min, max] of axes) {
@@ -119,14 +128,4 @@ export function segmentBox(start: Point3, end: Point3, b: Obstacle, padding = 0)
     if (near > far) return null;
   }
   return near >= 0 && near <= 1 ? near : null;
-}
-
-export function waveConfig(wave: number) {
-  const w = Math.max(1, Math.floor(wave));
-  return {
-    count: Math.min(3 + Math.floor((w - 1) / 2), 7),
-    health: 72 + Math.min(w - 1, 12) * 12,
-    attackInterval: Math.max(1.6, 5.2 - w * 0.3),
-    speed: 0.55 + Math.min(w, 12) * 0.07,
-  };
 }

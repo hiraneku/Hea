@@ -3,7 +3,7 @@ export class Controls {
   enabled = false;
   shooting = false;
   shotRequested = false;
-  blocking = false;
+  focusRequested = false;
   jumpRequested = false;
   dashRequested = false;
   private keys = new Set<string>();
@@ -35,7 +35,6 @@ export class Controls {
     window.addEventListener('keydown', (e) => this.keydown(e));
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
-      if (e.code === 'KeyF') this.blocking = false;
     });
     window.addEventListener('mousemove', (e) => {
       if (!this.enabled || this.touch || performance.now() < this.ignoreMouseUntil) return;
@@ -53,7 +52,7 @@ export class Controls {
         this.shotRequested = true;
         this.mouseDown = true;
       }
-      if (e.button === 2) this.blocking = true;
+      if (e.button === 2) this.focusRequested = true;
       this.requestLock();
     });
     window.addEventListener('pointerup', (e) => {
@@ -62,7 +61,6 @@ export class Controls {
         this.shooting = false;
         this.mouseDown = false;
       }
-      if (e.button === 2) this.blocking = false;
     });
     canvas.addEventListener('contextmenu', (e) => e.preventDefault());
     document.addEventListener('pointerlockchange', () => {
@@ -90,7 +88,7 @@ export class Controls {
   }
   reset() {
     this.keys.clear();
-    this.shooting = this.shotRequested = this.blocking = this.mouseDown = false;
+    this.shooting = this.shotRequested = this.focusRequested = this.mouseDown = false;
     this.jumpRequested = this.dashRequested = false;
     this.dx = this.dy = this.stickX = this.stickY = 0;
     this.stickPointer = this.lookPointer = null;
@@ -162,7 +160,7 @@ export class Controls {
     }
     if (e.code === 'Space') this.jumpRequested = true;
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.dashRequested = true;
-    if (e.code === 'KeyF') this.blocking = true;
+    if (e.code === 'KeyE') this.focusRequested = true;
     if (e.code === 'KeyQ' || e.code === 'Tab') this.onCycle();
     if (['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.onSpell(Number(e.code.at(-1)) - 1);
   }
@@ -236,8 +234,10 @@ export class Controls {
       this.shooting = value;
       if (value) this.shotRequested = true;
     });
-    hold('#touch-shield', (value) => {
-      this.blocking = value;
+    document.querySelector('#touch-focus')!.addEventListener('pointerdown', (e) => {
+      if (!this.enabled) return;
+      e.preventDefault();
+      this.focusRequested = true;
     });
     for (const [id, action] of [
       ['#touch-dash', 'dash'],

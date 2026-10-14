@@ -132,8 +132,15 @@ export class AudioEngine {
     this.tone(120, 35, 0.3, 0.5, 'triangle');
     this.air(0.2, 600, 0.35);
   }
-  wave() {
+  beginDuel() {
     [330, 440, 660].forEach((f, i) => this.tone(f, f * 1.01, 0.4, 0.12, 'sine', i * 0.1));
+  }
+  crash(strength: number) {
+    this.tone(60, 25, 0.6, Math.min(0.65, strength / 60));
+    this.air(0.6, 1800, 0.5);
+  }
+  charge() {
+    this.tone(220, 820, 0.7, 0.11, 'triangle');
   }
   click() {
     this.tone(620, 420, 0.04, 0.12);

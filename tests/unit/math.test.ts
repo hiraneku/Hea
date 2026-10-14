@@ -7,7 +7,6 @@ import {
   seededRandom,
   segmentBox,
   segmentSphere,
-  waveConfig,
   type Obstacle,
 } from '../../src/game/math';
 
@@ -80,13 +79,6 @@ describe('continuous projectile collision', () => {
 });
 
 describe('simulation utilities', () => {
-  it('keeps difficulty and enemy counts bounded', () => {
-    expect(waveConfig(1).count).toBe(3);
-    expect(waveConfig(0)).toEqual(waveConfig(1));
-    expect(waveConfig(1000).count).toBe(7);
-    expect(waveConfig(1000).attackInterval).toBeGreaterThanOrEqual(1.6);
-    expect(waveConfig(1000).health).toBeLessThan(250);
-  });
   it('uses deterministic scenery without modifying global randomness', () => {
     const a = seededRandom(71),
       b = seededRandom(71);

@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { Effects, makeHexField, makeSigil } from './Effects';
+import { Effects } from './Effects';
+import { DestructibleVolume, TerrainDeformation } from './destruction';
 import { seededRandom, type Obstacle } from './math';
 
 function gridTexture(): THREE.CanvasTexture {
@@ -103,16 +104,18 @@ export function contactShadowTexture(): THREE.CanvasTexture {
 
 export class World {
   obstacles: Obstacle[] = [];
-  readonly portalPosition = new THREE.Vector3(-2, 5.3, -9.02);
-  readonly portal: THREE.Group;
   readonly sun: THREE.DirectionalLight;
-  private hexes: THREE.Group[] = [];
+  readonly terrain = new TerrainDeformation();
+  private buildings: {
+    mesh: THREE.Mesh;
+    volume: DestructibleVolume;
+    fragments?: THREE.InstancedMesh;
+  }[] = [];
+  private fixedObstacles: Obstacle[] = [];
   private sky: THREE.Mesh;
-  private orbiters: THREE.Mesh[] = [];
-  private moteTimer = 0;
-  private portalLight: THREE.PointLight;
-  private beamTimer = 0;
-  private ground: THREE.Mesh;
+  private ground: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
+  private fragmentStamp = new THREE.Object3D();
+  private contactShadows: THREE.InstancedMesh;
   constructor(
     private scene: THREE.Scene,
     private fx: Effects,
@@ -147,7 +150,36 @@ export class World {
       roughness: 1,
       metalness: 0,
     });
-    this.ground = new THREE.Mesh(new THREE.PlaneGeometry(800, 800), floor);
+    const outer = new THREE.Shape();
+    outer.moveTo(-400, -400);
+    outer.lineTo(400, -400);
+    outer.lineTo(400, 400);
+    outer.lineTo(-400, 400);
+    outer.closePath();
+    const hole = new THREE.Path();
+    hole.moveTo(-56, -56);
+    hole.lineTo(-56, 56);
+    hole.lineTo(56, 56);
+    hole.lineTo(56, -56);
+    hole.closePath();
+    outer.holes.push(hole);
+    const outerGeometry = new THREE.ShapeGeometry(outer);
+    const outerPositions = outerGeometry.attributes.position,
+      outerUV = outerGeometry.attributes.uv;
+    for (let i = 0; i < outerPositions.count; i++)
+      outerUV.setXY(i, (outerPositions.getX(i) + 400) / 800, (outerPositions.getY(i) + 400) / 800);
+    const outerGround = new THREE.Mesh(outerGeometry, floor);
+    outerGround.rotation.x = -Math.PI / 2;
+    outerGround.receiveShadow = true;
+    scene.add(outerGround);
+    const innerMap = gridTexture();
+    innerMap.repeat.set(14, 14);
+    this.ground = new THREE.Mesh(
+      new THREE.PlaneGeometry(112, 112, 112, 112),
+      new THREE.MeshStandardMaterial({ map: innerMap, roughness: 1, vertexColors: true }),
+    );
+    const colors = new Float32Array(this.ground.geometry.attributes.position.count * 3).fill(1);
+    this.ground.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.receiveShadow = true;
     scene.add(this.ground);
@@ -177,13 +209,18 @@ export class World {
       scene.add(mesh);
       mesh.updateMatrixWorld();
       const box = new THREE.Box3().setFromObject(mesh);
-      this.obstacles.push({
+      const bounds: Obstacle = {
         minX: box.min.x,
         maxX: box.max.x,
         minZ: box.min.z,
         maxZ: box.max.z,
+        bottom: 0,
         top: box.max.y,
-      });
+        owner: this.buildings.length,
+      };
+      const volume = new DestructibleVolume(bounds, this.buildings.length);
+      this.buildings.push({ mesh, volume });
+      this.obstacles.push(bounds);
       return mesh;
     };
     block(-2, -10, 4.5, 8.2, 1.7, dark);
@@ -208,7 +245,8 @@ export class World {
     wedge.castShadow = true;
     wedge.receiveShadow = true;
     scene.add(wedge);
-    this.obstacles.push({ minX: 3.25, maxX: 9.75, minZ: -17.25, maxZ: -10.75, top: 5.35 });
+    this.fixedObstacles.push({ minX: 3.25, maxX: 9.75, minZ: -17.25, maxZ: -10.75, top: 5.35 });
+    this.obstacles.push(...this.fixedObstacles);
     const random = seededRandom(137);
     for (let i = 0; i < 22; i++) {
       const a = (i / 22) * Math.PI * 2,
@@ -252,7 +290,7 @@ export class World {
       }),
     );
     marker.position.set(-16.9, 2.5, -2.48);
-    scene.add(marker);
+    this.buildings[4].mesh.attach(marker);
     const groundMark = new THREE.Mesh(
       new THREE.PlaneGeometry(4.8, 2.4),
       new THREE.MeshBasicMaterial({
@@ -267,7 +305,7 @@ export class World {
     scene.add(groundMark);
     this.addScars(random);
     // One instanced draw retains ground contact even with real-time shadows disabled on mobile.
-    const contacts = new THREE.InstancedMesh(
+    this.contactShadows = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(1, 1),
       new THREE.MeshBasicMaterial({
         map: contactShadowTexture(),
@@ -278,8 +316,19 @@ export class World {
       }),
       this.obstacles.length,
     );
-    const stamp = new THREE.Object3D();
-    this.obstacles.forEach((obstacle, i) => {
+    this.contactShadows.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.contactShadows.frustumCulled = false;
+    scene.add(this.contactShadows);
+    this.updateContactShadows();
+  }
+  private updateContactShadows() {
+    const original = [...this.buildings.map((b) => b.volume.bounds), ...this.fixedObstacles];
+    original.forEach((obstacle, i) => {
+      const body = this.buildings[i];
+      const alive = body
+        ? body.volume.cells.filter((c) => c.alive).length / body.volume.cells.length
+        : 1;
+      const stamp = this.fragmentStamp;
       stamp.position.set(
         (obstacle.minX + obstacle.maxX) / 2,
         0.019,
@@ -287,42 +336,14 @@ export class World {
       );
       stamp.rotation.set(-Math.PI / 2, 0, 0);
       stamp.scale.set(
-        (obstacle.maxX - obstacle.minX) * 2.1,
-        (obstacle.maxZ - obstacle.minZ) * 2.1,
+        (obstacle.maxX - obstacle.minX) * 2.1 * Math.sqrt(alive),
+        (obstacle.maxZ - obstacle.minZ) * 2.1 * Math.sqrt(alive),
         1,
       );
       stamp.updateMatrix();
-      contacts.setMatrixAt(i, stamp.matrix);
+      this.contactShadows.setMatrixAt(i, stamp.matrix);
     });
-    scene.add(contacts);
-    this.portal = makeSigil(fx.sigilMap, 1.73, '#ffac45');
-    this.portal.position.copy(this.portalPosition);
-    scene.add(this.portal);
-    this.portalLight = new THREE.PointLight('#ffa354', 10, 9, 2);
-    this.portalLight.position.copy(this.portalPosition).add(new THREE.Vector3(0, 0, 1.5));
-    scene.add(this.portalLight);
-    const points = [
-      [-5.3, 2.1, -7.6],
-      [2, 4, -8.4],
-      [1.2, 1.9, -6.4],
-      [-6, 4.5, -9.1],
-    ];
-    points.forEach((p, i) => {
-      const hex = makeHexField(i % 2 === 0 ? 0.24 : 0.3, i === 0 ? 1 : 2);
-      hex.position.set(p[0], p[1], p[2]);
-      hex.rotation.y = (i - 1.5) * 0.2;
-      hex.userData.baseY = p[1];
-      scene.add(hex);
-      this.hexes.push(hex);
-    });
-    const orbMat = new THREE.MeshBasicMaterial({
-      color: new THREE.Color('#ff9e43').multiplyScalar(5),
-    });
-    for (let i = 0; i < 3; i++) {
-      const orb = new THREE.Mesh(new THREE.IcosahedronGeometry(0.13, 1), orbMat);
-      scene.add(orb);
-      this.orbiters.push(orb);
-    }
+    this.contactShadows.instanceMatrix.needsUpdate = true;
   }
   private addScars(random: () => number) {
     const canvas = document.createElement('canvas');
@@ -378,40 +399,127 @@ export class World {
     this.scene.add(rubble);
   }
   setQuality(low: boolean) {
-    this.portalLight.visible = !low;
     this.sun.castShadow = !low;
   }
-  update(time: number, dt: number, showcase: boolean) {
-    this.portal.rotation.z = time * 0.085;
-    this.portal.children[1].rotation.z = -time * 0.2;
-    const scale = 1 + Math.sin(time * 1.8) * 0.018;
-    this.portal.scale.setScalar(scale);
-    this.hexes.forEach((hex, i) => {
-      hex.position.y = hex.userData.baseY + Math.sin(time * 1.1 + i * 1.7) * 0.13;
-      hex.rotation.z = Math.sin(time * 0.8 + i) * 0.025;
-    });
-    this.orbiters.forEach((orb, i) => {
-      const a = time * 0.65 + (i * Math.PI * 2) / 3;
-      orb.position.copy(this.portalPosition);
-      orb.position.x += Math.cos(a) * 1.32;
-      orb.position.y += Math.sin(a) * 1.32;
-      orb.position.z += 0.09;
-    });
-    this.moteTimer -= dt;
-    if (this.moteTimer < 0) {
-      this.moteTimer = 0.12;
-      for (const orb of this.orbiters) this.fx.burst(orb.position, '#ffac4d', 2, 0.3, 0.25, -0.15);
+  get wallsBroken() {
+    return this.buildings.filter((b) => b.volume.damaged).length;
+  }
+  surfaceHeight(x: number, z: number) {
+    // Sample the rendered triangles, not the ideal crater curve: feet and debris sit on the mesh.
+    if (Math.abs(x) >= 56 || Math.abs(z) >= 56) return 0;
+    const gx = x + 56,
+      gz = z + 56,
+      ix = Math.floor(gx),
+      iz = Math.floor(gz),
+      u = gx - ix,
+      v = gz - iz;
+    const vertices = this.ground.geometry.attributes.position,
+      a = iz * 113 + ix;
+    const h00 = vertices.getZ(a),
+      h10 = vertices.getZ(a + 1),
+      h01 = vertices.getZ(a + 113),
+      h11 = vertices.getZ(a + 114);
+    return u + v <= 1
+      ? h00 * (1 - u - v) + h10 * u + h01 * v
+      : h11 * (u + v - 1) + h01 * (1 - u) + h10 * (1 - v);
+  }
+  reset() {
+    for (const b of this.buildings) {
+      b.volume.reset();
+      b.mesh.visible = true;
+      if (b.fragments) b.fragments.visible = false;
     }
-    if (showcase) {
-      this.beamTimer -= dt;
-      if (this.beamTimer < 0) {
-        this.beamTimer = 3.2;
-        const from = new THREE.Vector3(-7, 3.6, -7.4),
-          to = new THREE.Vector3(3.5, 3.6, -7.4);
-        this.fx.beam(from, to, '#76e6ff', 0.035, 1.8);
-        this.fx.glyph(from, new THREE.Vector3(1, 0, 0), '#87f7ff', 0.45, 1.8);
-        this.fx.hex(to, new THREE.Vector3(10, 7, 20), 0.2, 1.3);
+    this.terrain.reset();
+    this.updateTerrain();
+    this.rebuildColliders();
+  }
+  private rebuildColliders() {
+    this.obstacles = [
+      ...this.fixedObstacles,
+      ...this.buildings.flatMap((b) => b.volume.colliders()),
+    ];
+  }
+  damageWall(obstacle: Obstacle, at: THREE.Vector3, force: THREE.Vector3, radius = 2.05): boolean {
+    if (obstacle.owner === undefined) return false;
+    const b = this.buildings[obstacle.owner];
+    const removed = b.volume.breakAt(at, radius);
+    if (!removed.length) return false;
+    b.mesh.visible = false;
+    if (!b.fragments) {
+      b.fragments = new THREE.InstancedMesh(
+        new THREE.BoxGeometry(1, 1, 1),
+        b.mesh.material,
+        b.volume.cells.length,
+      );
+      b.fragments.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      b.fragments.castShadow = true;
+      b.fragments.receiveShadow = true;
+      b.fragments.frustumCulled = false;
+      this.scene.add(b.fragments);
+    }
+    b.fragments.visible = true;
+    b.volume.cells.forEach((cell, i) => {
+      this.fragmentStamp.position.set(cell.x, cell.y, cell.z);
+      this.fragmentStamp.rotation.set(0, 0, 0);
+      this.fragmentStamp.scale.set(
+        cell.alive ? cell.w : 0,
+        cell.alive ? cell.h : 0,
+        cell.alive ? cell.d : 0,
+      );
+      this.fragmentStamp.updateMatrix();
+      b.fragments!.setMatrixAt(i, this.fragmentStamp.matrix);
+    });
+    b.fragments.instanceMatrix.needsUpdate = true;
+    removed
+      .slice(0, 28)
+      .forEach((c) => this.fx.debris(new THREE.Vector3(c.x, c.y, c.z), 1, 7, 3.2, force));
+    this.fx.dust(at, 15, 2.1, force);
+    this.rebuildColliders();
+    return true;
+  }
+  crater(at: THREE.Vector3, speed: number) {
+    this.terrain.add(
+      at.x,
+      at.z,
+      Math.min(4.2, 1.5 + speed * 0.055),
+      Math.min(1.35, 0.35 + speed * 0.026),
+    );
+    this.updateTerrain();
+    this.fx.dust(at, 22, 2.5);
+    this.fx.debris(at, 24, 7, 2.5);
+  }
+  private updateTerrain() {
+    const p = this.ground.geometry.attributes.position,
+      c = this.ground.geometry.attributes.color;
+    for (let i = 0; i < p.count; i++) {
+      const height = this.terrain.heightAt(p.getX(i), -p.getY(i));
+      p.setZ(i, height);
+      const shade = Math.max(0.5, 1 + height * 0.32);
+      c.setXYZ(i, shade, shade, shade);
+    }
+    p.needsUpdate = c.needsUpdate = true;
+    this.ground.geometry.computeVertexNormals();
+    this.ground.geometry.computeBoundingSphere();
+  }
+  traceGround(start: THREE.Vector3, end: THREE.Vector3): number | null {
+    const steps = Math.min(24, Math.max(1, Math.ceil(start.distanceTo(end) / 0.35)));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps,
+        x = start.x + (end.x - start.x) * t,
+        z = start.z + (end.z - start.z) * t;
+      if (start.y + (end.y - start.y) * t <= this.surfaceHeight(x, z) + 0.025) {
+        let a = Math.max(0, (i - 1) / steps),
+          b = t;
+        for (let j = 0; j < 7; j++) {
+          const mid = (a + b) / 2,
+            mx = start.x + (end.x - start.x) * mid,
+            mz = start.z + (end.z - start.z) * mid;
+          if (start.y + (end.y - start.y) * mid <= this.surfaceHeight(mx, mz) + 0.025) b = mid;
+          else a = mid;
+        }
+        return b;
       }
     }
+    return null;
   }
 }

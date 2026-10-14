@@ -552,57 +552,29 @@ h1 span {
 .vitals.critical .vitals-label {
   color: #ffb49e;
 }
-.wave-hud {
-  position: absolute;
-  left: 50%;
-  top: 121px;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 0 5px;
-}
-.wave-hud > span {
-  font: 7px var(--mono);
-  letter-spacing: 1.2px;
-}
-.wave-hud strong {
-  font: 500 28px/0.8 var(--heading);
-  letter-spacing: 1px;
-}
-.wave-hud > i {
-  height: 14px;
-  width: 1px;
-  background: #e6ecd744;
-  margin: 0 3px;
-}
-.wave-hud b {
-  font: 500 12px var(--heading);
-  margin-right: 4px;
-}
-.score-hud {
+.duel-stats {
   position: absolute;
   right: 48px;
   top: 117px;
   text-align: right;
 }
-.score-hud > span {
+.duel-stats > span {
   font: 7px var(--mono);
   letter-spacing: 1.4px;
   margin-right: 10px;
 }
-.score-hud > strong {
+.duel-stats > strong {
   font: 500 31px/1 var(--heading);
   letter-spacing: 2px;
 }
-.score-hud small {
+.duel-stats small {
   display: block;
   font: 6px var(--mono);
   letter-spacing: 1.3px;
   margin-top: 10px;
   color: #d1dad2;
 }
-.score-hud small b {
+.duel-stats small b {
   font-weight: 400;
   color: #f0f2df;
   margin-left: 5px;
@@ -728,7 +700,7 @@ h1 span {
   opacity: 1;
   transform: translate(-50%, 0);
 }
-#wave-announcement {
+#duel-announcement {
   position: absolute;
   top: 25%;
   left: 50%;
@@ -740,26 +712,26 @@ h1 span {
     transform 0.5s;
   white-space: nowrap;
 }
-#wave-announcement.visible {
+#duel-announcement.visible {
   opacity: 1;
   transform: translate(-50%, 0);
 }
-#wave-announcement > span {
+#duel-announcement > span {
   font: 8px var(--mono);
   letter-spacing: 3px;
   color: #e7c4a7;
 }
-#wave-announcement > strong {
+#duel-announcement > strong {
   display: block;
   font: 600 45px/0.98 var(--heading);
   letter-spacing: 1.5px;
   margin: 10px 0;
 }
-#wave-announcement > strong b {
+#duel-announcement > strong b {
   font-weight: 600;
   color: var(--orange);
 }
-#wave-announcement small {
+#duel-announcement small {
   font:
     9px Inter,
     sans-serif;
@@ -1150,7 +1122,7 @@ kbd {
   right: 1px;
   top: 0;
 }
-.touch-actions #touch-shield {
+.touch-actions #touch-focus {
   left: 17px;
   top: 21px;
   color: #a4eaf1;
@@ -1784,7 +1756,7 @@ input[type='range'] {
   .desktop-hints {
     left: 32px;
   }
-  .score-hud,
+  .duel-stats,
   .dash-hud,
   .session-info {
     right: 32px;
@@ -1901,26 +1873,12 @@ input[type='range'] {
     top: 99px;
     left: 24px;
   }
-  .score-hud {
+  .duel-stats {
     top: 99px;
     right: 24px;
   }
-  .score-hud > strong {
+  .duel-stats > strong {
     font-size: 28px;
-  }
-  .wave-hud {
-    top: 104px;
-    gap: 7px;
-  }
-  .wave-hud > span {
-    font-size: 6px;
-  }
-  .wave-hud strong {
-    font-size: 24px;
-  }
-  .wave-hud > i {
-    margin: 0;
-    height: 12px;
   }
   .desktop-hints {
     left: 22px;
@@ -2173,67 +2131,36 @@ input[type='range'] {
     font-size: 4.5px;
     letter-spacing: 0.6px;
   }
-  .score-hud {
+  .duel-stats {
     top: 87px;
     right: 21px;
   }
-  .score-hud > span {
+  .duel-stats > span {
     font-size: 5px;
     display: block;
     margin: 0 0 4px;
     letter-spacing: 1px;
   }
-  .score-hud > strong {
+  .duel-stats > strong {
     font-size: 25px;
     letter-spacing: 1.4px;
   }
-  .score-hud small {
+  .duel-stats small {
     font-size: 4.5px;
     letter-spacing: 0.7px;
     margin-top: 7px;
   }
-  .wave-hud {
-    top: 89px;
-    gap: 4px;
-    display: grid;
-    grid-template-columns: 1fr auto;
-    width: 67px;
-    text-align: center;
-    left: 52%;
-  }
-  .wave-hud > span:first-child {
-    font-size: 5px;
-    letter-spacing: 0.7px;
-    grid-column: 1/-1;
-  }
-  .wave-hud strong {
-    font-size: 22px;
-    line-height: 1.3;
-    grid-column: 1/-1;
-  }
-  .wave-hud > i {
-    display: none;
-  }
-  .wave-hud > span:last-child {
-    grid-column: 1/-1;
-    font-size: 5px;
-    letter-spacing: 0.5px;
-  }
-  .wave-hud b {
-    font-size: 8px;
-    margin-right: 3px;
-  }
-  #wave-announcement {
+  #duel-announcement {
     top: 24%;
   }
-  #wave-announcement > strong {
+  #duel-announcement > strong {
     font-size: 35px;
   }
-  #wave-announcement > span {
+  #duel-announcement > span {
     font-size: 6px;
     letter-spacing: 2px;
   }
-  #wave-announcement small {
+  #duel-announcement small {
     font-size: 8px;
   }
   .has-touch .spell-dock {
@@ -2469,11 +2396,8 @@ input[type='range'] {
     padding-top: 18px;
   }
   .vitals,
-  .score-hud {
+  .duel-stats {
     top: 100px;
-  }
-  .wave-hud {
-    top: 107px;
   }
 }
 @media (max-height: 540px) and (orientation: landscape) {
@@ -2643,44 +2567,31 @@ input[type='range'] {
     height: 2px;
     margin-top: 6px;
   }
-  .wave-hud {
-    top: 80px;
-    gap: 8px;
-  }
-  .wave-hud > span {
-    font-size: 5px;
-  }
-  .wave-hud strong {
-    font-size: 21px;
-  }
-  .wave-hud b {
-    font-size: 10px;
-  }
-  .score-hud {
+  .duel-stats {
     top: 75px;
     right: 29px;
   }
-  .score-hud > span {
+  .duel-stats > span {
     font-size: 5px;
   }
-  .score-hud > strong {
+  .duel-stats > strong {
     font-size: 25px;
   }
-  .score-hud small {
+  .duel-stats small {
     font-size: 5px;
     margin-top: 7px;
   }
-  #wave-announcement {
+  #duel-announcement {
     top: 28%;
   }
-  #wave-announcement > span {
+  #duel-announcement > span {
     font-size: 6px;
   }
-  #wave-announcement > strong {
+  #duel-announcement > strong {
     font-size: 33px;
     margin: 6px 0;
   }
-  #wave-announcement small {
+  #duel-announcement small {
     font-size: 7px;
   }
   .spell-dock,
@@ -2803,7 +2714,7 @@ input[type='range'] {
     width: 18px;
     height: 18px;
   }
-  .touch-actions #touch-shield {
+  .touch-actions #touch-focus {
     left: 19px;
     top: 18px;
   }
@@ -2935,7 +2846,7 @@ input[type='range'] {
     left: 19px;
     width: 109px;
   }
-  .score-hud {
+  .duel-stats {
     right: 19px;
   }
   .panel {
@@ -3062,30 +2973,19 @@ input[type='range'] {
   .has-touch .vitals-caption {
     display: none;
   }
-  .has-touch .wave-hud > span:first-child {
-    font-size: 7px;
-    letter-spacing: 0.35px;
-  }
-  .has-touch .wave-hud > span:last-child {
-    font-size: 7px;
-    letter-spacing: 0.3px;
-  }
-  .has-touch .score-hud > span {
+  .has-touch .duel-stats > span {
     font-size: 7px;
     letter-spacing: 0.6px;
   }
-  .has-touch .score-hud small {
+  .has-touch .duel-stats small {
     font-size: 6px;
     letter-spacing: 0.4px;
   }
   .has-touch .session-info {
     font-size: 6px;
   }
-  .has-touch .wave-hud {
-    top: 95px;
-  }
   .has-touch .vitals,
-  .has-touch .score-hud {
+  .has-touch .duel-stats {
     top: 91px;
   }
   .panel .primary-button {
@@ -3133,12 +3033,8 @@ input[type='range'] {
     font-size: 8px;
     letter-spacing: 0.4px;
   }
-  .has-touch .wave-hud > span {
-    font-size: 7px;
-    letter-spacing: 0.6px;
-  }
-  .has-touch .score-hud > span,
-  .has-touch .score-hud small {
+  .has-touch .duel-stats > span,
+  .has-touch .duel-stats small {
     font-size: 7px;
   }
   .has-touch .vitals-caption {

@@ -1,4 +1,4 @@
-export type Mode = 'menu' | 'playing' | 'paused' | 'demo' | 'gameover';
+export type Mode = 'menu' | 'playing' | 'paused' | 'demo' | 'gameover' | 'victory';
 export type Quality = 'auto' | 'low' | 'high';
 export type SpellId = 0 | 1 | 2;
 
@@ -35,27 +35,45 @@ export interface Snapshot {
   mode: Mode;
   health: number;
   energy: number;
-  shield: boolean;
+  shield: {
+    phase: 'ready' | 'active' | 'cooldown';
+    remaining: number;
+    progress: number;
+    blocked: number;
+  };
+  boss: {
+    health: number;
+    maxHealth: number;
+    alive: boolean;
+    attack: string;
+    stage: string;
+    charge: number;
+    distance: number;
+    enraged: boolean;
+  };
   dash: number;
   spell: SpellId;
   cooldowns: number[];
-  wave: number;
-  score: number;
-  best: number;
-  kills: number;
-  enemies: number;
+  damageDealt: number;
+  impacts: number;
+  wallsBroken: number;
+  craters: number;
+  launched: boolean;
+  lockedOn: boolean;
   fps: number;
   elapsed: number;
+  bestTime: number;
   position: { x: number; y: number; z: number };
   aimTarget: boolean;
 }
 
 export type GameEvent =
   | { type: 'mode'; mode: Mode }
-  | { type: 'hit'; kill: boolean; points: number }
+  | { type: 'hit'; kill: boolean; damage: number }
   | { type: 'damage'; amount: number }
-  | { type: 'impact' }
-  | { type: 'wave'; wave: number }
+  | { type: 'impact'; surface: 'wall' | 'ground'; actor: 'player' | 'boss'; strength: number }
+  | { type: 'duel' }
+  | { type: 'block'; direction: { x: number; y: number; z: number } }
   | { type: 'toast'; text: string }
   | { type: 'lock'; locked: boolean };
 

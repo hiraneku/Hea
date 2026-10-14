@@ -289,7 +289,20 @@ export class Effects {
   private rockCursor = 0;
   private capacity = 440;
   private particleBudget = 440;
-  private rockCapacity = 90;
+  private rockCapacity = 150;
+  private groundAt = (_x: number, _z: number) => 0;
+  private dustMesh: THREE.Points;
+  private dustClouds = Array.from({ length: 64 }, () => ({
+    p: new THREE.Vector3(),
+    v: new THREE.Vector3(),
+    life: 0,
+    max: 1,
+    size: 1,
+  }));
+  private dustCursor = 0;
+  private dustPositions = new Float32Array(64 * 3);
+  private dustSizes = new Float32Array(64);
+  private dustAlphas = new Float32Array(64);
   constructor(private scene: THREE.Scene) {
     this.position = new Float32Array(this.capacity * 3);
     this.color = new Float32Array(this.capacity * 3);
@@ -324,6 +337,34 @@ export class Effects {
     this.sparkMesh = new THREE.Points(geometry, material);
     this.sparkMesh.frustumCulled = false;
     scene.add(this.sparkMesh);
+    const smoke = new THREE.BufferGeometry();
+    smoke.setAttribute(
+      'position',
+      new THREE.BufferAttribute(this.dustPositions, 3).setUsage(THREE.DynamicDrawUsage),
+    );
+    smoke.setAttribute(
+      'aSize',
+      new THREE.BufferAttribute(this.dustSizes, 1).setUsage(THREE.DynamicDrawUsage),
+    );
+    smoke.setAttribute(
+      'aAlpha',
+      new THREE.BufferAttribute(this.dustAlphas, 1).setUsage(THREE.DynamicDrawUsage),
+    );
+    this.dustMesh = new THREE.Points(
+      smoke,
+      new THREE.ShaderMaterial({
+        uniforms: { screenScale: { value: 500 } },
+        vertexShader:
+          'attribute float aSize; attribute float aAlpha; uniform float screenScale; varying float vAlpha; void main(){vAlpha=aAlpha;vec4 p=modelViewMatrix*vec4(position,1.0);gl_PointSize=clamp(aSize*screenScale/max(0.5,-p.z),0.0,220.0);gl_Position=projectionMatrix*p;}',
+        fragmentShader:
+          'varying float vAlpha; void main(){float d=length(gl_PointCoord-0.5)*2.0;if(d>1.0)discard;gl_FragColor=vec4(vec3(0.44,0.45,0.46),pow(1.0-d,1.3)*vAlpha);}',
+        transparent: true,
+        depthWrite: false,
+        blending: THREE.NormalBlending,
+      }),
+    );
+    this.dustMesh.frustumCulled = false;
+    scene.add(this.dustMesh);
     this.rockMesh = new THREE.InstancedMesh(
       new THREE.BoxGeometry(1, 1, 1),
       new THREE.MeshStandardMaterial({ color: '#67696a', roughness: 1 }),
@@ -356,10 +397,40 @@ export class Effects {
       this.rockMesh.setMatrixAt(i, dummy.matrix);
     }
   }
+  setGroundSampler(sampler: (x: number, z: number) => number) {
+    this.groundAt = sampler;
+  }
+  dust(at: THREE.Vector3, count = 12, radius = 1.5, force?: THREE.Vector3) {
+    for (let i = 0; i < count; i++) {
+      const p = this.dustClouds[this.dustCursor++ % this.dustClouds.length];
+      p.p
+        .copy(at)
+        .add(
+          new THREE.Vector3(
+            (Math.random() - 0.5) * radius,
+            Math.random() * 0.4,
+            (Math.random() - 0.5) * radius,
+          ),
+        );
+      p.v.set((Math.random() - 0.5) * 2, 0.5 + Math.random() * 1.3, (Math.random() - 0.5) * 2);
+      if (force) p.v.addScaledVector(force, 0.045);
+      p.size = radius * (0.6 + Math.random());
+      p.life = p.max = 1.1 + Math.random();
+    }
+  }
+  block(at: THREE.Vector3, incoming: THREE.Vector3) {
+    const patch = makeHexField(0.27, 2);
+    patch.position.copy(at);
+    patch.lookAt(at.clone().sub(incoming.clone().normalize()));
+    this.add(patch, 0.38, 0.1);
+    this.burst(at, '#7af1ff', 18, 3, 0.28, 0.5);
+  }
   quality(low: boolean) {
     this.particleBudget = low ? 180 : this.capacity;
   }
   resize(height: number, pixelRatio: number) {
+    (this.dustMesh.material as THREE.ShaderMaterial).uniforms.screenScale.value =
+      height * pixelRatio * 0.75;
     (this.sparkMesh.material as THREE.ShaderMaterial).uniforms.screenScale.value =
       height * pixelRatio * 0.75;
   }
@@ -386,19 +457,20 @@ export class Effects {
       p.gravity = gravity;
     }
   }
-  debris(at: THREE.Vector3, count = 10, force = 4) {
+  debris(at: THREE.Vector3, count = 10, force = 4, scale = 1, direction?: THREE.Vector3) {
     for (let i = 0; i < count; i++) {
       const d = this.rocks[this.rockCursor++ % this.rockCapacity];
       d.p.copy(at);
-      d.p.y = Math.max(0.1, d.p.y);
+      d.p.y = Math.max(this.groundAt(at.x, at.z) + 0.1, d.p.y);
       d.v.set(
         (Math.random() - 0.5) * force * 1.6,
         1.5 + Math.random() * force,
         (Math.random() - 0.5) * force * 1.6,
       );
+      if (direction) d.v.addScaledVector(direction, 0.12);
       d.r.set(Math.random() * 6, Math.random() * 6, Math.random() * 6);
-      d.life = d.max = 0.6 + Math.random() * 1.2;
-      d.size = 0.08 + Math.random() * 0.2;
+      d.life = d.max = 1.0 + Math.random() * 1.5;
+      d.size = (0.08 + Math.random() * 0.2) * scale;
     }
   }
   add(object: THREE.Object3D, life: number, grow = 0, spin = 0) {
@@ -491,6 +563,17 @@ export class Effects {
     }
   }
   update(dt: number) {
+    this.dustClouds.forEach((p, i) => {
+      p.life = Math.max(0, p.life - dt);
+      p.p.addScaledVector(p.v, dt);
+      p.v.multiplyScalar(Math.exp(-dt));
+      this.dustPositions.set(p.p.toArray(), i * 3);
+      this.dustSizes[i] = p.life > 0 ? p.size * (1 + (1 - p.life / p.max) * 1.3) : 0;
+      this.dustAlphas[i] = Math.min(0.5, (p.life / p.max) * 0.65);
+    });
+    Object.values(this.dustMesh.geometry.attributes).forEach((a) => {
+      a.needsUpdate = true;
+    });
     for (let i = 0; i < this.capacity; i++) {
       const p = this.sparks[i];
       p.life = Math.max(0, p.life - dt);
@@ -519,8 +602,9 @@ export class Effects {
       if (d.life > 0) {
         d.v.y -= 15 * dt;
         d.p.addScaledVector(d.v, dt);
-        if (d.p.y < d.size * 0.5) {
-          d.p.y = d.size * 0.5;
+        const ground = this.groundAt(d.p.x, d.p.z) + d.size * 0.5;
+        if (d.p.y < ground) {
+          d.p.y = ground;
           d.v.y *= -0.3;
           d.v.x *= 0.88;
           d.v.z *= 0.88;
@@ -555,6 +639,9 @@ export class Effects {
     }
   }
   clear() {
+    this.dustClouds.forEach((p) => {
+      p.life = 0;
+    });
     this.sparks.forEach((p) => {
       p.life = 0;
     });

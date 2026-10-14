@@ -1,0 +1,491 @@
+/* Duel-specific instrumentation. No wave or target-count UI. */
+.boss-hud {
+  position: absolute;
+  top: 111px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(370px, 37vw);
+  padding: 10px 13px 9px;
+  background: linear-gradient(90deg, transparent, #13242e85 15%, #13242e85 85%, transparent);
+  text-shadow: 0 1px 5px #10212eaa;
+}
+.boss-kicker {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font: 6px var(--mono);
+  letter-spacing: 1.4px;
+  color: #dee6d5;
+}
+.boss-kicker b {
+  font-weight: 400;
+  color: #ffc097;
+  letter-spacing: 1px;
+}
+.boss-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 7px 0 6px;
+}
+.boss-heading strong {
+  font: 600 28px/0.9 var(--heading);
+  letter-spacing: 3px;
+}
+.boss-heading span {
+  font: 8px var(--mono);
+  letter-spacing: 0.7px;
+  color: #eee7d5;
+}
+.boss-meter {
+  height: 3px;
+  background: #161d2477;
+}
+.boss-meter i {
+  background: linear-gradient(90deg, #eb7747, #ffe2a0);
+}
+.boss-action {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  align-items: center;
+  margin-top: 8px;
+  font: 6px var(--mono);
+  letter-spacing: 0.75px;
+  color: #ecddc7;
+}
+.boss-action b {
+  font-weight: 400;
+  white-space: nowrap;
+  color: #e6eddd;
+}
+.boss-charge {
+  height: 1px;
+  margin-top: 5px;
+  overflow: hidden;
+  background: #eeeecc12;
+}
+.boss-charge i {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: #ffbb77;
+  transform-origin: left;
+  transition: transform 0.1s linear;
+}
+.boss-hud[data-stage='attack'] .boss-action {
+  color: #ffc09a;
+}
+.boss-hud[data-stage='stagger'] .boss-action {
+  color: #a6e6ef;
+}
+.aegis-hud {
+  position: absolute;
+  top: 177px;
+  left: 48px;
+  width: 188px;
+  color: #b5e7ed;
+}
+.aegis-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font: 8px var(--mono);
+  letter-spacing: 0.7px;
+}
+.aegis-title svg {
+  width: 16px;
+  height: 16px;
+}
+.aegis-title span b {
+  font: 6px var(--mono);
+  color: #e3e8c8;
+  border: 1px solid #d6e6c75c;
+  padding: 2px 3px;
+  margin-left: 3px;
+}
+.aegis-title strong {
+  font: 8px var(--mono);
+  font-weight: 400;
+  margin-left: auto;
+  color: #ddf9f5;
+}
+.aegis-meter {
+  margin-top: 7px;
+  height: 2px;
+  background: #a9e9ff22;
+}
+.aegis-meter i {
+  background: #a3edf4;
+}
+.aegis-hud small {
+  display: block;
+  margin-top: 7px;
+  font: 5.5px var(--mono);
+  letter-spacing: 0.75px;
+  color: #c3dee0;
+}
+.aegis-hud[data-phase='cooldown'] {
+  color: #b8c4c7;
+}
+.aegis-hud[data-phase='cooldown'] .aegis-meter i {
+  background: #97afb4;
+}
+.aegis-hud[data-phase='active'] .aegis-title {
+  color: #c1ffff;
+  text-shadow: 0 0 9px #57def6cc;
+}
+.aegis-hud[data-phase='active'] .aegis-meter {
+  box-shadow: 0 0 12px #7eefff55;
+}
+#focus-badge {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + 27px);
+  transform: translateX(-50%);
+  font: 7px var(--mono);
+  letter-spacing: 1.2px;
+  color: #b2eaf1;
+  opacity: 0;
+}
+#focus-badge.visible {
+  opacity: 0.85;
+}
+#score-pop {
+  top: calc(50% + 49px);
+}
+#impact-caption,
+#block-feedback {
+  position: absolute;
+  left: 50%;
+  transform: translate(-50%, 5px);
+  opacity: 0;
+  text-align: center;
+  font: 8px var(--mono);
+  letter-spacing: 1.3px;
+  transition:
+    opacity 0.12s,
+    transform 0.12s;
+  white-space: nowrap;
+}
+#impact-caption {
+  top: calc(50% - 63px);
+  color: #ffdfbc;
+  text-shadow: 0 1px 9px #111c22;
+}
+#block-feedback {
+  top: calc(50% + 76px);
+  color: #baf7ff;
+  text-shadow:
+    0 0 9px #448ed4,
+    0 1px 4px #0008;
+}
+#impact-caption.visible,
+#block-feedback.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+.has-touch .touch-actions #touch-focus {
+  border-color: #8de1ed80;
+}
+.has-touch #touch-focus.held {
+  color: #c5faff;
+  border-color: #a5f4ff;
+  background: #498da669;
+  box-shadow: 0 0 15px #69d0ff22;
+}
+@media (max-width: 1000px) {
+  .aegis-hud {
+    left: 32px;
+    width: 160px;
+  }
+  .boss-hud {
+    width: 33vw;
+  }
+  .boss-kicker {
+    font-size: 5px;
+  }
+  .boss-heading strong {
+    font-size: 25px;
+  }
+  .boss-action {
+    font-size: 5.5px;
+    letter-spacing: 0.4px;
+  }
+}
+@media (max-width: 720px) {
+  .aegis-hud {
+    left: 24px;
+    top: 164px;
+    width: 147px;
+  }
+  .aegis-title {
+    font-size: 7px;
+  }
+  .aegis-title strong {
+    font-size: 7px;
+  }
+  .aegis-title span b {
+    font-size: 5px;
+  }
+  .boss-hud {
+    top: 104px;
+    width: 34vw;
+    padding: 8px 10px;
+  }
+  .boss-kicker {
+    font-size: 5px;
+    letter-spacing: 0.5px;
+  }
+  .boss-heading {
+    margin-top: 6px;
+  }
+  .boss-heading strong {
+    font-size: 24px;
+  }
+  .boss-heading span {
+    font-size: 6px;
+  }
+  .boss-action {
+    font-size: 5px;
+    letter-spacing: 0.2px;
+  }
+  .boss-action b {
+    font-size: 6px;
+  }
+}
+@media (max-width: 480px) and (orientation: portrait) {
+  .boss-hud {
+    top: 183px;
+    left: 22px;
+    right: 22px;
+    transform: none;
+    width: auto;
+    padding: 9px 12px;
+    background: linear-gradient(90deg, #13242e33, #13242e8a 20%, #13242e8a 80%, #13242e33);
+  }
+  .boss-kicker {
+    font-size: 7px;
+    letter-spacing: 1px;
+  }
+  .boss-heading {
+    margin: 7px 0;
+  }
+  .boss-heading strong {
+    font-size: 28px;
+  }
+  .boss-heading span {
+    font-size: 9px;
+  }
+  .boss-action {
+    font-size: 7px;
+    letter-spacing: 0.3px;
+  }
+  .boss-action b {
+    font-size: 8px;
+  }
+  .boss-hud .boss-meter {
+    height: 3px;
+  }
+  .boss-charge {
+    margin-top: 5px;
+  }
+  .aegis-hud {
+    top: 137px;
+    left: 23px;
+    right: 23px;
+    width: auto;
+  }
+  .aegis-title {
+    font-size: 9px;
+    gap: 7px;
+  }
+  .aegis-title svg {
+    width: 16px;
+    height: 16px;
+  }
+  .aegis-title span b {
+    font-size: 7px;
+  }
+  .aegis-title strong {
+    font-size: 9px;
+  }
+  .aegis-hud small {
+    font-size: 6px;
+    letter-spacing: 0.7px;
+    margin-top: 5px;
+  }
+  .aegis-meter {
+    margin-top: 5px;
+  }
+  .has-touch .duel-stats small {
+    font-size: 6px;
+    letter-spacing: 0.1px;
+  }
+  #duel-announcement {
+    top: 34%;
+  }
+  #duel-announcement > strong {
+    font-size: 33px;
+  }
+  #duel-announcement small {
+    font-size: 8px;
+  }
+  #focus-badge {
+    font-size: 7px;
+  }
+  #impact-caption,
+  #block-feedback {
+    font-size: 7px;
+    letter-spacing: 0.5px;
+  }
+  .has-touch .spell-dock {
+    bottom: 193px;
+  }
+  .has-touch .vitals,
+  .has-touch .duel-stats {
+    top: 90px;
+  }
+}
+@media (max-height: 540px) and (orientation: landscape) {
+  .boss-hud {
+    top: 73px;
+    width: 285px;
+    padding: 8px 11px;
+  }
+  .boss-kicker {
+    font-size: 5.5px;
+    letter-spacing: 0.9px;
+  }
+  .boss-heading {
+    margin: 5px 0;
+  }
+  .boss-heading strong {
+    font-size: 24px;
+  }
+  .boss-heading span {
+    font-size: 7px;
+  }
+  .boss-action {
+    font-size: 6px;
+    letter-spacing: 0.3px;
+    margin-top: 6px;
+  }
+  .boss-meter {
+    height: 2px;
+  }
+  .aegis-hud {
+    left: max(29px, env(safe-area-inset-left));
+    top: 125px;
+    width: 139px;
+  }
+  .aegis-title {
+    font-size: 7px;
+  }
+  .aegis-title strong {
+    font-size: 7px;
+  }
+  .aegis-title span b {
+    font-size: 5px;
+  }
+  .aegis-title svg {
+    width: 13px;
+    height: 13px;
+  }
+  .aegis-hud small {
+    font-size: 5px;
+    letter-spacing: 0.3px;
+  }
+  .aegis-meter {
+    margin-top: 5px;
+  }
+  #duel-announcement {
+    top: 39%;
+  }
+  #duel-announcement > strong {
+    font-size: 27px;
+    margin: 5px 0;
+  }
+  #duel-announcement > span {
+    font-size: 5px;
+  }
+  #duel-announcement small {
+    font-size: 6px;
+  }
+  #focus-badge {
+    top: calc(50% + 24px);
+    font-size: 5px;
+  }
+  #score-pop {
+    top: calc(50% + 37px);
+  }
+  #block-feedback {
+    top: calc(50% + 50px);
+    font-size: 6px;
+  }
+  #impact-caption {
+    top: calc(50% - 34px);
+    font-size: 6px;
+  }
+  .has-touch .spell-dock {
+    bottom: 20px;
+  }
+}
+@media (max-width: 360px) and (orientation: portrait) {
+  .boss-hud {
+    left: 19px;
+    right: 19px;
+  }
+  .boss-action {
+    font-size: 6px;
+  }
+  .aegis-hud {
+    left: 20px;
+    right: 20px;
+  }
+  .duel-stats small {
+    font-size: 5px;
+  }
+}
+/* Keep critical timers legible even against bright clouds. */
+.aegis-hud,
+.vitals,
+.duel-stats {
+  text-shadow: 0 1px 5px #193443cc;
+}
+.aegis-hud {
+  background: linear-gradient(90deg, #243b453d, transparent);
+}
+.aegis-title,
+.aegis-title strong {
+  color: #ddfaff;
+}
+.aegis-hud[data-phase='cooldown'] .aegis-title,
+.aegis-hud[data-phase='cooldown'] .aegis-title strong {
+  color: #edf1e8;
+}
+@media (max-width: 480px) and (orientation: portrait) {
+  .has-touch .duel-stats small {
+    margin-top: 3px;
+  }
+  .aegis-title {
+    font-size: 9px;
+  }
+  .aegis-hud small {
+    font-size: 7px;
+    letter-spacing: 0.2px;
+  }
+  .boss-hud {
+    top: 178px;
+    padding: 8px 12px;
+  }
+  .boss-heading {
+    margin: 5px 0;
+  }
+  .boss-heading strong {
+    font-size: 26px;
+  }
+  .boss-action {
+    margin-top: 6px;
+  }
+}
