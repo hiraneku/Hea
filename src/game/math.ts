@@ -1,3 +1,5 @@
+import { ARENA } from './config';
+
 export interface Obstacle {
   minX: number;
   maxX: number;
@@ -59,7 +61,10 @@ export function resolveCircle(
       }
     }
   }
-  return { x: clamp(x, -47, 47), z: clamp(z, -47, 47) };
+  return {
+    x: clamp(x, -ARENA.halfSize, ARENA.halfSize),
+    z: clamp(z, -ARENA.halfSize, ARENA.halfSize),
+  };
 }
 
 export function groundHeight(

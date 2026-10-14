@@ -40,6 +40,7 @@ export interface Snapshot {
     remaining: number;
     progress: number;
     blocked: number;
+    blindWarning: boolean;
   };
   boss: {
     health: number;
@@ -59,6 +60,7 @@ export interface Snapshot {
   wallsBroken: number;
   craters: number;
   launched: boolean;
+  flight: { altitude: number; speed: number; phase: 'hover' | 'flying' | 'contact' | 'launch' };
   lockedOn: boolean;
   fps: number;
   elapsed: number;
@@ -72,6 +74,7 @@ export type GameEvent =
   | { type: 'hit'; kill: boolean; damage: number }
   | { type: 'damage'; amount: number }
   | { type: 'impact'; surface: 'wall' | 'ground'; actor: 'player' | 'boss'; strength: number }
+  | { type: 'contact'; actor: 'player' | 'boss' }
   | { type: 'duel' }
   | { type: 'block'; direction: { x: number; y: number; z: number } }
   | { type: 'toast'; text: string }

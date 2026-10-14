@@ -85,14 +85,14 @@ describe('maximum automatic Aegis', () => {
 describe('one boss, deliberate attack patterns', () => {
   it('fires salvos, missile pairs and a heavy shot in the authored order', () => {
     const d = new BossDirector(),
-      commands = d.step(10);
+      commands = d.step(13.1);
     const shots = commands.filter((c) => c.type === 'shot');
     expect(shots.filter((c) => c.attack === 'fire').length).toBe(ATTACKS.fire.shots);
     expect(shots.filter((c) => c.attack === 'missiles').length).toBe(3);
     expect(shots.filter((c) => c.attack === 'hammer').length).toBe(1);
     expect(shots[0].attack).toBe('fire');
-    expect(shots[12].attack).toBe('missiles');
-    expect(shots[15].attack).toBe('hammer');
+    expect(shots[ATTACKS.fire.shots].attack).toBe('missiles');
+    expect(shots[ATTACKS.fire.shots + 3].attack).toBe('hammer');
   });
   it('does not skip or duplicate attacks at low frame rates', () => {
     const a = new BossDirector(),
@@ -111,7 +111,7 @@ describe('one boss, deliberate attack patterns', () => {
     expect(d.charge).toBeGreaterThan(0.5);
     expect(rangeCorrection(6)).toBeLessThan(0);
     expect(rangeCorrection(32)).toBeGreaterThan(0);
-    expect(rangeCorrection(15)).toBe(0);
+    expect(rangeCorrection(DUEL.preferredRange)).toBe(0);
   });
   it('missiles have capped turning and constant requested speed', () => {
     const v = new Vector3(0, 0, -15),

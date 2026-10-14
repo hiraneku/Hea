@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { Effects } from './Effects';
+import { ARENA } from './config';
 import { DestructibleVolume, TerrainDeformation } from './destruction';
 import { seededRandom, type Obstacle } from './math';
 
@@ -116,14 +117,16 @@ export class World {
   private ground: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
   private fragmentStamp = new THREE.Object3D();
   private contactShadows: THREE.InstancedMesh;
+  private intactBatches: { mesh: THREE.InstancedMesh; ids: number[] }[] = [];
+  private wallLabel: THREE.Mesh;
   constructor(
     private scene: THREE.Scene,
     private fx: Effects,
   ) {
     scene.background = new THREE.Color('#b4cbd6');
-    scene.fog = new THREE.Fog('#b6c5cf', 65, 190);
+    scene.fog = new THREE.Fog('#b6c5cf', 105, 285);
     this.sky = new THREE.Mesh(
-      new THREE.SphereGeometry(280, 32, 20),
+      new THREE.SphereGeometry(360, 32, 20),
       new THREE.MeshBasicMaterial({
         map: skyTexture(),
         side: THREE.BackSide,
@@ -134,13 +137,13 @@ export class World {
     scene.add(this.sky);
     scene.add(new THREE.HemisphereLight('#d5ebff', '#646365', 2.1));
     this.sun = new THREE.DirectionalLight('#fff3d8', 2.8);
-    this.sun.position.set(26, 48, 20);
+    this.sun.position.set(56, 100, 35);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(2048, 2048);
-    this.sun.shadow.camera.left = this.sun.shadow.camera.bottom = -43;
-    this.sun.shadow.camera.right = this.sun.shadow.camera.top = 43;
+    this.sun.shadow.camera.left = this.sun.shadow.camera.bottom = -115;
+    this.sun.shadow.camera.right = this.sun.shadow.camera.top = 115;
     this.sun.shadow.camera.near = 1;
-    this.sun.shadow.camera.far = 130;
+    this.sun.shadow.camera.far = 250;
     this.sun.shadow.normalBias = 0.035;
     this.sun.shadow.bias = -0.00015;
     this.sun.shadow.radius = 3;
@@ -157,10 +160,10 @@ export class World {
     outer.lineTo(-400, 400);
     outer.closePath();
     const hole = new THREE.Path();
-    hole.moveTo(-56, -56);
-    hole.lineTo(-56, 56);
-    hole.lineTo(56, 56);
-    hole.lineTo(56, -56);
+    hole.moveTo(-ARENA.terrainHalf, -ARENA.terrainHalf);
+    hole.lineTo(-ARENA.terrainHalf, ARENA.terrainHalf);
+    hole.lineTo(ARENA.terrainHalf, ARENA.terrainHalf);
+    hole.lineTo(ARENA.terrainHalf, -ARENA.terrainHalf);
     hole.closePath();
     outer.holes.push(hole);
     const outerGeometry = new THREE.ShapeGeometry(outer);
@@ -173,9 +176,14 @@ export class World {
     outerGround.receiveShadow = true;
     scene.add(outerGround);
     const innerMap = gridTexture();
-    innerMap.repeat.set(14, 14);
+    innerMap.repeat.set(ARENA.terrainHalf / 4, ARENA.terrainHalf / 4);
     this.ground = new THREE.Mesh(
-      new THREE.PlaneGeometry(112, 112, 112, 112),
+      new THREE.PlaneGeometry(
+        ARENA.terrainHalf * 2,
+        ARENA.terrainHalf * 2,
+        ARENA.terrainSegments,
+        ARENA.terrainSegments,
+      ),
       new THREE.MeshStandardMaterial({ map: innerMap, roughness: 1, vertexColors: true }),
     );
     const colors = new Float32Array(this.ground.geometry.attributes.position.count * 3).fill(1);
@@ -206,7 +214,7 @@ export class World {
       mesh.rotation.z = lean;
       mesh.castShadow = true;
       mesh.receiveShadow = true;
-      scene.add(mesh);
+      // Intact blocks share three instanced draws; this mesh stores only their transforms.
       mesh.updateMatrixWorld();
       const box = new THREE.Box3().setFromObject(mesh);
       const bounds: Obstacle = {
@@ -223,21 +231,54 @@ export class World {
       this.obstacles.push(bounds);
       return mesh;
     };
-    block(-2, -10, 4.5, 8.2, 1.7, dark);
-    block(-2, -10, 5.4, 0.25, 3, light);
-    block(-8.5, -16, 4.6, 14.5, 4, light);
-    block(10, -19, 4.3, 12.5, 4.2, dark, -0.17);
-    block(-17, -5, 5.7, 8.2, 5, material);
-    block(16, 3, 4.2, 9.5, 4.5, material);
-    block(-12, 12, 5.5, 2.5, 5, dark);
-    block(7.8, -3.7, 4.5, 3.1, 3.4, dark);
-    block(2.5, -24, 6, 5, 5, material);
-    block(-22, -21, 4, 11, 4, dark);
-    block(24, -12, 4, 6, 6, material);
-    block(19, 23, 7, 3.5, 7, dark);
-    block(-26, 21, 5, 7, 5, light);
-    block(6, 29, 3, 10, 3, material);
-    block(-22, -35, 6, 4, 4, dark);
+    block(-2, -10, 6.5, 13, 2.8, dark);
+    block(-2, -10, 7.4, 0.25, 4, light);
+    block(-10, -22, 7.5, 23, 7, light);
+    block(13, -23, 7, 21, 6, dark, -0.12);
+    block(-23, -5, 9, 14, 8, material);
+    block(24, 5, 8, 19, 7, material);
+    block(-12, 12, 8, 7, 8, dark);
+    block(10.5, -3.7, 6.5, 6, 4, dark);
+    block(3, -35, 11, 9, 8, material);
+    block(-34, -27, 8, 24, 8, dark);
+    block(36, -15, 8, 14, 9, material);
+    block(28, 30, 12, 8, 9, dark);
+    block(-30, 29, 8, 15, 9, light);
+    block(9, 37, 7, 20, 6, material);
+    block(-30, -45, 11, 8, 7, dark);
+    // Two staggered rings of large, destructible blocks, with generous aerial/ground corridors.
+    const layout = seededRandom(714);
+    for (let ring = 0; ring < 2; ring++) {
+      const count = ring === 0 ? 16 : 24,
+        radius = ring === 0 ? 57 : 85;
+      for (let i = 0; i < count; i++) {
+        const angle = ((i + (ring ? 0.4 : 0.15)) / count) * Math.PI * 2;
+        const x = Math.cos(angle) * radius,
+          z = Math.sin(angle) * radius;
+        const width = 7.5 + layout() * 5.5,
+          height = 9 + layout() * 19,
+          depth = 5 + layout() * 5;
+        block(
+          x,
+          z,
+          width,
+          height,
+          depth,
+          i % 3 === 0 ? dark : i % 3 === 1 ? light : material,
+          i % 9 === 0 ? 0.065 : 0,
+        );
+      }
+    }
+    for (const m of [material, dark, light]) {
+      const ids = this.buildings.flatMap((b, i) => (b.mesh.material === m ? [i] : []));
+      const mesh = new THREE.InstancedMesh(geometry, m, ids.length);
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      this.intactBatches.push({ mesh, ids });
+      scene.add(mesh);
+    }
+    this.updateIntactBatches();
     // The tilted prism keeps the intentionally simple greybox silhouette of the reference.
     const wedge = new THREE.Mesh(new THREE.ConeGeometry(4.6, 5.7, 4), light);
     wedge.position.set(6.5, 2.5, -14);
@@ -248,17 +289,20 @@ export class World {
     this.fixedObstacles.push({ minX: 3.25, maxX: 9.75, minZ: -17.25, maxZ: -10.75, top: 5.35 });
     this.obstacles.push(...this.fixedObstacles);
     const random = seededRandom(137);
-    for (let i = 0; i < 22; i++) {
-      const a = (i / 22) * Math.PI * 2,
-        r = 58 + random() * 28,
-        h = 5 + random() * 18;
-      const mesh = new THREE.Mesh(geometry, i % 3 === 0 ? dark : material);
-      mesh.scale.set(3 + random() * 6, h, 3 + random() * 4);
-      mesh.position.set(Math.cos(a) * r, h * 0.5, Math.sin(a) * r);
-      scene.add(mesh);
+    const skyline = new THREE.InstancedMesh(geometry, material, 30),
+      tower = new THREE.Object3D();
+    for (let i = 0; i < 30; i++) {
+      const a = (i / 30) * Math.PI * 2,
+        r = 132 + random() * 38,
+        h = 14 + random() * 25;
+      tower.scale.set(7 + random() * 8, h, 7 + random() * 8);
+      tower.position.set(Math.cos(a) * r, h * 0.5, Math.sin(a) * r);
+      tower.updateMatrix();
+      skyline.setMatrixAt(i, tower.matrix);
     }
+    scene.add(skyline);
     const ring = new THREE.Mesh(
-      new THREE.RingGeometry(46.75, 46.88, 128),
+      new THREE.RingGeometry(ARENA.halfSize - 0.4, ARENA.halfSize - 0.25, 192),
       new THREE.MeshBasicMaterial({
         color: '#d4dfd9',
         transparent: true,
@@ -289,8 +333,9 @@ export class World {
         depthWrite: false,
       }),
     );
-    marker.position.set(-16.9, 2.5, -2.48);
-    this.buildings[4].mesh.attach(marker);
+    marker.position.set(-22.9, 3.5, this.buildings[4].volume.bounds.maxZ + 0.02);
+    this.wallLabel = marker;
+    scene.add(marker);
     const groundMark = new THREE.Mesh(
       new THREE.PlaneGeometry(4.8, 2.4),
       new THREE.MeshBasicMaterial({
@@ -320,6 +365,19 @@ export class World {
     this.contactShadows.frustumCulled = false;
     scene.add(this.contactShadows);
     this.updateContactShadows();
+  }
+  private updateIntactBatches() {
+    const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+    for (const batch of this.intactBatches) {
+      batch.ids.forEach((id, i) => {
+        const b = this.buildings[id];
+        batch.mesh.setMatrixAt(i, b.volume.damaged ? hidden : b.mesh.matrixWorld);
+      });
+      batch.mesh.instanceMatrix.needsUpdate = true;
+    }
+  }
+  get buildingCount() {
+    return this.buildings.length;
   }
   private updateContactShadows() {
     const original = [...this.buildings.map((b) => b.volume.bounds), ...this.fixedObstacles];
@@ -406,19 +464,21 @@ export class World {
   }
   surfaceHeight(x: number, z: number) {
     // Sample the rendered triangles, not the ideal crater curve: feet and debris sit on the mesh.
-    if (Math.abs(x) >= 56 || Math.abs(z) >= 56) return 0;
-    const gx = x + 56,
-      gz = z + 56,
+    if (Math.abs(x) >= ARENA.terrainHalf || Math.abs(z) >= ARENA.terrainHalf) return 0;
+    const spacing = (ARENA.terrainHalf * 2) / ARENA.terrainSegments,
+      gx = (x + ARENA.terrainHalf) / spacing,
+      gz = (z + ARENA.terrainHalf) / spacing,
       ix = Math.floor(gx),
       iz = Math.floor(gz),
       u = gx - ix,
       v = gz - iz;
     const vertices = this.ground.geometry.attributes.position,
-      a = iz * 113 + ix;
+      stride = ARENA.terrainSegments + 1,
+      a = iz * stride + ix;
     const h00 = vertices.getZ(a),
       h10 = vertices.getZ(a + 1),
-      h01 = vertices.getZ(a + 113),
-      h11 = vertices.getZ(a + 114);
+      h01 = vertices.getZ(a + stride),
+      h11 = vertices.getZ(a + stride + 1);
     return u + v <= 1
       ? h00 * (1 - u - v) + h10 * u + h01 * v
       : h11 * (u + v - 1) + h01 * (1 - u) + h10 * (1 - v);
@@ -438,6 +498,9 @@ export class World {
       ...this.fixedObstacles,
       ...this.buildings.flatMap((b) => b.volume.colliders()),
     ];
+    this.updateIntactBatches();
+    this.updateContactShadows();
+    this.wallLabel.visible = !this.buildings[4].volume.damaged;
   }
   damageWall(obstacle: Obstacle, at: THREE.Vector3, force: THREE.Vector3, radius = 2.05): boolean {
     if (obstacle.owner === undefined) return false;
@@ -481,7 +544,7 @@ export class World {
     this.terrain.add(
       at.x,
       at.z,
-      Math.min(4.2, 1.5 + speed * 0.055),
+      Math.min(5, 2.3 + speed * 0.065),
       Math.min(1.35, 0.35 + speed * 0.026),
     );
     this.updateTerrain();
@@ -501,20 +564,21 @@ export class World {
     this.ground.geometry.computeVertexNormals();
     this.ground.geometry.computeBoundingSphere();
   }
-  traceGround(start: THREE.Vector3, end: THREE.Vector3): number | null {
+  traceGround(start: THREE.Vector3, end: THREE.Vector3, radius = 0): number | null {
     const steps = Math.min(24, Math.max(1, Math.ceil(start.distanceTo(end) / 0.35)));
     for (let i = 0; i <= steps; i++) {
       const t = i / steps,
         x = start.x + (end.x - start.x) * t,
         z = start.z + (end.z - start.z) * t;
-      if (start.y + (end.y - start.y) * t <= this.surfaceHeight(x, z) + 0.025) {
+      if (start.y + (end.y - start.y) * t <= this.surfaceHeight(x, z) + radius + 0.025) {
         let a = Math.max(0, (i - 1) / steps),
           b = t;
         for (let j = 0; j < 7; j++) {
           const mid = (a + b) / 2,
             mx = start.x + (end.x - start.x) * mid,
             mz = start.z + (end.z - start.z) * mid;
-          if (start.y + (end.y - start.y) * mid <= this.surfaceHeight(mx, mz) + 0.025) b = mid;
+          if (start.y + (end.y - start.y) * mid <= this.surfaceHeight(mx, mz) + radius + 0.025)
+            b = mid;
           else a = mid;
         }
         return b;

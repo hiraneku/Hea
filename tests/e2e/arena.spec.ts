@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import type { Snapshot } from '../../src/game/types';
 import type { Game } from '../../src/game/Game';
-import { DUEL } from '../../src/game/combat';
+import { ATTACKS, DUEL } from '../../src/game/combat';
 
 declare global {
   interface Window {
@@ -68,9 +68,7 @@ test('one-boss menu, settings, guide, reference and live demo', async ({ page })
   expect(errors).toEqual([]);
 });
 
-test('desktop controls: movement, double jump, dash, focus, shooting, pause and reset', async ({
-  page,
-}, info) => {
+test('desktop controls: flight, dash, focus, shooting, pause and reset', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop');
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -82,12 +80,14 @@ test('desktop controls: movement, double jump, dash, focus, shooting, pause and 
   await page.mouse.click(550, 350);
   await expect.poll(async () => (await state(page)).energy).toBeLessThan(100);
   await page.keyboard.down('KeyW');
-  await expect.poll(async () => (await state(page)).position.z).toBeLessThan(17.8);
+  await expect.poll(async () => (await state(page)).position.z).toBeLessThan(23.4);
   await page.keyboard.up('KeyW');
   await page.keyboard.press('ShiftLeft');
   await expect.poll(async () => (await state(page)).dash).toBeLessThan(1);
-  await page.keyboard.press('Space');
-  await expect.poll(async () => (await state(page)).position.y).toBeGreaterThan(0.1);
+  const takeoff = (await state(page)).position.y;
+  await page.keyboard.down('Space');
+  await expect.poll(async () => (await state(page)).position.y).toBeGreaterThan(takeoff + 0.6);
+  await page.keyboard.up('Space');
   await page.keyboard.press('Digit2');
   await expect(page.locator('[data-spell="1"]')).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('KeyP');
@@ -117,7 +117,14 @@ test('mobile: simultaneous movement and casting, camera focus, landscape and res
   await load(page);
   await page.locator('#start-button').tap();
   await expect(page.locator('#touch-controls')).toBeVisible();
-  for (const id of ['#joystick', '#touch-fire', '#touch-dash', '#touch-jump', '#touch-focus']) {
+  for (const id of [
+    '#joystick',
+    '#touch-fire',
+    '#touch-dash',
+    '#touch-rise',
+    '#touch-descend',
+    '#touch-focus',
+  ]) {
     const b = (await page.locator(id).boundingBox())!;
     expect(b.x).toBeGreaterThanOrEqual(0);
     expect(b.x + b.width).toBeLessThanOrEqual(390);
@@ -144,7 +151,7 @@ test('mobile: simultaneous movement and casting, camera focus, landscape and res
       { id: 2, x: fx, y: fy },
     ],
   });
-  await expect.poll(async () => (await state(page)).position.z).toBeLessThan(17.5);
+  await expect.poll(async () => (await state(page)).position.z).toBeLessThan(23.3);
   await expect.poll(async () => (await state(page)).boss.health).toBeLessThan(DUEL.bossHealth);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await cdp.send('Input.dispatchTouchEvent', {
@@ -161,19 +168,33 @@ test('mobile: simultaneous movement and casting, camera focus, landscape and res
   await expect.poll(async () => (await state(page)).lockedOn).toBe(true);
   await page.locator('#touch-dash').tap();
   await expect.poll(async () => (await state(page)).dash).toBeLessThan(1);
-  await page.locator('#touch-jump').tap();
-  await expect.poll(async () => (await state(page)).position.y).toBeGreaterThan(0.1);
+  const rise = (await page.locator('#touch-rise').boundingBox())!,
+    altitude = (await state(page)).position.y;
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ id: 4, x: rise.x + rise.width / 2, y: rise.y + rise.height / 2 }],
+  });
+  await expect.poll(async () => (await state(page)).position.y).toBeGreaterThan(altitude + 0.6);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await page.setViewportSize({ width: 844, height: 390 });
   await expect(page.locator('.boss-hud')).toBeVisible();
   const b = (await page.locator('#touch-fire').boundingBox())!;
   expect(b.y + b.height).toBeLessThanOrEqual(390);
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.freeze(true));
+  for (const width of [360, 320]) {
+    await page.setViewportSize({ width, height: 780 });
+    const slots = (await page.locator('.spell-slots').boundingBox())!,
+      rise = (await page.locator('#touch-rise').boundingBox())!;
+    expect(rise.x).toBeGreaterThan(slots.x + slots.width);
+    expect(rise.width).toBeGreaterThanOrEqual(44);
+  }
   await page.locator('#pause-button').tap();
   await page.locator('#restart-button').tap();
   expect((await state(page)).health).toBe(100);
   expect(errors).toEqual([]);
 });
 
-test('automatic shield intercepts simultaneous threats from four directions, then cools down', async ({
+test('Aegis covers front and sides, never the rear, and respects cooldown and cover', async ({
   page,
 }, info) => {
   test.skip(info.project.name !== 'mobile');
@@ -181,18 +202,24 @@ test('automatic shield intercepts simultaneous threats from four directions, the
   await scenario(page, 'shield');
   await step(page, 0.25);
   let s = await state(page);
-  expect(s.shield.blocked).toBe(4);
+  expect(s.shield.blocked).toBe(3);
   expect(s.health).toBe(100);
   expect(s.shield.phase).toBe('active');
   expect(s.energy).toBe(100);
   await expect(page.locator('#shield-state')).toContainText('AKTIF');
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.incoming('back'));
+  await step(page, 0.25);
+  expect((await state(page)).health).toBeLessThan(100);
+  expect((await state(page)).shield.blocked).toBe(3);
+  expect((await state(page)).shield.phase).toBe('active');
+  expect((await state(page)).shield.blindWarning).toBe(true);
   await step(page, DUEL.shieldWindow);
   s = await state(page);
   expect(s.shield.phase).toBe('cooldown');
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.incoming());
   await step(page, 0.25);
   expect((await state(page)).health).toBeLessThan(100);
-  expect((await state(page)).shield.blocked).toBe(4);
+  expect((await state(page)).shield.blocked).toBe(3);
   await step(page, DUEL.shieldCooldown);
   expect((await state(page)).shield.phase).toBe('ready');
   expect(await page.locator('#touch-shield').count()).toBe(0);
@@ -242,7 +269,7 @@ test('ground slam deforms terrain, produces collision impact, respects comfort m
   expect(s.craters).toBeGreaterThan(0);
   expect(s.impacts).toBeGreaterThan(0);
   expect(s.position.y).toBeLessThan(0);
-  expect(await page.evaluate(() => window.__HEA_DEBUG__.harness!.groundAt(0, 12))).toBeLessThan(
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.harness!.groundAt(0, 24))).toBeLessThan(
     -0.3,
   );
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).lastImpact?.surface).toBe(
@@ -257,9 +284,11 @@ test('boss uses all patterns, missile guidance, victory and defeat end the duel 
   test.skip(info.project.name !== 'mobile');
   await load(page);
   await scenario(page, 'patterns');
-  await step(page, 5.65);
+  const missilesAt =
+    1 + ATTACKS.fire.tell + ATTACKS.fire.duration + ATTACKS.fire.recovery + ATTACKS.missiles.tell;
+  await step(page, missilesAt + 0.44);
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  expect(d.attacksFired.fire).toBeGreaterThanOrEqual(12);
+  expect(d.attacksFired.fire).toBe(ATTACKS.fire.shots);
   expect(d.attacksFired.missile).toBeGreaterThan(0);
   expect(d.missiles.length).toBeGreaterThan(0);
   const velocity = d.missiles[0].velocity;
@@ -307,4 +336,129 @@ test('Prisma damages the boss and Nova launches it into destructible cover', asy
   expect(s.wallsBroken).toBeGreaterThan(0);
   expect(s.impacts).toBeGreaterThan(0);
   expect(d.lastImpact?.actor).toBe('boss');
+});
+
+test('flight holds altitude, descends smoothly, and crosses the old map boundary', async ({
+  page,
+  context,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'flight');
+  const cdp = await context.newCDPSession(page),
+    rise = (await page.locator('#touch-rise').boundingBox())!,
+    fall = (await page.locator('#touch-descend').boundingBox())!;
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ id: 1, x: rise.x + rise.width / 2, y: rise.y + rise.height / 2 }],
+  });
+  await step(page, 1);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await step(page, 1.5);
+  const hover = await state(page);
+  expect(hover.position.y).toBeGreaterThan(9);
+  expect(hover.flight.phase).toBe('hover');
+  await step(page, 1.5);
+  expect(Math.abs((await state(page)).position.y - hover.position.y)).toBeLessThan(0.06);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ id: 2, x: fall.x + fall.width / 2, y: fall.y + fall.height / 2 }],
+  });
+  await step(page, 0.8);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await step(page, 0.5);
+  expect((await state(page)).position.y).toBeLessThan(hover.position.y - 5);
+  // Fly above the towers, then travel past the previous ±47m movement clamp.
+  await page.keyboard.down('Space');
+  await step(page, 5.5);
+  await page.keyboard.up('Space');
+  await step(page, 0.8);
+  expect((await state(page)).position.y).toBeLessThan(42.5);
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.face(Math.PI));
+  await page.keyboard.down('KeyW');
+  await step(page, 4.8);
+  await page.keyboard.up('KeyW');
+  expect((await state(page)).position.z).toBeGreaterThan(70);
+  const arena = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).arena;
+  expect(arena.size).toBe(200);
+  expect(arena.buildings).toBe(55);
+});
+
+test('close spell seeker connects; the solar sphere triggers a larger directional shield', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'missile-near');
+  await step(page, 0.9);
+  expect((await state(page)).health).toBe(84);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).contacts).toBe(1);
+  await scenario(page, 'shield');
+  await step(page, 0.12);
+  const small = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).lastBlock!.scale;
+  await scenario(page, 'shield-large');
+  await step(page, 0.2);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect((await state(page)).shield.blocked).toBe(1);
+  expect((await state(page)).health).toBe(100);
+  expect(d.lastBlock!.scale).toBeGreaterThan(small * 1.8);
+});
+
+test('contact freezes positions BEFORE launch, both for player hits and Nova on the boss', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'contact');
+  await step(page, 0.03);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.playerReaction).toBe('contact');
+  expect(d.hitPause).toBeGreaterThan(0);
+  const contact = (await state(page)).position;
+  await step(page, 0.03);
+  expect((await state(page)).position).toEqual(contact);
+  expect((await state(page)).impacts).toBe(0);
+  await step(page, 0.16);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).playerReaction).toBe(
+    'launch',
+  );
+  expect((await state(page)).position.z).toBeLessThan(contact.z - 2);
+  await step(page, 0.35);
+  expect((await state(page)).position.z).toBeLessThan(contact.z - 9);
+  await scenario(page, 'nova');
+  const before = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition;
+  await page.locator('#touch-fire').tap();
+  await step(page, 0.008);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.bossReaction).toBe('contact');
+  expect(d.bossPosition).toEqual(before);
+  await step(page, 0.045);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition).toEqual(
+    before,
+  );
+  await step(page, 0.35);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.bossPosition[2]).toBeLessThan(before[2] - 6);
+  expect((await state(page)).wallsBroken).toBeGreaterThan(0);
+});
+
+test('a fatal Nova still pauses and launches the boss before the victory result', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'nova-finish');
+  await page.locator('#touch-fire').tap();
+  await step(page, 0.04);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.bossReaction).toBe('contact');
+  expect(d.bossVisible).toBe(true);
+  expect((await state(page)).boss.health).toBe(0);
+  await step(page, 0.45);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.bossVisible).toBe(true);
+  expect(d.bossPosition[2]).toBeLessThan(-6);
+  await step(page, 2);
+  expect((await state(page)).mode).toBe('victory');
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossVisible).toBe(false);
 });

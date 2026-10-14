@@ -4,7 +4,8 @@ export class Controls {
   shooting = false;
   shotRequested = false;
   focusRequested = false;
-  jumpRequested = false;
+  private riseHeld = false;
+  private descendHeld = false;
   dashRequested = false;
   private keys = new Set<string>();
   private dx = 0;
@@ -89,7 +90,10 @@ export class Controls {
   reset() {
     this.keys.clear();
     this.shooting = this.shotRequested = this.focusRequested = this.mouseDown = false;
-    this.jumpRequested = this.dashRequested = false;
+    this.riseHeld = this.descendHeld = this.dashRequested = false;
+    document
+      .querySelectorAll('#touch-controls button.held')
+      .forEach((button) => button.classList.remove('held'));
     this.dx = this.dy = this.stickX = this.stickY = 0;
     this.stickPointer = this.lookPointer = null;
     this.knob.style.transform = '';
@@ -136,7 +140,10 @@ export class Controls {
       x /= length;
       z /= length;
     }
-    return { x, z };
+    const lift =
+      (this.keys.has('Space') || this.riseHeld ? 1 : 0) -
+      (this.keys.has('KeyC') || this.descendHeld ? 1 : 0);
+    return { x, z, lift };
   }
   look() {
     const result = { x: this.dx, y: this.dy };
@@ -158,7 +165,6 @@ export class Controls {
       this.onPause();
       return;
     }
-    if (e.code === 'Space') this.jumpRequested = true;
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.dashRequested = true;
     if (e.code === 'KeyE') this.focusRequested = true;
     if (e.code === 'KeyQ' || e.code === 'Tab') this.onCycle();
@@ -239,18 +245,19 @@ export class Controls {
       e.preventDefault();
       this.focusRequested = true;
     });
-    for (const [id, action] of [
-      ['#touch-dash', 'dash'],
-      ['#touch-jump', 'jump'],
-    ] as const) {
-      document.querySelector(id)!.addEventListener('pointerdown', (e) => {
-        if (!this.enabled) return;
-        e.preventDefault();
-        if (action === 'dash') this.dashRequested = true;
-        else this.jumpRequested = true;
-      });
-    }
+    hold('#touch-rise', (value) => {
+      this.riseHeld = value;
+    });
+    hold('#touch-descend', (value) => {
+      this.descendHeld = value;
+    });
+    document.querySelector('#touch-dash')!.addEventListener('pointerdown', (e) => {
+      if (!this.enabled) return;
+      e.preventDefault();
+      this.dashRequested = true;
+    });
   }
+
   private updateStick(e: PointerEvent) {
     const radius = this.joystick.clientWidth * 0.32;
     let x = e.clientX - this.stickOrigin.x,

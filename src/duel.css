@@ -489,3 +489,79 @@
     margin-top: 6px;
   }
 }
+/* Vertical flight controls: hold, release to hover. Rear warning does not suggest cooldown. */
+.touch-actions #touch-rise {
+  right: 1px;
+  top: -60px;
+}
+.touch-actions #touch-descend svg {
+  transform: rotate(180deg);
+}
+.touch-actions #touch-rise,
+.touch-actions #touch-descend {
+  color: #d0f4f2;
+  border-color: #c7eae578;
+}
+.aegis-hud[data-blind='true'] small {
+  color: #ffc093;
+  text-shadow: 0 1px 4px #331909;
+}
+.flight-hud {
+  position: absolute;
+  left: 48px;
+  bottom: 183px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #e6eee4;
+  font: 8px var(--mono);
+  letter-spacing: 1px;
+  text-shadow: 0 1px 5px #193443cc;
+}
+.flight-hud i {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #b6eeee;
+}
+.flight-hud strong {
+  font-weight: 400;
+  color: #c3f2f4;
+}
+@media (max-width: 720px) {
+  .flight-hud {
+    left: 24px;
+  }
+}
+@media (max-width: 480px) and (orientation: portrait) {
+  .flight-hud {
+    left: 25px;
+    bottom: 155px;
+    font-size: 7px;
+    letter-spacing: 0.4px;
+    gap: 6px;
+  }
+  .touch-actions #touch-rise {
+    top: -60px;
+  }
+  .aegis-hud small {
+    font-size: 6.5px;
+  }
+}
+@media (max-height: 540px) and (orientation: landscape) {
+  .touch-actions #touch-rise {
+    top: -53px;
+  }
+  .flight-hud {
+    left: 29px;
+    bottom: 142px;
+    font-size: 7px;
+    letter-spacing: 0.4px;
+  }
+}
+@media (max-width: 380px) and (orientation: portrait) {
+  .has-touch .spell-dock {
+    left: calc(50% - 16px);
+    width: clamp(180px, 60vw, 218px);
+  }
+}

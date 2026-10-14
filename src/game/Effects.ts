@@ -418,12 +418,50 @@ export class Effects {
       p.life = p.max = 1.1 + Math.random();
     }
   }
-  block(at: THREE.Vector3, incoming: THREE.Vector3) {
-    const patch = makeHexField(0.27, 2);
+  block(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1) {
+    const patch = makeHexField(0.27 * scale, 2);
     patch.position.copy(at);
     patch.lookAt(at.clone().sub(incoming.clone().normalize()));
-    this.add(patch, 0.38, 0.1);
-    this.burst(at, '#7af1ff', 18, 3, 0.28, 0.5);
+    this.add(patch, scale > 2 ? 0.52 : 0.34, 0.1);
+    this.burst(at, '#7af1ff', scale > 2 ? 34 : 18, 3, 0.28 * Math.sqrt(scale), 0.5);
+    if (scale > 2) this.glyph(at, incoming.clone().negate(), '#b8f6ff', scale * 0.55, 0.42);
+  }
+  contact(at: THREE.Vector3, incoming: THREE.Vector3, scale = 1) {
+    const points: number[] = [];
+    for (let i = 0; i < 12; i++) {
+      const angle = (i * Math.PI) / 6,
+        length = (i % 3 === 0 ? 1.4 : 0.8) * scale;
+      const x = Math.cos(angle),
+        y = Math.sin(angle),
+        w = 0.065 * scale;
+      points.push(
+        x * 0.15,
+        y * 0.15,
+        0,
+        x * length,
+        y * length,
+        0,
+        x * 0.35 - y * w,
+        y * 0.35 + x * w,
+        0,
+      );
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3));
+    const flash = new THREE.Mesh(
+      geometry,
+      new THREE.MeshBasicMaterial({
+        color: '#e7fcff',
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      }),
+    );
+    flash.position.copy(at);
+    flash.lookAt(at.clone().sub(incoming.clone().normalize()));
+    this.add(flash, 0.22, 1.5);
+    this.burst(at, '#e5fcff', 18, 5, 0.23, 1);
   }
   quality(low: boolean) {
     this.particleBudget = low ? 180 : this.capacity;

@@ -5,7 +5,7 @@ import { Effects, makeSigil, Ribbon } from './Effects';
 /** A single floating spellcaster: dark blockout body and an animated, front-facing solar sigil. */
 export class Boss {
   readonly group = new THREE.Group();
-  readonly position = new THREE.Vector3(-2, 4.3, 1.5);
+  readonly position = new THREE.Vector3(-2, 5.8, 1.5);
   readonly velocity = new THREE.Vector3();
   readonly impulse = new THREE.Vector3();
   readonly lockedTarget = new THREE.Vector3();
@@ -14,6 +14,10 @@ export class Boss {
   health: number = DUEL.bossHealth;
   knockTime = 0;
   flash = 0;
+  pendingImpulse: THREE.Vector3 | null = null;
+  deathDelay = -1;
+  private castRotation = 0;
+  private spellSeeds: THREE.Mesh[] = [];
   private plate: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
   private sigil: THREE.Group;
   private chargeRing: THREE.Group;
@@ -50,6 +54,12 @@ export class Boss {
     this.ember = new THREE.Mesh(new THREE.IcosahedronGeometry(0.16, 1), gold);
     this.ember.position.set(0, 0.1, 0.75);
     this.group.add(this.ember);
+    const seedGeometry = new THREE.IcosahedronGeometry(0.11, 1);
+    for (let i = 0; i < 6; i++) {
+      const seed = new THREE.Mesh(seedGeometry, gold);
+      this.group.add(seed);
+      this.spellSeeds.push(seed);
+    }
     for (let i = 0; i < 4; i++) {
       const shard = new THREE.Mesh(new THREE.BoxGeometry(0.33, 0.7, 0.65), stone);
       this.group.add(shard);
@@ -72,19 +82,31 @@ export class Boss {
   }
   reset() {
     this.health = DUEL.bossHealth;
-    this.position.set(-2, 4.3, 1.5);
+    this.position.set(-2, 5.8, 1.5);
     this.velocity.set(0, 0, 0);
     this.impulse.set(0, 0, 0);
     this.knockTime = this.flash = 0;
+    this.pendingImpulse = null;
+    this.deathDelay = -1;
+    this.castRotation = 0;
     this.director.reset();
     this.group.visible = true;
     this.group.scale.setScalar(1);
     this.ribbon.reset(this.position);
     this.ribbon.mesh.visible = true;
   }
-  muzzle(side = 0) {
+  muzzle(radius = 0) {
     this.group.updateMatrixWorld(true);
-    return this.group.localToWorld(new THREE.Vector3(side * 1.5, side ? 0.75 : 0.1, 1.05));
+    return this.group.localToWorld(new THREE.Vector3(0, 0.1, 1.05 + radius * 0.8));
+  }
+  private seedPosition(index: number) {
+    const angle = this.castRotation + (index / 6) * Math.PI * 2;
+    return new THREE.Vector3(Math.cos(angle) * 0.86, 0.1 + Math.sin(angle) * 0.86, 0.78);
+  }
+  /** Launch points are ON the frontal spell circle, not on the shoulders. */
+  spellPort(index: number) {
+    this.group.updateMatrixWorld(true);
+    return this.group.localToWorld(this.seedPosition(index));
   }
   present(time: number, dt: number, target: THREE.Vector3, camera: THREE.Vector3) {
     this.group.position.copy(this.position);
@@ -95,11 +117,20 @@ export class Boss {
     const charge = this.director.charge;
     this.sigil.rotation.z += dt * (0.35 + charge * 2.2);
     this.sigil.scale.setScalar(1 + charge * 0.13);
-    this.chargeRing.visible =
-      this.director.stage === 'telegraph' && this.director.attack !== 'fire';
+    this.chargeRing.visible = this.director.stage !== 'recover' && this.director.attack !== 'fire';
     this.chargeRing.rotation.z -= dt * 0.8;
-    this.chargeRing.scale.setScalar(0.82 + charge * 0.25);
-    this.ember.scale.setScalar(1 + charge * 2.8 + Math.sin(time * 5) * 0.1);
+    this.chargeRing.scale.setScalar(
+      this.director.attack === 'hammer' ? 1.1 + charge * 0.5 : 0.82 + charge * 0.25,
+    );
+    const heavy = this.director.attack === 'hammer' && this.director.stage === 'telegraph';
+    this.ember.scale.setScalar(1 + charge * (heavy ? 5.8 : 1.8) + Math.sin(time * 5) * 0.1);
+    this.ember.position.z = 0.75 + (heavy ? charge * 0.9 : 0);
+    this.castRotation = time * 0.55;
+    this.spellSeeds.forEach((seed, i) => {
+      seed.visible = this.director.attack === 'missiles' && this.director.stage !== 'recover';
+      seed.position.copy(this.seedPosition(i));
+      seed.scale.setScalar(0.4 + charge * 1.9);
+    });
     this.shards.forEach((shard, i) => {
       const side = i % 2 ? 1 : -1;
       shard.position.set(
@@ -109,6 +140,6 @@ export class Boss {
       );
       shard.rotation.z = side * (0.16 + Math.sin(time + i) * 0.08);
     });
-    if (this.alive) this.ribbon.push(this.position, camera);
+    if (this.group.visible) this.ribbon.push(this.position, camera);
   }
 }

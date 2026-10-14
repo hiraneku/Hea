@@ -45,21 +45,22 @@ npm run build:pages
 
 Jangan memilih folder root: `index.html` di root adalah entry pengembangan TypeScript, bukan build statis yang dapat langsung dijalankan GitHub Pages. `dist/` tetap diabaikan Git; hanya `docs/` yang disertakan untuk publikasi Pages.
 
-## Duel v0.2
+## Duel v0.3 — Aerial Duel
 
 - **Satu boss: IGNIS.** Duel berakhir saat boss kalah atau HP player habis. Tidak ada gelombang, target latihan tambahan, atau respawn musuh otomatis.
-- Player berupa balok merah dengan pita putih; kamera third-person mengikuti gerak, dash, dan hempasan. Boss berupa balok gelap terbang dengan glyph emas di depan.
+- **Terbang enam arah:** player merah dengan pita putih, akselerasi/perlambatan halus, dan hover ketika input dilepas. Gerak maju mengikuti arah pandang; naik-turun independen dan dash dapat dilakukan di udara. Kamera third-person mengikuti gerak dan hempasan. Boss berupa balok gelap dengan glyph emas di depan.
+- **Arena 200 × 200 meter**, dengan **55 blok/dinding utama yang destruktibel**. Balok, dinding dan menara lebih besar; bangunan utuh digabung dalam tiga instanced draw untuk menekan biaya render.
 - Boss mendekat, mengorbit, menghindari penghalang lewat perubahan ketinggian, dan menjaga jarak tembak. Urutan serangannya memiliki telegraph, fase tembak, dan pemulihan:
-  1. **Rentetan api:** 12 proyektil cepat, seperti tembakan senapan.
-  2. **Misil homing:** tiga salvo berpasangan; misil melebar dan melengkung menuju player. Kecepatan belok dan durasi panduannya terbatas sehingga tetap bisa dihindari.
-  3. **Hempasan Surya:** naik ke udara dan mengunci sasaran sebelum melepas tembakan berat. Gerak setelah sasaran terkunci dapat menghindarinya.
-- **Aegis maksimum, otomatis 360°.** Glyph heksagonal muncul menghadap proyektil sesaat sebelum benturan. Semua proyektil yang mengancam diblokir selama **1,65 detik**, tanpa batas jumlah dan tanpa biaya energi. Setelah itu **cooldown 3,2 detik**. Tembakan yang meleset atau lebih dulu terhalang bangunan tidak menghabiskan shield. HUD menunjukkan status dan waktu tersisa.
-- Serangan yang lolos menyebabkan knockback. Misil melontarkan; serangan berat dapat menghantamkan player ke tanah. **Nova juga dapat menghempaskan boss.** Benturan keras berikutnya dengan lingkungan menimbulkan puing, debu, hit-stop, dan impact frame hitam-putih, bukan setiap kali sihir ditembakkan.
+  1. **Rentetan api:** 30 proyektil berdiameter sekitar 0,64 m dalam fase tembak 3,65 detik, dengan spread horizontal/vertikal yang teratur.
+  2. **Mantra Pemburu:** tiga salvo berpasangan berupa orb sihir bercincin, keluar dari enam titik pada lingkaran emas boss. Guidance langsung aktif, mengantisipasi gerakan, memperkuat belokan dan mengurangi laju ketika perlu berbelok tajam di jarak dekat. Tidak ada lagi dead zone 0,38 detik di awal peluncuran. Radius orb ikut dihitung dalam collision kontinu. Tetap bisa diblokir, ditahan bangunan, atau dihindari dengan dash.
+  3. **Hempasan Surya:** mengisi orb besar di depan glyph, naik dan mengunci sasaran sebelum melepas bola surya berdiameter 2,5 m. Aegis memunculkan bidang heksagonal yang lebih besar untuk menahannya. Gerak setelah sasaran terkunci dapat menghindarinya.
+- **Aegis maksimum, otomatis arah depan–samping.** Sektor pandang 3D **210°** mengikuti arah tubuh/pandangan, bukan arah perpindahan. **Belakang adalah titik buta**: serangan dari sana tidak memunculkan shield atau menghabiskan status siap, dan tetap dapat mengenai player saat window aktif. Glyph muncul sesaat sebelum benturan, dengan ukuran mengikuti proyektil. Semua proyektil yang mengancam di sektor terlindungi diblokir selama **1,65 detik**, tanpa batas jumlah dan tanpa biaya energi. Setelah itu **cooldown 3,2 detik**. Tembakan yang meleset atau lebih dulu terhalang bangunan tidak menghabiskan shield. HUD menunjukkan status dan waktu tersisa.
+- **Kontak → jeda → hempasan cepat → benturan.** Saat serangan musuh mengenai player, simulasi berhenti 75–120 ms tepat pada kontak sebelum impuls diluncurkan. **Nova memberi jeda 105 ms pada boss lalu hempasan 62 m/s**, termasuk pada pukulan terakhir. Kontak menampilkan percikan lokal; benturan keras berikutnya dengan lingkungan menghasilkan puing, debu, jeda benturan dan impact frame hitam-putih. Serangan biasa yang tidak mengenai lingkungan tidak memalsukan impact frame.
 - **Kerusakan nyata:** bagian balok yang hancur dihapus dari mesh dan collision. Tanah berlekuk secara permanen selama duel, dan collision menggunakan segitiga permukaan yang sama. Restart mengembalikan arena, boss, HP, energi, dan semua cooldown.
 - Tiga sihir player: **Bara** (api dengan bantuan bidik), **Prisma** (sinar cyan instan), **Nova** (ledakan dan knockback berat).
-- Dash dengan kekebalan singkat, lompat ganda, regenerasi energi, dan pemulihan HP setelah sembilan detik tanpa terkena serangan.
+- Dash udara dengan kekebalan singkat, hover dan kontrol ketinggian, regenerasi energi, serta pemulihan HP setelah sembilan detik tanpa terkena serangan.
 - Multitouch, fokus boss opsional, layout portrait/landscape, pause, restart, demo real-time, panduan, dan video referensi asli.
-- Audio WebAudio prosedural; kualitas, sensitivitas, volume, serta **Efek nyaman** untuk menonaktifkan impact frame/hit-stop dan mengurangi guncangan. Rekor waktu kemenangan dan preferensi disimpan lokal.
+- Audio WebAudio prosedural; kualitas, sensitivitas, volume, serta **Efek nyaman** untuk menonaktifkan impact frame dan mengurangi guncangan. Jeda kontak tetap berlaku agar aturan hempasan konsisten. Rekor waktu kemenangan dan preferensi disimpan lokal.
 
 ## Kontrol
 
@@ -71,12 +72,12 @@ Jangan memilih folder root: `index.html` di root adalah entry pengembangan TypeS
 | Menyerang      | Klik / tahan mouse kiri                       | Tap / tahan **Serang**     |
 | Ganti sihir    | 1 / 2 / 3, Q atau Tab                         | Sentuh slot sihir          |
 | Dash           | Shift                                         | Tombol **Dash**            |
-| Lompat ganda   | Space dua kali                                | Tombol **Lompat** dua kali |
+| Naik / turun   | Tahan Space / C                               | Tahan **Naik / Turun**     |
 | Aegis          | **Otomatis, tanpa tombol**                    | **Otomatis, tanpa tombol** |
 | Jeda           | Esc / P / tombol jeda                         | Tombol jeda                |
 | Ulangi duel    | R / menu jeda                                 | Menu jeda / hasil duel     |
 
-Fokus boss aktif secara default di mobile. Menggeser kamera melepaskan fokus; tekan **Fokus** untuk menguncinya kembali. Tombol fokus hanya mengendalikan kamera, **bukan** perisai. Dash memberi kekebalan selama gerak cepatnya, bukan sepanjang cooldown. Energi hanya dipakai untuk sihir.
+Fokus boss aktif secara default di mobile. Menggeser kamera melepaskan fokus; tekan **Fokus** untuk menguncinya kembali. Tombol fokus hanya mengendalikan kamera, **bukan** perisai. Dash memberi kekebalan selama gerak cepatnya, bukan sepanjang cooldown. Energi hanya dipakai untuk sihir. Terbang tidak menguras energi. Menjauh sambil tetap menghadap boss menjaga perlindungan depan; berbalik membelakanginya membuka titik buta.
 
 ## Hubungan dengan referensi
 
@@ -89,7 +90,8 @@ Model tetap mengikuti gaya blockout, bukan karakter humanoid. Durasi shield, dam
 - Three.js + TypeScript + Vite; font dan aset dibundel lokal.
 - `src/game/Game.ts`: simulasi duel, chase camera, knockback, projectile CCD, spell dan hasil duel.
 - `src/game/Boss.ts`: satu model boss terbang, glyph, telegraph dan presentasi visual.
-- `src/game/combat.ts`: state machine Aegis dan pola boss, prediksi ancaman, panduan misil, serta parameter utama `DUEL` / `ATTACKS`.
+- `src/game/combat.ts`: Aegis directional, contact pause, pola boss, radius collision, spread dan panduan misil; tuning `DUEL` / `ATTACKS` / `PROJECTILES`.
+- `src/game/flight.ts`, `src/game/config.ts`: flight motor, hover, smoothing, ukuran arena dan batas ketinggian.
 - `src/game/destruction.ts`: sel balok destruktibel, collider berlubang, dan bentuk kawah.
 - `src/game/World.ts`: arena prosedural, mesh pecahan, deformasi tanah dan bayangan kontak.
 - `src/game/Effects.ts`: particle pool, instanced debris, debu, ribbon, glyph, beam dan shield directional.
@@ -104,9 +106,9 @@ Font Inter dan Barlow Condensed didistribusikan melalui `@fontsource` beserta li
 
 ## Pengujian
 
-`npm test` memeriksa collision, Aegis, prediksi benturan, jadwal serangan pada timestep berbeda, belokan misil, lubang dinding, dan kawah/reset.
+`npm test` memeriksa collision, arc Aegis, prediksi benturan, emisi dari glyph boss, jadwal serangan/spread, homing dari jarak 2–22 m (termasuk orientasi awal menjauh), jeda kontak, flight motor, lubang dinding, dan kawah/reset.
 
-`npm run test:e2e` memeriksa menu dan kontrol desktop/mobile, damage sihir, empat intersepsi bersamaan, kerentanan saat cooldown, hempasan player/boss, lubang collision, deformasi tanah, semua pola serangan, kemenangan/kekalahan tanpa respawn, dan restart. Sebagian kasus khusus mobile sengaja dilewati pada project desktop, dan sebaliknya.
+`npm run test:e2e` memeriksa menu dan kontrol desktop/mobile, damage sihir, intersepsi depan–samping, titik buta saat shield aktif, kerentanan saat cooldown, misil jarak dekat, jeda kontak sebelum hempasan player/boss, lubang collision, deformasi tanah, semua pola serangan, hover/kontrol naik-turun, perpindahan melampaui batas map lama, shield besar, kemenangan/kekalahan tanpa respawn, dan restart. Sebagian kasus khusus mobile sengaja dilewati pada project desktop, dan sebaliknya.
 
 Pada server dev, `window.__HEA_DEBUG__` menyediakan snapshot/diagnostik. Tambahan query `?test` membuka fixture QA deterministik untuk melangkah simulasi dan menguji benturan. **Hook tersebut tidak diekspor pada build produksi / GitHub Pages.** Tes memakai simulasi sungguhan; fixture hanya menempatkan aktor/proyektil dan mengatur waktu agar kondisi dapat direproduksi.
 
