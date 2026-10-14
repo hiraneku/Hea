@@ -1181,8 +1181,10 @@ function applyHitReaction(formulaKey, dmg, dirVel, weaknessHit, now) {
   else if (f.kind === 'knock' || dmg >= 20) tier = 'heavy';
   else if (dmg >= 12) tier = 'medium';
 
-  const impulse = tier === 'launch' ? cfg.launchImpulse : tier === 'heavy' ? cfg.heavyImpulse : tier === 'medium' ? cfg.mediumImpulse : cfg.lightImpulse;
+  // Setiap hit harus terasa: impuls diskalakan langsung dari damage serangan.
+  const impulse = Math.min(cfg.maxSpeed, 3 + dmg * 0.34 + (f.kind === 'knock' ? 2.5 : 0));
   enemy.kbVel.addScaledVector(dir, impulse);
+  if (tier === 'heavy') enemy.kbVy = Math.max(enemy.kbVy, 1.9); // hantaman keras sedikit mengangkat
   if (enemy.kbVel.length() > cfg.maxSpeed) enemy.kbVel.setLength(cfg.maxSpeed);
   if (tier === 'launch') {
     enemy.kbVy = Math.max(enemy.kbVy, cfg.launchVertical);
@@ -1620,7 +1622,7 @@ function updateKnockback(dt, now) {
   }
   pos.y = Math.sin(now * 2.1) * 0.055 + enemy.kbY;
   // Gesekan: sangat licin selagi terlontar (seperti video), normal setelahnya
-  const damping = enemy.kbY > 0 ? cfg.dampingAir : enemy.launched ? cfg.dampingLaunched : cfg.dampingGround;
+  const damping = enemy.kbY > 0 ? cfg.dampingAir : (enemy.launched || enemy.kbVel.length() > 6) ? cfg.dampingLaunched : cfg.dampingGround;
   enemy.kbVel.multiplyScalar(Math.exp(-damping * dt));
   // Menyeret tanah: puing kecil + bekas gesekan selama meluncur kencang di tanah
   if (enemy.kbY === 0 && enemy.kbVel.length() > 4) {
@@ -1642,6 +1644,7 @@ function updateKnockback(dt, now) {
   if (enemy.head) enemy.head.rotation.x = -react * 0.55;
   if (enemy.kbVel.length() < 0.45 && enemy.kbY === 0) {
     enemy.kbActive = false;
+    enemy.kbEndAt = now;
     enemy.kbVel.set(0, 0, 0);
     enemy.group.rotation.x = 0;
   }
@@ -1706,11 +1709,12 @@ function updateEnemy(dt, now) {
     return;
   }
 
-  // Drift back toward the marker after being displaced.
+  // Kembali ke penanda sangat pelan dan hanya setelah jeda pasca-knockback,
+  // supaya hempasan terlihat menetap (tidak langsung tersedot balik).
   const anchorDistance = horizontalDistance(enemy.group.position, enemy.anchor);
-  if (anchorDistance > .15) {
+  if (anchorDistance > .15 && now - (enemy.kbEndAt || 0) > 2.5) {
     tempV.copy(enemy.anchor).sub(enemy.group.position).setY(0);
-    enemy.group.position.addScaledVector(tempV.normalize(), Math.min(anchorDistance, dt * 1.4));
+    enemy.group.position.addScaledVector(tempV.normalize(), Math.min(anchorDistance, dt * 0.45));
   }
 
   enemy.attackTimer -= dt * (now < enemy.enragedUntil ? 1.8 : 1);
