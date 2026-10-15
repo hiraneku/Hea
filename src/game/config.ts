@@ -27,16 +27,25 @@ export const BOSS = {
   extent: 2.05 * 1.45,
   hover: 2.05 * 1.45 + 0.7,
 } as const;
+/**
+ * Flight tuned against the first reference clip: a brisk 21 m/s cruise that answers the stick
+ * almost at once (the motor is a critically damped spring — `acceleration` is its frequency, so
+ * thrust reaches three quarters of the target in about 0.15 s), with a short glide when the
+ * stick is released rather than a dead stop.
+ */
 export const FLIGHT = {
-  speed: 14.5,
-  verticalSpeed: 10,
-  acceleration: 10.5,
-  braking: 7,
+  speed: 21,
+  verticalSpeed: 13,
+  acceleration: 19,
+  braking: 10,
   hoverHeight: 0.85,
-  dashSpeed: 48.5,
-  /** After a dash the flight motor runs this much faster, decaying over `boostDuration` s. */
-  boost: 0.65,
-  boostDuration: 1.5,
+  /** After a dash the motor runs this much faster: held for `boostHold` s, then eased out. */
+  boost: 0.6,
+  boostHold: 0.5,
+  boostDuration: 1.7,
+  /** How far the body leans into lateral and forward speed, in radians. */
+  bankRoll: 0.48,
+  bankPitch: 0.2,
 } as const;
 
 export const GROUND = { speed: 8.5, gravity: 25, jump: 9.6, airJump: 8.6 } as const;

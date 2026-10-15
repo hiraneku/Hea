@@ -60,7 +60,7 @@ app.innerHTML = `
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.12</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.13</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -77,7 +77,7 @@ app.innerHTML = `
       <div id="score-pop" aria-live="polite"></div>
       <div id="duel-announcement"><span>ONE ON ONE</span><strong>HADAPI <b>IGNIS.</b></strong><small>Aegis aktif otomatis. Baca pola serangannya.</small></div><div id="impact-caption" role="status"></div><div id="block-feedback">AEGIS / INTERSEPSI</div><div id="focus-badge">FOKUS BOSS</div>
       <div id="pointer-tip">KLIK ARENA UNTUK MEMBIDIK <span>·</span> ESC UNTUK JEDA</div>
-      <div class="desktop-hints"><div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>GERAK</span></div><div><kbd>SPACE / C</kbd><span>NAIK / TURUN</span><kbd>F</kbd><span>MODE</span><kbd>E</kbd><span>FOKUS BOSS</span></div><div class="hints-muted"><kbd>R</kbd><span>ULANGI</span><kbd>Q</kbd><span>GANTI SIHIR</span></div></div>
+      <div class="desktop-hints"><div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>GERAK</span></div><div><kbd>SPACE / C</kbd><span>NAIK / TURUN</span><kbd>F</kbd><span>MODE</span><kbd>E</kbd><span>FOKUS BOSS</span></div><div class="hints-muted"><kbd>V</kbd><span>SUDUT PANDANG</span><kbd>R</kbd><span>ULANGI</span><kbd>Q</kbd><span>GANTI SIHIR</span></div></div>
       <div class="spell-dock">
         <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span></div>
         <div class="spell-slots">${SPELLS.map((s, i) => `<button class="spell-slot ${i === 0 ? 'selected' : ''}" data-spell="${i}" style="--element:${s.color};--cooldown:0" aria-label="Pilih ${s.name} — ${s.subtitle}" aria-pressed="${i === 0}"><span class="slot-key">${i + 1}</span><span class="slot-icon">${spellIcons[i]}</span><span class="slot-name">${s.name}</span><span class="slot-cost">${s.cost}</span><span class="slot-cooldown"></span></button>`).join('')}</div>
@@ -94,6 +94,7 @@ app.innerHTML = `
         <button id="touch-dash" aria-label="Dash">${icons.dash}<small>DASH</small></button>
         <button id="touch-rise" aria-label="Tahan untuk terbang naik">${icons.jump}<small>NAIK</small></button><button id="touch-descend" aria-label="Tahan untuk terbang turun">${icons.jump}<small>TURUN</small></button>
         <button id="touch-focus" aria-label="Kunci pandangan ke boss" aria-pressed="false">${icons.target}<small>FOKUS</small></button>
+        <button id="touch-view" aria-label="Ganti sudut pandang kamera" aria-pressed="false">${icons.eye}<small>MATA</small></button>
       </div>
       <span class="look-label">GESER LAYAR UNTUK MELIHAT</span>
     </div>
@@ -221,6 +222,13 @@ function event(event: GameEvent) {
     $('#block-feedback').classList.add('visible');
     clearTimeout(blockTimer);
     blockTimer = setTimeout(() => $('#block-feedback').classList.remove('visible'), 450);
+  } else if (event.type === 'camera') {
+    // The in-game toggle (V / the MATA button) is a settings change like any other.
+    settings.camera = event.camera;
+    applySettings();
+    toast(
+      event.camera === 'first' ? 'SUDUT PANDANG: ORANG PERTAMA' : 'SUDUT PANDANG: ORANG KETIGA',
+    );
   } else if (event.type === 'lock')
     $('#pointer-tip').classList.toggle(
       'visible',
@@ -277,6 +285,7 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       <div class="settings-row slider-row"><div><label for="sensitivity">Sensitivitas kamera</label><b id="sensitivity-label">${settings.sensitivity.toFixed(1)}×</b></div><input id="sensitivity" type="range" min="0.3" max="2.5" step="0.1" value="${settings.sensitivity}" /></div>
       <div class="settings-row"><div><label for="sound-toggle">Audio</label><p>Efek suara sihir dan gerakan.</p></div><label class="switch"><input id="sound-toggle" type="checkbox" ${settings.sound ? 'checked' : ''} aria-label="Audio"/><span></span></label></div>
       <div class="settings-row slider-row"><div><label for="volume">Volume efek</label><b id="volume-label">${Math.round(settings.volume * 100)}%</b></div><input id="volume" type="range" min="0" max="1" step="0.05" value="${settings.volume}" /></div>
+      <div class="settings-row"><div><label for="camera-mode">Sudut pandang</label><p>Kamera pengejar di belakang tubuh,<br>atau dari mata avatar (<kbd>V</kbd> saat bermain).</p></div><select id="camera-mode"><option value="third" ${settings.camera === 'third' ? 'selected' : ''}>Orang ketiga</option><option value="first" ${settings.camera === 'first' ? 'selected' : ''}>Orang pertama</option></select></div>
       <div class="settings-row"><div><label for="comfort">Efek nyaman</label><p>Kurangi kilatan, goyangan kamera,<br>dan perubahan bidang pandang.</p></div><label class="switch"><input id="comfort" type="checkbox" ${settings.reducedEffects ? 'checked' : ''} aria-label="Efek nyaman"/><span></span></label></div>
       <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render.</p>
       <button class="primary-button full-width" id="panel-done"><span>SIMPAN & KEMBALI</span>${icons.arrow}</button>`;
@@ -343,6 +352,10 @@ function renderPanel(type: Exclude<typeof panel, null>) {
     };
     $<HTMLInputElement>('#comfort').onchange = (e) => {
       settings.reducedEffects = (e.target as HTMLInputElement).checked;
+      applySettings();
+    };
+    $<HTMLSelectElement>('#camera-mode').onchange = (e) => {
+      settings.camera = (e.target as HTMLSelectElement).value === 'first' ? 'first' : 'third';
       applySettings();
     };
   }
@@ -433,6 +446,9 @@ function updateHud(s: Snapshot) {
   $('#focus-badge').classList.toggle('visible', s.lockedOn && s.boss.alive);
   $('#touch-focus').classList.toggle('held', s.lockedOn);
   $('#touch-focus').setAttribute('aria-pressed', String(s.lockedOn));
+  $('#touch-view').classList.toggle('held', settings.camera === 'first');
+  $('#touch-view').setAttribute('aria-pressed', String(settings.camera === 'first'));
+  experience.classList.toggle('first-person', s.camera === 'first');
   $('#dash-value').textContent = s.dash >= 1 ? 'SIAP' : `${((1 - s.dash) * 1.65).toFixed(1)}s`;
   $('#dash-fill').style.transform = `scaleX(${s.dash})`;
   $('#dash-value').classList.toggle('not-ready', s.dash < 1);
@@ -443,7 +459,7 @@ function updateHud(s: Snapshot) {
   $('#menu-fps').textContent = String(s.fps);
   $('#speed-lines').classList.toggle(
     'active',
-    (s.flight.speed > 23 || s.launched) && s.mode === 'playing' && !settings.reducedEffects,
+    (s.flight.speed > 25.5 || s.launched) && s.mode === 'playing' && !settings.reducedEffects,
   );
   document.querySelectorAll<HTMLElement>('.spell-slot').forEach((button, i) => {
     button.classList.toggle('selected', i === s.spell);

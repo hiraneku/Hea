@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import type { Snapshot } from '../../src/game/types';
 import type { Game } from '../../src/game/Game';
 import { ATTACKS, DUEL } from '../../src/game/combat';
-import { ARENA } from '../../src/game/config';
+import { ARENA, FLIGHT } from '../../src/game/config';
 import { beside } from '../../src/game/layout';
 
 declare global {
@@ -126,6 +126,7 @@ test('mobile: simultaneous movement and casting, camera focus, landscape and res
     '#touch-rise',
     '#touch-descend',
     '#touch-focus',
+    '#touch-view',
     '#shield-toggle',
     '#flight-toggle',
   ]) {
@@ -533,9 +534,19 @@ test('dash speed has a smooth boost tail, and shield patches cover separate near
   expect(d.dashMotion.strength).toBeLessThan(0.2);
   expect(d.dashMotion.invulnerable).toBe(false);
   await step(page, 0.1);
-  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).dashMotion.active).toBe(
-    false,
-  );
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.dashMotion.active).toBe(false);
+  // No afterimages any more; the burst leaves the motor running hot instead: holding the
+  // stick right after it, flight is markedly faster than cruise, then eases back to it.
+  expect(d.particles.afterimages).toBe(0);
+  expect(d.dashMotion.boost).toBeGreaterThan(FLIGHT.boostDuration - 0.2);
+  await page.keyboard.down('KeyW');
+  await step(page, 0.4);
+  expect((await state(page)).flight.speed).toBeGreaterThan(FLIGHT.speed * 1.3);
+  await step(page, FLIGHT.boostDuration);
+  expect((await state(page)).flight.speed).toBeLessThan(FLIGHT.speed + 0.5);
+  expect((await state(page)).flight.speed).toBeGreaterThan(FLIGHT.speed - 1);
+  await page.keyboard.up('KeyW');
   await scenario(page, 'shield-scatter');
   await step(page, 0.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
@@ -783,6 +794,56 @@ test('walk mode restores gravity, double jump and landing; toggles also work on 
   await step(page, 1);
   expect((await state(page)).flight.enabled).toBe(false);
   expect((await state(page)).position.y).toBeCloseTo(0, 1);
+});
+
+test('first person: V moves the camera into the eyes, hides the body, and hands back to the chase camera when thrown', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page, false);
+  await scenario(page, 'flight');
+  await step(page, 0.5);
+  const distance = async () => {
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    const [cx, cy, cz] = d.cameraPosition,
+      [px, py, pz] = d.playerPosition;
+    return { gap: Math.hypot(cx - px, cy - py, cz - pz), avatar: d.avatarVisible, fov: d.fov };
+  };
+  expect((await state(page)).camera).toBe('third');
+  const chase = await distance();
+  expect(chase.gap).toBeGreaterThan(4);
+  expect(chase.avatar).toBe(true);
+  await page.keyboard.press('KeyV');
+  await step(page, 0.1);
+  expect((await state(page)).camera).toBe('first');
+  const eyes = await distance();
+  // The eye line sits 1.36 m above the physics root (the top of the 1.3 m body).
+  expect(eyes.gap).toBeLessThan(1.6);
+  expect(eyes.gap).toBeGreaterThan(1.1);
+  expect(eyes.avatar).toBe(false);
+  expect(eyes.fov).toBeGreaterThan(chase.fov + 4);
+  // Flying forward keeps the eyes with the body.
+  await page.keyboard.down('KeyW');
+  await step(page, 1);
+  await page.keyboard.up('KeyW');
+  expect((await distance()).gap).toBeLessThan(1.6);
+  // A heavy hit throws the body as a ragdoll: the view steps back behind it until it stands.
+  await scenario(page, 'ragdoll');
+  await step(page, 0.6);
+  expect((await state(page)).camera).toBe('third');
+  expect((await distance()).avatar).toBe(true);
+  await step(page, 9);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).ragdoll.player).toBe(
+    false,
+  );
+  expect((await state(page)).camera).toBe('first');
+  // The choice is remembered like any other setting.
+  expect(
+    JSON.parse((await page.evaluate(() => localStorage.getItem('hea-settings')))!).camera,
+  ).toBe('first');
+  await page.keyboard.press('KeyV');
+  await step(page, 0.1);
+  expect((await state(page)).camera).toBe('third');
 });
 
 test('solar sphere bores thin slabs, continues into player/ground, but thick walls stop it', async ({

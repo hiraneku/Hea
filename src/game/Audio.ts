@@ -304,4 +304,16 @@ export class AudioEngine {
   click() {
     this.tone(620, 420, 0.04, 0.12);
   }
+  /**
+   * The impact frame's two beats: a dry, sharp click as the picture cuts to paper, and a
+   * short sub-bass thump under the negative frame.
+   */
+  impactPaper() {
+    this.tone(3200, 1200, 0.018, 0.22, 'square');
+    this.air(0.03, 6500, 0.25);
+  }
+  impactNegative() {
+    this.tone(48, 28, 0.2, 0.55, 'sine');
+    this.tone(96, 40, 0.09, 0.18, 'triangle');
+  }
 }

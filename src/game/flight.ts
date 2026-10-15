@@ -26,6 +26,16 @@ export function smoothFlight(velocity: Vector3, target: Vector3, dt: number): Ve
   const rate = target.lengthSq() > 0.01 ? FLIGHT.acceleration : FLIGHT.braking;
   return velocity.clone().lerp(target, 1 - Math.exp(-Math.max(0, dt) * rate));
 }
+/**
+ * Speed multiplier the motor keeps after a dash: full boost while `remaining` is still inside
+ * the hold, then a smooth ease back to 1 over the rest of `FLIGHT.boostDuration`.
+ */
+export function dashBoost(remaining: number): number {
+  if (remaining <= 0) return 1;
+  const tail = FLIGHT.boostDuration - FLIGHT.boostHold;
+  const k = Math.min(1, remaining / tail);
+  return 1 + FLIGHT.boost * k * k * (3 - 2 * k);
+}
 
 /** Jerk-soft flight motor. Acceleration persists across starts, stops and reversals. */
 export function advanceFlight(

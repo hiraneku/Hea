@@ -1275,9 +1275,18 @@ export class Effects {
    * erodes away, so it turns into a torn ring with pale blue-grey radial creases and jagged
    * spikes around the rim, and is gone before the dash ends.
    */
-  dashRing(at: THREE.Vector3, direction: THREE.Vector3, scale = 1) {
+  /**
+   * `flat` lays the disc on a surface instead of hanging it across the path (used when the
+   * take-off point is too close to the ground for a vertical disc to clear it).
+   */
+  dashRing(at: THREE.Vector3, direction: THREE.Vector3, scale = 1, flat = false) {
     const material = new THREE.ShaderMaterial({
-      uniforms: { uPhase: { value: 0 }, uSeed: { value: Math.random() * 100 } },
+      uniforms: {
+        uPhase: { value: 0 },
+        uSeed: { value: Math.random() * 100 },
+        // A ring lying on the ground is seen at a grazing angle, so its rim is kept broader.
+        uThick: { value: flat ? 0.17 : 0.06 },
+      },
       vertexShader: `varying vec2 vUv;
         void main() {
           vUv = uv;
@@ -1285,6 +1294,7 @@ export class Effects {
         }`,
       fragmentShader: `uniform float uPhase;
         uniform float uSeed;
+        uniform float uThick;
         varying vec2 vUv;
         float hash(float n) { return fract(sin(n * 127.1 + uSeed) * 43758.5453); }
         // Angular noise with a number of jagged steps around the circle, smoothed a little.
@@ -1301,7 +1311,7 @@ export class Effects {
           // The rim: a few broad lobes plus fine tears, growing more ragged as it spreads.
           float lobes = banded(angle, 7.0, 1.0), tears = banded(angle, 41.0, 2.0);
           float rim = 0.78 + 0.1 * lobes + (0.04 + 0.1 * uPhase) * tears;
-          float body = smoothstep(rim, rim - 0.06, r);
+          float body = smoothstep(rim, rim - uThick, r);
           // Radial spikes shooting past the rim.
           float spikeMask = step(0.9, banded(angle, 23.0, 3.0));
           float spikes = spikeMask * smoothstep(rim + 0.22 + 0.12 * uPhase, rim - 0.02, r) * step(rim - 0.05, r);
@@ -1321,16 +1331,22 @@ export class Effects {
       side: THREE.DoubleSide,
       toneMapped: false,
     });
+    if (flat) {
+      material.depthWrite = false;
+      material.polygonOffset = true;
+      material.polygonOffsetFactor = -2;
+      material.polygonOffsetUnits = -2;
+    }
     const ring = new THREE.Mesh(this.dashRingGeometry, material);
     ring.position.copy(at);
     ring.lookAt(at.clone().add(direction));
     ring.scale.setScalar(2.2 * scale);
     ring.userData.kind = 'dash-ring';
     ring.userData.keepGeometry = true;
-    this.add(ring, 0.2, 0, 0);
+    this.add(ring, flat ? 0.3 : 0.2, 0, 0);
     const effect = this.timed[this.timed.length - 1];
     effect.animate = (e, progress) => {
-      material.uniforms.uPhase.value = progress;
+      material.uniforms.uPhase.value = flat ? Math.pow(progress, 1.3) : progress;
       const grow = 1 - Math.pow(1 - progress, 2.2);
       e.object.scale.setScalar((2.2 + 2.3 * grow) * scale);
     };

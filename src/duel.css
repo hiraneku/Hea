@@ -494,6 +494,19 @@
   right: 1px;
   top: -66px;
 }
+/* The camera-view toggle: a smaller, secondary button up beside the rise control. */
+.touch-actions #touch-view {
+  left: 17px;
+  top: -48px;
+  width: 44px;
+  height: 44px;
+  color: #d6e7ff;
+  border-color: #c9d9f066;
+}
+.touch-actions #touch-view svg {
+  width: 17px;
+  height: 17px;
+}
 .touch-actions #touch-descend svg {
   transform: rotate(180deg);
 }

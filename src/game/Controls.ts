@@ -4,6 +4,8 @@ export class Controls {
   shooting = false;
   shotRequested = false;
   focusRequested = false;
+  /** V (or the touch button) asks for the other camera view. */
+  viewRequested = false;
   shieldRequested = false;
   flightRequested = false;
   jumpRequested = false;
@@ -97,6 +99,7 @@ export class Controls {
     this.keys.clear();
     this.shieldRequested = this.flightRequested = this.jumpRequested = false;
     this.shooting = this.shotRequested = this.focusRequested = this.mouseDown = false;
+    this.viewRequested = false;
     this.riseHeld = this.descendHeld = this.dashRequested = false;
     document
       .querySelectorAll('#touch-controls button.held')
@@ -174,6 +177,7 @@ export class Controls {
     }
     if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.dashRequested = true;
     if (e.code === 'KeyE') this.focusRequested = true;
+    if (e.code === 'KeyV') this.viewRequested = true;
     if (e.code === 'KeyG') this.shieldRequested = true;
     if (e.code === 'KeyF') this.flightRequested = true;
     if (e.code === 'Space') this.jumpRequested = true;
@@ -272,6 +276,11 @@ export class Controls {
       if (!this.enabled) return;
       e.preventDefault();
       this.focusRequested = true;
+    });
+    document.querySelector('#touch-view')!.addEventListener('pointerdown', (e) => {
+      if (!this.enabled) return;
+      e.preventDefault();
+      this.viewRequested = true;
     });
     hold('#touch-rise', (value) => {
       this.riseHeld = value;

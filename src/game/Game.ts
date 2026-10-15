@@ -47,10 +47,11 @@ import {
   type Settings,
   type Snapshot,
   type SpellId,
+  type CameraMode,
 } from './types';
 
 import { ARENA, BOSS, FLIGHT, GROUND, HEAVY } from './config';
-import { flightWish, advanceFlight } from './flight';
+import { flightWish, advanceFlight, dashBoost } from './flight';
 import { Ragdoll, type RagdollSurface } from './Ragdoll';
 import type { FiringLane } from './AttackSight';
 import {
@@ -146,6 +147,9 @@ export class Game {
     [];
   private flightAcceleration = new THREE.Vector3();
   private cameraSpringVelocity = new THREE.Vector3();
+  private cameraWasFirst = false;
+  private headBob = 0;
+  private castKick = 0;
   private playerTumble = new BodyTumble(true);
   private ragdoll: Ragdoll;
   private ragdollSurface: RagdollSurface;
@@ -196,7 +200,6 @@ export class Game {
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
   private dashBuffer = 0;
-  private ghostClock = 0;
   private perfectDodges = 0;
   private dashTime = 0;
   private knockTime = 0;
@@ -386,6 +389,13 @@ export class Game {
       /* Storage is optional. */
     }
     this.applySettings(settings);
+    // The impact frame's two beats each get a sound: a dry click on the paper cut and a
+    // sub-bass thump under the negative.
+    this.impactFrame.onBeat = (beat) => {
+      if (this.mode === 'menu') return;
+      if (beat === 0) this.audio.impactPaper();
+      else this.audio.impactNegative();
+    };
     this.resetDuel();
     this.showcaseCamera(0);
     window.addEventListener('resize', this.resizeListener);
@@ -479,6 +489,7 @@ export class Game {
                     : 'hover',
       },
       lockedOn: this.lockedOn,
+      camera: this.cameraMode,
       fps: this.fps,
       elapsed: this.elapsed,
       bestTime: this.bestTime,
@@ -495,6 +506,8 @@ export class Game {
       geometries: this.renderer.info.memory.geometries,
       textures: this.renderer.info.memory.textures,
       camera: { yaw: this.yaw, pitch: this.pitch },
+      cameraPosition: this.camera.position.toArray(),
+      avatarVisible: this.avatar.visible,
       facing: this.facing.toArray(),
       health: this.health,
       hitPause: this.hitPause.remaining,
@@ -888,6 +901,10 @@ export class Game {
       this.controls.focusRequested = false;
       this.lockedOn = !this.lockedOn;
     }
+    if (this.controls.viewRequested) {
+      this.controls.viewRequested = false;
+      if (!this.outcome) this.toggleCamera();
+    }
     const look = this.controls.look();
     if (Math.abs(look.x) + Math.abs(look.y) > 2) this.lockedOn = false;
     this.yaw -= look.x * this.settings.sensitivity * 0.0021;
@@ -908,13 +925,11 @@ export class Game {
       this.flightEnabled ? this.pitch : 0,
     );
     if (!this.flightEnabled) wish.multiplyScalar(GROUND.speed / FLIGHT.speed);
-    // The dash leaves the flight motor running hot for a moment: a glide that is noticeably
-    // faster right after the burst and settles back over a second and a half.
-    this.flightBoost = Math.max(0, this.flightBoost - dt);
-    if (this.flightEnabled && this.flightBoost > 0) {
-      const k = this.flightBoost / FLIGHT.boostDuration;
-      wish.multiplyScalar(1 + FLIGHT.boost * k * k * (3 - 2 * k));
-    }
+    // The dash leaves the motor running hot: once the burst itself is over, movement stays
+    // markedly faster for half a second and then eases back over the next second, in the air
+    // and on foot alike. The clock only runs after the burst so the plateau is felt in full.
+    if (!this.airDash.active) this.flightBoost = Math.max(0, this.flightBoost - dt);
+    if (this.flightBoost > 0) wish.multiplyScalar(dashBoost(this.flightBoost));
     if (showcase) {
       const target = new THREE.Vector3(
         Math.sin(this.time * 0.46) * 11,
@@ -983,37 +998,22 @@ export class Game {
         const dashAim = wish.lengthSq() > 0.01 ? wish.clone() : this.facing.clone();
         if (!this.flightEnabled) dashAim.y = 0;
         this.airDash.start(dashAim.normalize());
-        this.ghostClock = 0;
         this.knockTime = Math.min(this.knockTime, 0.55);
-        if (this.flightEnabled) this.flightBoost = FLIGHT.boostDuration;
+        this.flightBoost = FLIGHT.boostDuration;
         this.audio.dash();
         const chest = this.player.clone().add(UP);
         this.fx.burst(chest, '#effaff', 22, 3.6, 0.26, 2);
         // The launch disc: a flat white circle left hanging at the take-off point, facing the
-        // way the body goes, that tears open into a jagged ring as the body leaves it.
-        this.fx.dashRing(chest, this.airDash.direction);
+        // way the body goes, that tears open into a jagged ring as the body leaves it. Close
+        // to the ground the disc would cut through the floor, so it lies on the surface instead.
+        this.launchDisc(chest, this.airDash.direction, floor, 1);
         if (!this.flightEnabled) this.fx.dust(this.player, 8, 1.4);
       }
     }
     this.airDash.step(dt, wish);
     this.dashTime = this.airDash.active ? AirDash.duration - this.airDash.age : 0;
-    if (this.airDash.active && !this.settings.reducedEffects) {
-      // Afterimages of the body peel off along the dash, with a few streaks pulled past it.
-      this.ghostClock -= dt;
-      if (this.airDash.strength > 0.3 && this.ghostClock <= 0) {
-        this.ghostClock = 0.032;
-        this.fx.afterimage(this.avatar);
-        this.fx.burst(
-          this.player.clone().add(UP).addScaledVector(this.airDash.direction, -0.4),
-          '#dff6ff',
-          3,
-          0.6,
-          0.18,
-          0.9,
-          this.airDash.direction.clone().multiplyScalar(-9),
-        );
-      }
-    }
+    // No afterimages: the dash is read from the torn disc, the thickened ribbon and the
+    // speed itself.
     advanceFlight(this.velocity, this.flightAcceleration, wish, dt);
     const motor = this.velocity.clone().add(this.airDash.velocity);
     if (!this.flightEnabled && !physical) motor.y = this.verticalVelocity;
@@ -1056,12 +1056,19 @@ export class Game {
     }
     if (dragging && this.mode !== 'menu')
       this.audio.scrape('player', Math.hypot(this.impulse.x + motor.x, this.impulse.z + motor.z));
+    // The chase camera banks with lateral speed (about six degrees at full strafe), so the
+    // horizon tilts through turns the way it does in the reference footage.
+    const lateral = this.velocity.dot(
+      new THREE.Vector3(1, 0, 0).applyQuaternion(this.facingQuaternion),
+    );
     this.roll = damp(
       this.roll,
       this.settings.reducedEffects
         ? 0
-        : -move.x * 0.035 + (this.knockTime > 0 ? Math.sin(this.time * 8) * 0.055 : 0),
-      7,
+        : clamp(-lateral / FLIGHT.speed, -1, 1) * (this.flightEnabled ? 0.11 : 0.04) -
+            move.x * 0.012 +
+            (this.knockTime > 0 ? Math.sin(this.time * 8) * 0.055 : 0),
+      6,
       dt,
     );
     if (!showcase) {
@@ -1223,6 +1230,25 @@ export class Game {
    * Chase camera. `realDt` > 0 with `dt` = 0 runs only the wall-clock parts (the heavy-hit
    * zoom punch and its shake) while the simulation itself is frozen or slowed.
    */
+  /** Flip between the chase camera and the first-person view; the shell persists it. */
+  toggleCamera() {
+    const camera: CameraMode = this.settings.camera === 'first' ? 'third' : 'first';
+    this.settings = { ...this.settings, camera };
+    this.emit({ type: 'camera', camera });
+  }
+  /**
+   * The view in use right now. First person is a setting, but the camera steps back out to the
+   * chase framing while the body is thrown about as a ragdoll, and returns once it stands.
+   */
+  get cameraMode(): CameraMode {
+    return this.settings.camera === 'first' &&
+      !this.playerTumble.physical &&
+      this.playerTumble.weight < 0.02 &&
+      !this.ragdoll.active &&
+      this.outcome !== 'gameover'
+      ? 'first'
+      : 'third';
+  }
   private updateCamera(dt: number, snap = false, realDt = 0) {
     if (dt <= 0 && !snap) {
       this.applyPunch(realDt);
@@ -1233,59 +1259,105 @@ export class Game {
     );
     const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(quaternion),
       right = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion);
+    const first = this.cameraMode === 'first';
     const pivot = this.player.clone().add(new THREE.Vector3(0, 1.25, 0));
-    const desired = pivot
-      .clone()
-      .addScaledVector(forward, -6.4)
-      .addScaledVector(right, 0.65)
-      .addScaledVector(UP, 0.95);
-    const wall = this.trace(pivot, desired, false);
-    if (wall) desired.lerpVectors(pivot, desired, Math.max(0.1, wall.t - 0.06));
-    if (snap) {
+    let desired: THREE.Vector3;
+    if (first) {
+      // From the eyes: the head rides the body's lean a little, bobs on foot, and sits at the
+      // avatar's eye line in either movement mode.
+      const grounded = !this.flightEnabled;
+      const stride = grounded ? Math.min(1, this.velocity.length() / GROUND.speed) : 0;
+      this.headBob += dt * (6 + stride * 8);
+      const bob = grounded
+        ? Math.sin(this.headBob) * 0.028 * stride
+        : Math.sin(this.time * 2.2) *
+          0.02 *
+          (1 - Math.min(1, this.velocity.length() / FLIGHT.speed));
+      desired = this.player
+        .clone()
+        .addScaledVector(UP, (this.flightEnabled ? 1.36 : 1.18) + bob)
+        .addScaledVector(right, -this.bank.z * 0.12)
+        .addScaledVector(forward, 0.12);
+    } else {
+      // The chase spring is loose, so the camera is fed the body's velocity to cancel most of
+      // the steady-state lag: cruising keeps the avatar close while every change of heading
+      // still swings it across the frame before the camera settles behind it again.
+      const motion = this.velocity.clone().add(this.airDash.velocity);
+      desired = pivot
+        .clone()
+        .addScaledVector(forward, -6.2)
+        .addScaledVector(right, 0.65)
+        .addScaledVector(UP, 0.95)
+        .addScaledVector(motion, 0.075);
+      const wall = this.trace(pivot, desired, false);
+      if (wall) desired.lerpVectors(pivot, desired, Math.max(0.1, wall.t - 0.06));
+    }
+    if (snap || first !== this.cameraWasFirst) {
+      // A view change (or a reset) cuts rather than flies the camera through the body.
       this.camera.position.copy(desired);
       this.cameraSpringVelocity.set(0, 0, 0);
-    } else
+      this.cameraWasFirst = first;
+    } else if (first) {
+      // The eye follows the body tightly; only a whisper of lag so launches still read.
+      springVector(this.camera.position, this.cameraSpringVelocity, desired, 60, dt);
+    } else {
+      // A looser chase follow than before: the body drifts across the frame through turns and
+      // the camera settles behind it, instead of being bolted to the avatar.
       springVector(
         this.camera.position,
         this.cameraSpringVelocity,
         desired,
-        this.knockTime > 0 ? 18 : 23,
+        this.knockTime > 0 ? 14 : 18,
         dt,
       );
-    // Keep a backwards launch from pushing the avatar through the chase camera.
-    const behind = this.camera.position.clone().sub(pivot).dot(forward.clone().negate());
-    if (behind < 3.8) {
-      this.camera.position.addScaledVector(forward, behind - 3.8);
-      this.cameraSpringVelocity.copy(this.velocity).add(this.impulse).add(this.airDash.velocity);
-    }
-    const obstruction = this.trace(pivot, this.camera.position, false, 0.12);
-    if (obstruction) {
-      this.camera.position.lerpVectors(
-        pivot,
-        this.camera.position,
-        Math.max(0.08, obstruction.t - 0.03),
-      );
-      this.cameraSpringVelocity.multiplyScalar(0.2);
+      // ...but never so loose that the avatar leaves the frame: cap the lateral drift.
+      const offset = this.camera.position.clone().sub(desired),
+        side = offset.dot(right),
+        limit = 2.2;
+      if (Math.abs(side) > limit)
+        this.camera.position.addScaledVector(right, Math.sign(side) * limit - side);
+      // Keep a backwards launch from pushing the avatar through the chase camera.
+      const behind = this.camera.position.clone().sub(pivot).dot(forward.clone().negate());
+      if (behind < 3.8) {
+        this.camera.position.addScaledVector(forward, behind - 3.8);
+        this.cameraSpringVelocity.copy(this.velocity).add(this.impulse).add(this.airDash.velocity);
+      }
+      const obstruction = this.trace(pivot, this.camera.position, false, 0.12);
+      if (obstruction) {
+        this.camera.position.lerpVectors(
+          pivot,
+          this.camera.position,
+          Math.max(0.08, obstruction.t - 0.03),
+        );
+        this.cameraSpringVelocity.multiplyScalar(0.2);
+      }
     }
     this.shake = damp(this.shake, 0, 11, dt);
     const shake = this.settings.reducedEffects ? 0 : this.shake;
+    // A cast nudges the first-person view up by a fraction of a degree and settles back.
+    this.castKick = damp(this.castKick, 0, 14, dt);
+    const kick = first && !this.settings.reducedEffects ? this.castKick * 0.012 : 0;
     const targetRotation = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(
-        this.pitch + Math.sin(this.time * 49) * shake * 0.4,
+        this.pitch + Math.sin(this.time * 49) * shake * 0.4 + kick,
         this.yaw + Math.sin(this.time * 37 + 1.3) * shake * 0.4,
-        this.roll,
+        first ? this.roll * 0.55 : this.roll,
         'YXZ',
       ),
     );
-    if (snap) this.camera.quaternion.copy(targetRotation);
-    else this.camera.quaternion.slerp(targetRotation, 1 - Math.exp(-dt * 22));
+    if (snap || first !== this.cameraWasFirst) this.camera.quaternion.copy(targetRotation);
+    else this.camera.quaternion.slerp(targetRotation, 1 - Math.exp(-dt * (first ? 40 : 22)));
     const speed = this.velocity.clone().add(this.impulse).add(this.airDash.velocity).length();
-    // Speed widens the view; a dash kicks it wider still for its first instants.
+    // Speed widens the view; a dash kicks it wider still for its first instants. The
+    // first-person view starts wider, as eyes do.
+    const base = first ? 82 : 74;
     this.fovBase = damp(
       this.fovBase,
       this.settings.reducedEffects
-        ? 74
-        : 74 + clamp((speed - 14) * 0.25, 0, 11) + this.airDash.strength * 7,
+        ? base
+        : base +
+            clamp((speed - FLIGHT.speed * 0.65) * 0.28, 0, 11) +
+            this.airDash.strength * (first ? 9 : 7),
       this.airDash.active ? 16 : 8,
       dt,
     );
@@ -1350,28 +1422,41 @@ export class Game {
   private presentActors(dt: number) {
     this.avatar.position.copy(this.player);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.facingQuaternion);
+    // The body leans into its motion like a flyer, not a box on rails: a deep roll into
+    // lateral speed (with a touch of anticipation from the acceleration) and a nose-down
+    // pitch with forward speed, both eased so the pose flows through turns.
+    const lean = this.flightEnabled ? 1 : 0.35;
     this.bank.z = damp(
       this.bank.z,
       clamp(
-        (-this.velocity.dot(right) / FLIGHT.speed) * 0.24 -
-          this.flightAcceleration.dot(right) * 0.0015,
-        -0.32,
-        0.32,
+        ((-this.velocity.dot(right) / FLIGHT.speed) * FLIGHT.bankRoll -
+          this.flightAcceleration.dot(right) * 0.004) *
+          lean,
+        -FLIGHT.bankRoll,
+        FLIGHT.bankRoll,
       ),
-      8,
+      9,
       dt,
     );
     this.bank.x = damp(
       this.bank.x,
-      (this.velocity.dot(this.facing) / FLIGHT.speed) * 0.09 + this.airDash.strength * 0.13,
-      8,
+      clamp(
+        (this.velocity.dot(this.facing) / FLIGHT.speed) * FLIGHT.bankPitch * lean +
+          this.airDash.strength * 0.13,
+        -FLIGHT.bankPitch,
+        FLIGHT.bankPitch + 0.13,
+      ),
+      9,
       dt,
     );
     const pose = this.facingQuaternion
       .clone()
       .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.bank.x, 0, this.bank.z)));
     this.avatar.quaternion.copy(this.playerTumble.step(dt, pose));
-    const restingPivot = this.flightEnabled ? 0.85 : 0.66;
+    // A slow hover bob while flying gently, fading out with speed.
+    const cruise = Math.min(1, this.velocity.length() / FLIGHT.speed);
+    const bob = this.flightEnabled ? Math.sin(this.time * 2.2) * 0.05 * (1 - cruise) : 0;
+    const restingPivot = (this.flightEnabled ? 0.85 : 0.66) + bob;
     this.avatar.position.y +=
       restingPivot * (1 - this.playerTumble.weight) +
       (supportHeight(this.avatar.quaternion, new THREE.Vector3(0.325, 0.65, 0.325)) + 0.025) *
@@ -1390,7 +1475,10 @@ export class Game {
       );
       if (!this.playerTumble.active) this.ragdoll.finish();
     }
-    this.avatar.visible = !this.ragdoll.active;
+    const first = this.cameraMode === 'first';
+    this.avatar.visible = !this.ragdoll.active && !first;
+    // From the eyes the ribbon would only ever smear across the lower edge of the view.
+    this.playerTrail.mesh.visible = !first;
     // A body dragged along the ground leaves a furrow, not a light trail.
     if (this.playerTumble.physical && this.playerTumble.grounded)
       this.playerTrail.reset(this.avatar.position);
@@ -1426,8 +1514,26 @@ export class Game {
     away.y = 0;
     if (away.lengthSq() < 1e-4 || away.length() > 44) return;
     away.normalize();
-    this.fx.dashRing(b.position.clone().addScaledVector(away, -1.2), away, BOSS.scale * 0.95);
+    this.launchDisc(
+      b.position.clone().addScaledVector(away, -1.2),
+      away,
+      this.world.surfaceHeight(b.position.x, b.position.z),
+      BOSS.scale * 0.95,
+    );
     this.fx.burst(b.position, '#ffd2a8', 10, 4, 0.3, 0.9);
+  }
+  /**
+   * The take-off disc. In the air it hangs across the path, raised just enough that its
+   * opening radius clears the ground; a body too close to the floor for that (a dash on
+   * foot) leaves a ring on the ground instead of a disc cut in half by it.
+   */
+  private launchDisc(at: THREE.Vector3, direction: THREE.Vector3, floor: number, scale: number) {
+    const radius = 2.2 * scale;
+    if (at.y - floor >= 1.5 * scale) {
+      const lifted = at.clone();
+      lifted.y = Math.max(at.y, floor + radius + 0.1);
+      this.fx.dashRing(lifted, direction, scale);
+    } else this.fx.dashRing(new THREE.Vector3(at.x, floor + 0.07, at.z), UP, scale * 0.85, true);
   }
   private updateBoss(dt: number) {
     const b = this.boss;
@@ -1485,6 +1591,9 @@ export class Game {
     motor.clampLength(0, b.tactics.retreating ? BOSS_MOTOR.retreat : BOSS_MOTOR.max);
     motor.multiplyScalar(0.035 + recovery * 0.965);
     b.impulse.y -= (b.tumble.physical ? HEAVY.gravity : 14 * (1 - recovery)) * dt;
+    // The motor's exponential smoothing (time constant ~0.19 s) already rounds waypoint
+    // changes off; the banked, slerped presentation in Boss.present() does the rest, so the
+    // navigation itself is left exactly as tuned.
     b.velocity.lerp(motor, 1 - Math.exp(-dt * 5.2));
     const extent =
         BOSS.extent * (1 - b.tumble.weight) +
@@ -1901,6 +2010,12 @@ export class Game {
     const hasTarget = this.aimsAtBoss(direction);
     const distantAim = this.camera.position.clone().addScaledVector(direction, 60);
     const origin = this.player.clone().add(new THREE.Vector3(0, 1.12, 0));
+    if (this.cameraMode === 'first') {
+      // From the eyes the spell leaves the casting hand: low and to the right of the view.
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+      origin.addScaledVector(right, 0.34).addScaledVector(UP, -0.12);
+      this.castKick = 1;
+    }
     const aim = hasTarget ? this.boss.position.clone() : distantAim;
     direction.copy(aim).sub(origin).normalize();
     origin.addScaledVector(direction, 0.6);
@@ -2310,7 +2425,7 @@ export class Game {
     // Heavy contact: a short zoom punch released through the slow-motion tail, and the
     // two-tone impact frame cut around the point of contact.
     if (slow > 0 && !this.settings.reducedEffects) this.punch = 1;
-    if (slow > 0) this.impactCut(at);
+    if (slow > 0) this.impactCut(at, incoming);
     this.contacts++;
     this.emit({ type: 'contact', actor });
   }
@@ -2469,13 +2584,16 @@ export class Game {
     this.hitPause.request(0.035);
     // Impact frames are caused by heavy contact and by world collisions, never by ordinary
     // spell casts; the caption follows the collision.
-    if (this.impactCut(at)) this.emit({ type: 'impact', surface, actor, strength });
+    if (this.impactCut(at, velocity)) this.emit({ type: 'impact', surface, actor, strength });
   }
-  /** The graphic cut, rate-limited so a hit and the crash that follows do not strobe. */
-  private impactCut(at: THREE.Vector3) {
+  /**
+   * The graphic cut, rate-limited so a hit and the crash that follows do not strobe. The
+   * burst leans the way the body is thrown (`along`: the incoming hit or the crash velocity).
+   */
+  private impactCut(at: THREE.Vector3, along?: THREE.Vector3) {
     if (this.flashTimer > 0 || this.mode === 'menu') return false;
     this.flashTimer = DUEL.impactInterval;
-    this.impactFrame.trigger(at, this.settings.reducedEffects);
+    this.impactFrame.trigger(at, this.settings.reducedEffects, along);
     return true;
   }
 

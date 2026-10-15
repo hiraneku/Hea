@@ -1,5 +1,6 @@
 export type Mode = 'menu' | 'playing' | 'paused' | 'demo' | 'gameover' | 'victory';
 export type Quality = 'auto' | 'low' | 'high';
+export type CameraMode = 'third' | 'first';
 export type SpellId = 0 | 1 | 2;
 
 export interface Settings {
@@ -8,6 +9,8 @@ export interface Settings {
   sensitivity: number;
   quality: Quality;
   reducedEffects: boolean;
+  /** Chase camera or a first-person view from the avatar's eyes (V toggles it in play). */
+  camera: CameraMode;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -16,6 +19,7 @@ export const DEFAULT_SETTINGS: Settings = {
   sensitivity: 1,
   quality: 'auto',
   reducedEffects: false,
+  camera: 'third',
 };
 
 export const SPELLS = [
@@ -76,6 +80,8 @@ export interface Snapshot {
       | 'falling';
   };
   lockedOn: boolean;
+  /** The view in use right now: first person hands back to the chase camera while thrown. */
+  camera: CameraMode;
   fps: number;
   elapsed: number;
   bestTime: number;
@@ -93,7 +99,8 @@ export type GameEvent =
   | { type: 'block'; direction: { x: number; y: number; z: number } }
   | { type: 'toast'; text: string }
   | { type: 'dodge' }
-  | { type: 'lock'; locked: boolean };
+  | { type: 'lock'; locked: boolean }
+  | { type: 'camera'; camera: CameraMode };
 
 export function readSettings(): Settings {
   const fallback = {
@@ -112,6 +119,7 @@ export function readSettings(): Settings {
         ? Math.max(0.3, Math.min(2.5, raw.sensitivity))
         : fallback.sensitivity,
       quality: ['auto', 'low', 'high'].includes(raw.quality) ? raw.quality : fallback.quality,
+      camera: raw.camera === 'first' ? 'first' : fallback.camera,
     };
   } catch {
     return fallback;

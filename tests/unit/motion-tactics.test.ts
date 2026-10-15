@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Quaternion, Vector3 } from 'three';
+import { FLIGHT } from '../../src/game/config';
 import {
   AirDash,
   BodyTumble,
@@ -7,7 +8,7 @@ import {
   recoveryBlend,
   springVector,
 } from '../../src/game/motion';
-import { advanceFlight } from '../../src/game/flight';
+import { advanceFlight, dashBoost } from '../../src/game/flight';
 import {
   BOSS_MOTOR,
   BossTactics,
@@ -25,13 +26,13 @@ import {
 } from '../../src/game/combat';
 
 describe('continuous flight and dash', () => {
-  it('starts gently, carries acceleration through reversal, then settles into hover', () => {
+  it('starts without a jolt, carries acceleration through reversal, then settles into hover', () => {
     const v = new Vector3(),
       acceleration = new Vector3(),
-      goal = new Vector3(14.5, 0, 0);
+      goal = new Vector3(FLIGHT.speed, 0, 0);
     advanceFlight(v, acceleration, goal, 1 / 120);
     expect(v.x).toBeGreaterThan(0);
-    expect(v.x).toBeLessThan(0.1);
+    expect(v.x).toBeLessThan(0.3);
     for (let i = 0; i < 60; i++) advanceFlight(v, acceleration, goal, 1 / 120);
     const before = v.clone();
     advanceFlight(v, acceleration, goal.clone().negate(), 1 / 120);
@@ -39,6 +40,28 @@ describe('continuous flight and dash', () => {
     expect(v.x).toBeGreaterThan(0);
     for (let i = 0; i < 400; i++) advanceFlight(v, acceleration, new Vector3(), 1 / 120);
     expect(v.length()).toBeLessThan(0.001);
+  });
+  it('answers the stick like the reference: three quarters of cruise within 0.15 s, a short glide to stop', () => {
+    const v = new Vector3(),
+      acceleration = new Vector3(),
+      goal = new Vector3(FLIGHT.speed, 0, 0);
+    for (let i = 0; i < 18; i++) advanceFlight(v, acceleration, goal, 1 / 120);
+    expect(v.x).toBeGreaterThan(FLIGHT.speed * 0.72);
+    for (let i = 0; i < 60; i++) advanceFlight(v, acceleration, goal, 1 / 120);
+    expect(v.x).toBeGreaterThan(FLIGHT.speed * 0.98);
+    // Release: most of the speed bleeds off inside 0.3 s, but not as a dead stop.
+    for (let i = 0; i < 12; i++) advanceFlight(v, acceleration, new Vector3(), 1 / 120);
+    expect(v.x).toBeGreaterThan(FLIGHT.speed * 0.5);
+    for (let i = 0; i < 24; i++) advanceFlight(v, acceleration, new Vector3(), 1 / 120);
+    expect(v.x).toBeLessThan(FLIGHT.speed * 0.25);
+    // The post-dash boost: held, then eased out, never a step.
+    expect(dashBoost(FLIGHT.boostDuration)).toBeCloseTo(1 + FLIGHT.boost);
+    expect(dashBoost(FLIGHT.boostDuration - FLIGHT.boostHold)).toBeCloseTo(1 + FLIGHT.boost);
+    expect(dashBoost((FLIGHT.boostDuration - FLIGHT.boostHold) / 2)).toBeCloseTo(
+      1 + FLIGHT.boost / 2,
+    );
+    expect(dashBoost(0)).toBe(1);
+    expect(FLIGHT.speed).toBeGreaterThanOrEqual(20);
   });
   it('camera/motor springs are independent of frame subdivision', () => {
     const a = new Vector3(),

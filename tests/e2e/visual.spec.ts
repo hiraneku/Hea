@@ -109,6 +109,31 @@ test.describe('golden frames', () => {
     await expect(canvas(page)).toHaveScreenshot('shield-shatter.png', SNAPSHOT);
   });
 
+  test('a patch materialising cell by cell ahead of the first bolt', async ({ page }) => {
+    await load(page);
+    await scene(page, 'shield-volley');
+    // Half-way through the 0.14 s appearance: part of the hex grid is still missing.
+    await seededStep(page, 0.07, 81);
+    await settle(page);
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    expect(d.shieldPatches.length).toBeGreaterThanOrEqual(1);
+    expect(d.patchShatters).toBe(0);
+    await expect(canvas(page)).toHaveScreenshot('shield-appear.png', SNAPSHOT);
+  });
+
+  test('patches dissolving cell by cell once their bolts are spent', async ({ page }) => {
+    await load(page);
+    await scene(page, 'shield');
+    // The patches live 1.5 s after their block and fade over the last 0.16 s of it.
+    await seededStep(page, 1.3, 91);
+    await seededStep(page, 0.12, 92);
+    await settle(page);
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    expect(d.shieldPatches.length).toBe(3);
+    for (const patch of d.shieldPatches) expect(patch.life).toBeLessThan(0.16);
+    await expect(canvas(page)).toHaveScreenshot('shield-dissolve.png', SNAPSHOT);
+  });
+
   test('a solar vortex pulling the body and every ember towards its core', async ({ page }) => {
     await load(page);
     await scene(page, 'shield');

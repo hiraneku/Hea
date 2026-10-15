@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { BossDirector, DUEL } from './combat';
 import { Effects, makeSigil, Ribbon } from './Effects';
-import { BodyTumble, LaunchRelease, ease } from './motion';
-import { BossTactics, fireGateLocal, fireGateOffset } from './BossTactics';
+import { BodyTumble, LaunchRelease, ease, hoverLean } from './motion';
+import { BOSS_MOTOR, BossTactics, fireGateLocal, fireGateOffset } from './BossTactics';
 import { BOSS } from './config';
 
 /** Satellite fire gates relative to their v0.10 size. */
@@ -40,6 +40,11 @@ export class Boss {
   private castRotation = 0;
   /** Forward lunge after a release (1 at the moment of casting, decays to 0). */
   private snap = 0;
+  /** Smoothed facing and lean, so the construct turns and banks instead of snapping. */
+  private readonly facingQ = new THREE.Quaternion();
+  private facingSet = false;
+  private leanRoll = 0;
+  private leanPitch = 0;
   private lastStage: BossDirector['stage'] = 'recover';
   private spellSeeds: THREE.Mesh[] = [];
   private plate: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
@@ -166,6 +171,8 @@ export class Boss {
     this.deathDelay = -1;
     this.castRotation = 0;
     this.snap = 0;
+    this.facingSet = false;
+    this.leanRoll = this.leanPitch = 0;
     this.lastStage = 'recover';
     this.body.rotation.set(0, 0, 0);
     this.body.position.set(0, 0, 0);
@@ -263,8 +270,30 @@ export class Boss {
   }
   present(time: number, dt: number, target: THREE.Vector3, camera: THREE.Vector3) {
     this.group.position.copy(this.position);
+    // Face the target through a smoothed turn (not a per-frame snap), lean into the motion
+    // like something that actually flies, and breathe up and down a little while hovering.
     this.group.lookAt(target);
-    this.group.quaternion.copy(this.tumble.step(dt, this.group.quaternion.clone()));
+    if (!this.facingSet || this.tumble.physical || dt > 0.5) {
+      this.facingQ.copy(this.group.quaternion);
+      this.facingSet = true;
+    } else this.facingQ.slerp(this.group.quaternion, 1 - Math.exp(-dt * 7));
+    const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.facingQ),
+      right = new THREE.Vector3(-1, 0, 0).applyQuaternion(this.facingQ);
+    const lean = hoverLean(this.velocity, forward, right, BOSS_MOTOR.max),
+      settle = 1 - Math.exp(-dt * 6);
+    this.leanRoll += (lean.roll - this.leanRoll) * settle;
+    this.leanPitch += (lean.pitch - this.leanPitch) * settle;
+    const upright = 1 - this.tumble.weight;
+    const attitude = this.facingQ
+      .clone()
+      .multiply(
+        new THREE.Quaternion().setFromEuler(
+          new THREE.Euler(this.leanPitch * upright, 0, this.leanRoll * upright),
+        ),
+      );
+    this.group.quaternion.copy(this.tumble.step(dt, attitude));
+    const cruise = Math.min(1, this.velocity.length() / 8);
+    this.group.position.y += Math.sin(time * 1.7) * 0.12 * upright * (1 - cruise);
     this.group.updateMatrixWorld(true);
     this.flash = Math.max(0, this.flash - dt);
     this.plate.material.emissiveIntensity = this.flash > 0 ? 2.1 : 0.025;

@@ -29,4 +29,7 @@ export const icons = {
   help: svg('<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 5m0 3v.01"/>'),
   mouse: svg('<rect x="6" y="2" width="12" height="20" rx="6"/><path d="M12 2v7M6 9h12"/>'),
   chevron: svg('<path d="m8 4 8 8-8 8"/>'),
+  eye: svg(
+    '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+  ),
 };

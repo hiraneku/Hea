@@ -312,3 +312,22 @@ export function groundFriction(velocity: Vector3, dt: number) {
 export function recoveryBlend(remaining: number): number {
   return 1 - ease(remaining / 0.7);
 }
+
+/**
+ * How far a hovering construct leans into its own motion: a roll into lateral speed and a
+ * nose-down pitch with forward (and climbing) speed, in radians, relative to `maxSpeed`.
+ */
+export function hoverLean(
+  velocity: Vector3,
+  forward: Vector3,
+  right: Vector3,
+  maxSpeed: number,
+): { roll: number; pitch: number } {
+  const lateral = velocity.dot(right) / maxSpeed,
+    ahead = velocity.dot(forward) / maxSpeed,
+    climb = velocity.y / maxSpeed;
+  return {
+    roll: clamp(-lateral * 0.46, -0.4, 0.4),
+    pitch: clamp(ahead * 0.17 - climb * 0.12, -0.24, 0.24),
+  };
+}

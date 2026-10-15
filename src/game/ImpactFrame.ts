@@ -26,6 +26,7 @@ const ImpactShader = {
     uMix: { value: 0 },
     uSeed: { value: 0 },
     uSpokes: { value: 1 },
+    uDirection: { value: new THREE.Vector2(0, 0) },
   },
   vertexShader: `varying vec2 vUv;
     void main() {
@@ -39,6 +40,7 @@ const ImpactShader = {
     uniform float uMix;
     uniform float uSeed;
     uniform float uSpokes;
+    uniform vec2 uDirection;
     varying vec2 vUv;
     float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
     float sampleLuma(vec2 uv) { return luma(texture2D(tDiffuse, uv).rgb); }
@@ -71,8 +73,11 @@ const ImpactShader = {
       float a = (ang / 6.2831853 + 0.5) * spokes;
       float i = floor(a), f = fract(a) - 0.5;
       float h1 = hash(i), h2 = hash(i + 11.0), h3 = hash(i + 29.0);
-      float present = step(uPhase == 1.0 ? 0.4 : 0.55, h1);
-      float start = 0.07 + h2 * 0.2, len = 0.2 + h3 * 0.9;
+      // The burst follows the launch: lines on the side the body is thrown towards run
+      // longer and denser, the ones behind it stay short (uDirection is zero when unknown).
+      float bias = r > 1e-4 ? dot(d / r, uDirection) : 0.0;
+      float present = step((uPhase == 1.0 ? 0.4 : 0.55) - 0.22 * bias, h1);
+      float start = 0.07 + h2 * 0.2, len = (0.2 + h3 * 0.9) * (1.0 + 0.85 * bias);
       float along = clamp((r - start) / len, 0.0, 1.0);
       float halfWidth = uPhase == 1.0 ? (0.003 + 0.014 * h2) * along + 0.0008 : 0.0017;
       float cells = halfWidth / max(r * 6.2831853 / spokes, 1e-4);
@@ -97,8 +102,13 @@ export class ImpactFrame {
   readonly pass = new ShaderPass(ImpactShader);
   private time = -1;
   private readonly center = new THREE.Vector3();
+  private readonly direction = new THREE.Vector3();
   private reduced = false;
   private readonly projected = new THREE.Vector3();
+  private readonly projectedTip = new THREE.Vector3();
+  private beat = -1;
+  /** Called at the start of each visual beat (0 = paper, 1 = negative) for the sound. */
+  onBeat: ((beat: 0 | 1) => void) | null = null;
   constructor() {
     this.pass.enabled = false;
   }
@@ -118,13 +128,19 @@ export class ImpactFrame {
   get elapsed() {
     return this.time;
   }
-  /** Start (or restart) the frame around a world-space point of contact. */
-  trigger(at: THREE.Vector3, reduced: boolean) {
+  /**
+   * Start (or restart) the frame around a world-space point of contact. `direction` is the
+   * way the struck body is being thrown (world space); the burst leans that way.
+   */
+  trigger(at: THREE.Vector3, reduced: boolean, direction?: THREE.Vector3) {
     this.time = 0;
     this.reduced = reduced;
     this.center.copy(at);
+    if (direction && direction.lengthSq() > 1e-6) this.direction.copy(direction).normalize();
+    else this.direction.set(0, 0, 0);
     this.pass.uniforms.uSeed.value = Math.random() * 10;
     this.pass.enabled = true;
+    this.beat = -1;
   }
   cancel() {
     this.time = -1;
@@ -154,6 +170,11 @@ export class ImpactFrame {
     }
     u.uPhase.value = phase;
     u.uMix.value = Math.max(0, Math.min(1, mix));
+    const beat: 0 | 1 | -1 = phase === 1 ? 1 : this.reduced || t < 0.033 ? 0 : -1;
+    if (beat !== -1 && beat !== this.beat) {
+      this.beat = beat;
+      this.onBeat?.(beat);
+    }
     // Spokes only on the first paper frame and the negative; the last paper frame is calm.
     u.uSpokes.value = !this.reduced && t < 0.133 ? 1 : 0;
   }
@@ -169,6 +190,21 @@ export class ImpactFrame {
       Math.max(-0.3, Math.min(1.3, y)),
     );
     this.pass.uniforms.uResolution.value.set(width, height);
+    // The launch direction on screen: a point a few metres along it, projected and
+    // aspect-corrected; a direction into the screen collapses to nothing and stays radial.
+    const dir = this.pass.uniforms.uDirection.value as THREE.Vector2;
+    if (behind || this.direction.lengthSq() < 0.5) dir.set(0, 0);
+    else {
+      const tip = this.projectedTip
+        .copy(this.center)
+        .addScaledVector(this.direction, 4)
+        .project(camera);
+      const dx = ((tip.x - p.x) / 2) * (width / height),
+        dy = (tip.y - p.y) / 2,
+        len = Math.hypot(dx, dy);
+      if (len < 1e-4 || tip.z > 1) dir.set(0, 0);
+      else dir.set(dx / len, dy / len).multiplyScalar(Math.min(1, len / 0.12));
+    }
   }
   dispose() {
     this.pass.dispose();
