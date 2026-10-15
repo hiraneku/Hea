@@ -26,6 +26,7 @@ import {
   salvoSpread,
   HitPause,
   PROJECTILES,
+  novaCharge,
   type ProjectileKind,
   type MissileGuidance,
   type AttackId,
@@ -197,6 +198,12 @@ export class Game {
   private dashCooldown = 0;
   /** Seconds of post-dash flight boost left (the dash carries momentum into the glide). */
   private flightBoost = 0;
+  /** Seconds the fire control has been held with Nova selected (it casts on release). */
+  private novaHold = 0;
+  private novaHolding = false;
+  private novaChargedCasts = 0;
+  private novaChimed = false;
+  private chargeSigil?: THREE.Group;
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
   private dashBuffer = 0;
@@ -457,6 +464,10 @@ export class Game {
       },
       dash: clamp(1 - this.dashCooldown / 1.65, 0, 1),
       spell: this.spell,
+      charge: this.novaHolding
+        ? novaCharge(this.novaHold, this.energy, SPELLS[2].cost).progress
+        : 0,
+      charged: this.novaHolding && novaCharge(this.novaHold, this.energy, SPELLS[2].cost).charged,
       cooldowns: this.cooldowns.map((c, i) => clamp(c / SPELLS[i].cooldown, 0, 1)),
       damageDealt: this.damageDealt,
       impacts: this.impacts,
@@ -470,6 +481,7 @@ export class Game {
           this.player.y - this.world.surfaceHeight(this.player.x, this.player.z),
         ),
         speed: this.velocity.clone().add(this.impulse).add(this.airDash.velocity).length(),
+        boost: this.airDash.active ? 0 : (dashBoost(this.flightBoost) - 1) / FLIGHT.boost,
         phase: this.pendingPlayerImpulse
           ? 'contact'
           : this.playerTumble.active
@@ -508,6 +520,11 @@ export class Game {
       camera: { yaw: this.yaw, pitch: this.pitch },
       cameraPosition: this.camera.position.toArray(),
       avatarVisible: this.avatar.visible,
+      nova: {
+        hold: this.novaHold,
+        holding: this.novaHolding,
+        chargedCasts: this.novaChargedCasts,
+      },
       facing: this.facing.toArray(),
       health: this.health,
       hitPause: this.hitPause.remaining,
@@ -665,6 +682,8 @@ export class Game {
     this.bossSkidTimer = 0;
     this.health = this.energy = 100;
     this.dashCooldown = this.dashTime = this.knockTime = this.flightBoost = 0;
+    this.novaHold = 0;
+    this.novaHolding = this.novaChimed = false;
     this.spell = 0;
     this.cooldowns = [0, 0, 0];
     this.pendingPlayerImpulse = null;
@@ -729,6 +748,8 @@ export class Game {
   }
   selectSpell(slot: number) {
     if (slot >= 0 && slot <= 2) {
+      if (slot !== this.spell) this.novaHold = 0;
+      if (slot !== this.spell) this.novaHolding = false;
       this.spell = slot as SpellId;
       this.audio.click();
     }
@@ -1071,16 +1092,47 @@ export class Game {
       6,
       dt,
     );
+    // The rush of air: fed while the body moves fast through the air under its own motor
+    // (not while dragged along the ground, which has its own scrape), panned to the side
+    // the body is sweeping towards.
+    if (this.mode !== 'menu' && !dragging) {
+      const airspeed = motor.length();
+      if (airspeed > 9)
+        this.audio.wind(
+          airspeed,
+          clamp(lateral / FLIGHT.speed, -1, 1),
+          this.airDash.active ? 0 : (dashBoost(this.flightBoost) - 1) / FLIGHT.boost,
+        );
+    }
     if (!showcase) {
       this.updateCamera(dt);
       this.camera.getWorldDirection(direction);
       this.aiming = this.aimsAtBoss(direction);
       const shoot = this.controls.shooting || this.controls.shotRequested;
       if (this.hitPause.remaining === 0) {
-        this.controls.shotRequested = false;
-        if (shoot && !this.outcome && this.damageTimer > 0.18 && !this.playerTumble.physical)
-          this.cast();
+        const may = !this.outcome && this.damageTimer > 0.18 && !this.playerTumble.physical;
+        if (this.spell === 2) {
+          // Nova casts on release: a tap is the ordinary blast, a hold charges it. The hold
+          // only starts counting once the spell is ready, so a button pressed during the
+          // cooldown begins charging the moment it ends.
+          if (this.controls.shooting && may) {
+            this.controls.shotRequested = false;
+            if (this.cooldowns[2] === 0 && this.energy >= SPELLS[2].cost) {
+              this.novaHold += dt;
+              this.novaHolding = true;
+            }
+          } else if (this.novaHolding || this.controls.shotRequested) {
+            this.controls.shotRequested = false;
+            if (may) this.cast();
+            this.novaHold = 0;
+            this.novaHolding = false;
+          }
+        } else {
+          this.controls.shotRequested = false;
+          if (shoot && may) this.cast();
+        }
       }
+      this.presentCharge();
     }
   }
   private moveBody(
@@ -1285,7 +1337,7 @@ export class Game {
       const motion = this.velocity.clone().add(this.airDash.velocity);
       desired = pivot
         .clone()
-        .addScaledVector(forward, -6.2)
+        .addScaledVector(forward, -this.settings.cameraDistance)
         .addScaledVector(right, 0.65)
         .addScaledVector(UP, 0.95)
         .addScaledVector(motion, 0.075);
@@ -1317,9 +1369,10 @@ export class Game {
       if (Math.abs(side) > limit)
         this.camera.position.addScaledVector(right, Math.sign(side) * limit - side);
       // Keep a backwards launch from pushing the avatar through the chase camera.
-      const behind = this.camera.position.clone().sub(pivot).dot(forward.clone().negate());
-      if (behind < 3.8) {
-        this.camera.position.addScaledVector(forward, behind - 3.8);
+      const behind = this.camera.position.clone().sub(pivot).dot(forward.clone().negate()),
+        nearest = this.settings.cameraDistance * 0.61;
+      if (behind < nearest) {
+        this.camera.position.addScaledVector(forward, behind - nearest);
         this.cameraSpringVelocity.copy(this.velocity).add(this.impulse).add(this.airDash.velocity);
       }
       const obstruction = this.trace(pivot, this.camera.position, false, 0.12);
@@ -1350,7 +1403,7 @@ export class Game {
     const speed = this.velocity.clone().add(this.impulse).add(this.airDash.velocity).length();
     // Speed widens the view; a dash kicks it wider still for its first instants. The
     // first-person view starts wider, as eyes do.
-    const base = first ? 82 : 74;
+    const base = first ? this.settings.fovFirst : this.settings.fovThird;
     this.fovBase = damp(
       this.fovBase,
       this.settings.reducedEffects
@@ -2000,12 +2053,61 @@ export class Game {
       this.clearSight(this.camera.position, this.boss.position)
     );
   }
+  /**
+   * The tell of a held Nova: a sigil in the casting hand that grows and spins faster with
+   * the charge, pulses once full, and a chime the moment it gets there.
+   */
+  private presentCharge() {
+    const show = this.novaHolding && this.spell === 2 && this.mode === 'playing';
+    if (!show) {
+      if (this.chargeSigil) this.chargeSigil.visible = false;
+      this.novaChimed = false;
+      return;
+    }
+    if (!this.chargeSigil) {
+      this.chargeSigil = makeSigil(this.fx.sigilMap, 1, '#dcf9ff');
+      this.chargeSigil.renderOrder = 6;
+      this.scene.add(this.chargeSigil);
+    }
+    const charge = novaCharge(this.novaHold, this.energy, SPELLS[2].cost),
+      first = this.cameraMode === 'first',
+      right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion),
+      ahead = new THREE.Vector3(0, 0, -1).applyQuaternion(this.camera.quaternion);
+    const hand = first
+      ? this.camera.position
+          .clone()
+          .addScaledVector(right, 0.3)
+          .addScaledVector(UP, -0.17)
+          .addScaledVector(ahead, 0.75)
+      : this.player
+          .clone()
+          .add(new THREE.Vector3(0, 1.12, 0))
+          .addScaledVector(right, 0.55)
+          .addScaledVector(this.facing, 0.6);
+    const sigil = this.chargeSigil;
+    sigil.visible = true;
+    sigil.position.copy(hand);
+    sigil.quaternion.copy(this.camera.quaternion);
+    sigil.rotateZ(this.time * (1.5 + 7 * charge.progress));
+    const pulse = charge.charged ? 1 + 0.07 * Math.sin(this.time * 18) : 1;
+    sigil.scale.setScalar(((first ? 0.07 : 0.14) + (first ? 0.24 : 0.5) * charge.progress) * pulse);
+    if (charge.charged && !this.novaChimed) {
+      this.novaChimed = true;
+      this.audio.chargeReady();
+      this.fx.burst(hand, '#fff6dc', 14, 1.2, 0.3, 1);
+    }
+  }
   private cast() {
     const spell = SPELLS[this.spell];
     if (this.cooldowns[this.spell] > 0 || this.energy < spell.cost) return;
-    this.energy -= spell.cost;
+    const charge = novaCharge(this.spell === 2 ? this.novaHold : 0, this.energy, spell.cost);
+    this.energy -= charge.cost;
     this.cooldowns[this.spell] = spell.cooldown;
     this.audio.cast(this.spell);
+    if (charge.charged) {
+      this.novaChargedCasts++;
+      this.audio.novaCharged();
+    }
     this.camera.getWorldDirection(direction);
     const hasTarget = this.aimsAtBoss(direction);
     const distantAim = this.camera.position.clone().addScaledVector(direction, 60);
@@ -2029,26 +2131,44 @@ export class Game {
       this.fx.beam(origin, end, '#78e9ff', 0.045, 0.25);
       this.fx.glyph(origin, direction, '#79efff', 0.5, 0.4);
       this.fx.burst(end, '#95f5ff', 24, 4, 0.4, 1);
-      if (hit?.boss) this.damageBoss(spell.damage, direction.clone().multiplyScalar(3.5));
+      if (hit?.boss)
+        this.damageBoss(spell.damage, direction.clone().multiplyScalar(3.5), {
+          spell: 1,
+          at: end,
+          along: direction,
+        });
     } else {
       const end = origin.clone().addScaledVector(direction, 27),
         hit = this.trace(origin, end, true);
       if (hit) end.lerpVectors(origin, end, hit.t);
       if (hasTarget && this.boss.position.distanceTo(origin) < 34) end.copy(this.boss.position);
-      this.fx.impact(end, '#dff9ff', true);
-      this.fx.glyph(end, this.camera.position.clone().sub(end), '#dcf9ff', 1.55, 0.6);
+      // A charged Nova is the same blast grown half as large again: wider reach, a harder
+      // throw, a bigger wound in a wall; its damage is unchanged.
+      const grow = charge.radius;
+      this.fx.impact(end, '#dff9ff', true, grow);
+      this.fx.glyph(end, this.camera.position.clone().sub(end), '#dcf9ff', 1.55 * grow, 0.6);
+      if (charge.charged) this.fx.burst(end, '#fff1c9', 36, 7, 0.5, 2);
       if (hit?.obstacle)
-        this.world.damageWall(hit.obstacle, end, direction.clone().multiplyScalar(25), 2.6);
+        this.world.damageWall(
+          hit.obstacle,
+          end,
+          direction.clone().multiplyScalar(25 * grow),
+          2.6 * grow,
+        );
       if (
         this.boss.alive &&
-        this.boss.position.distanceTo(end) < 6.5 &&
+        this.boss.position.distanceTo(end) < 6.5 * grow &&
         this.clearSight(end, this.boss.position)
       )
         this.damageBoss(
           spell.damage,
-          direction.clone().multiplyScalar(DUEL.novaLaunch).addScaledVector(UP, 3),
+          direction
+            .clone()
+            .multiplyScalar(DUEL.novaLaunch * charge.launch)
+            .addScaledVector(UP, 3 * charge.launch),
+          { spell: 2, at: this.boss.position.clone(), along: direction },
         );
-      this.shake = Math.max(this.shake, 0.018);
+      this.shake = Math.max(this.shake, charge.charged ? 0.03 : 0.018);
     }
   }
   private clearSight(from: THREE.Vector3, to: THREE.Vector3) {
@@ -2436,7 +2556,32 @@ export class Game {
     this.fx.debris(this.boss.position, Math.round(35 * BOSS.scale), 8 * BOSS.scale, 3 * BOSS.scale);
     this.fx.dust(this.boss.position, Math.round(15 * BOSS.scale), 2.5 * BOSS.scale);
   }
-  private damageBoss(amount: number, impulse: THREE.Vector3) {
+  /**
+   * Where a hit lands on screen, for the floating damage number: position in 0..1 (y down)
+   * and the direction the hit travels in, projected. Null when the point is behind the camera.
+   */
+  private hitOnScreen(at: THREE.Vector3, along: THREE.Vector3) {
+    this.camera.updateMatrixWorld();
+    const p = at.clone().project(this.camera);
+    if (p.z >= 1 || !Number.isFinite(p.x) || !Number.isFinite(p.y)) return null;
+    const q = at.clone().addScaledVector(along.clone().normalize(), 3).project(this.camera);
+    let dx = q.x - p.x,
+      dy = -(q.y - p.y);
+    const len = Math.hypot(dx, dy);
+    if (len > 1e-4) {
+      dx /= len;
+      dy /= len;
+    } else {
+      dx = 0;
+      dy = -1;
+    }
+    return { x: (p.x + 1) / 2, y: (1 - p.y) / 2, dx, dy };
+  }
+  private damageBoss(
+    amount: number,
+    impulse: THREE.Vector3,
+    source?: { spell: SpellId; at: THREE.Vector3; along: THREE.Vector3 },
+  ) {
     if (!this.boss.alive || this.outcome || this.mode !== 'playing') return;
     const actual = Math.min(amount, this.boss.health);
     this.boss.health -= actual;
@@ -2454,7 +2599,13 @@ export class Game {
       this.boss.knockTime = 1.25;
       this.contactPause('boss', impulse, DUEL.heavyFreeze, impulse.length(), DUEL.heavySlow);
     } else this.boss.impulse.add(impulse).clampLength(0, 9);
-    this.emit({ type: 'hit', kill: !this.boss.alive, damage: actual });
+    const screen = source ? this.hitOnScreen(source.at, source.along) : null;
+    this.emit({
+      type: 'hit',
+      kill: !this.boss.alive,
+      damage: actual,
+      number: source && screen ? { spell: source.spell, ...screen } : undefined,
+    });
     this.audio.hit(!this.boss.alive);
     if (!this.boss.alive) {
       if (heavy) this.boss.deathDelay = 0.95;

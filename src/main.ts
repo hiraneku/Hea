@@ -10,6 +10,7 @@ import reference2Url from '../reference2.mp4?url';
 import { icons } from './icons';
 import { Game } from './game/Game';
 import {
+  CAMERA_RANGES,
   readSettings,
   saveSettings,
   SPELLS,
@@ -60,7 +61,7 @@ app.innerHTML = `
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.13</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.14</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -99,7 +100,7 @@ app.innerHTML = `
       <span class="look-label">GESER LAYAR UNTUK MELIHAT</span>
     </div>
     <div id="demo-ui" hidden><div class="demo-tag"><i></i><span>DEMONSTRASI LANGSUNG<small>Kamera otomatis · Efek real-time</small></span></div><button id="demo-play" class="primary-button"><span>GILIRANMU</span>${icons.arrow}</button><button id="demo-exit" class="icon-button" aria-label="Keluar dari demo">${icons.close}</button></div>
-    <div id="damage-vignette" aria-hidden="true"></div><div id="speed-lines" aria-hidden="true"></div>
+    <div id="damage-vignette" aria-hidden="true"></div><div id="speed-lines" aria-hidden="true"></div><div id="boost-vignette" aria-hidden="true"></div><div id="damage-numbers" aria-hidden="true"></div>
     <div id="toast" role="status"></div>
     <dialog id="panel-dialog" aria-labelledby="panel-title"></dialog>
     <div id="boot" role="status"><span class="boot-wordmark">HEA.</span><span class="boot-loader"></span><span id="boot-status">MENYIAPKAN ARENA</span></div>
@@ -164,6 +165,43 @@ function openPanel(type: Exclude<typeof panel, null>) {
   renderPanel(type);
 }
 
+/**
+ * A floating damage number for the precise spells: it appears where the hit landed, is
+ * thrown along the hit's direction on screen and fades within 0.6 s (Nova: larger, warmer,
+ * a little longer). Comfort mode keeps the number but drops the throw.
+ */
+function floatDamage(
+  damage: number,
+  at: { spell: number; x: number; y: number; dx: number; dy: number },
+) {
+  const layer = $('#damage-numbers');
+  const el = document.createElement('b');
+  el.className = `damage-number spell-${at.spell}`;
+  el.textContent = `${Math.round(damage)}`;
+  el.style.left = `${(at.x * 100).toFixed(2)}%`;
+  el.style.top = `${(at.y * 100).toFixed(2)}%`;
+  layer.append(el);
+  while (layer.childElementCount > 12) layer.firstElementChild!.remove();
+  const nova = at.spell === 2,
+    throwPx = settings.reducedEffects ? 0 : nova ? 54 : 44,
+    lift = settings.reducedEffects ? -18 : -10,
+    life = nova ? 780 : 600;
+  if (typeof el.animate === 'function') {
+    const animation = el.animate(
+      [
+        { transform: 'translate(-50%, -50%) scale(0.7)', opacity: 0 },
+        { transform: 'translate(-50%, -50%) scale(1.08)', opacity: 1, offset: 0.12 },
+        {
+          transform: `translate(calc(-50% + ${(at.dx * throwPx).toFixed(1)}px), calc(-50% + ${(at.dy * throwPx + lift).toFixed(1)}px)) scale(1)`,
+          opacity: 0,
+        },
+      ],
+      { duration: life, easing: 'cubic-bezier(0.2, 0.7, 0.3, 1)', fill: 'forwards' },
+    );
+    animation.onfinish = () => el.remove();
+  } else setTimeout(() => el.remove(), life);
+}
+
 function event(event: GameEvent) {
   if (event.type === 'mode') {
     experience.dataset.mode = event.mode;
@@ -190,6 +228,7 @@ function event(event: GameEvent) {
     clearTimeout(duelTimer);
     duelTimer = setTimeout(() => $('#duel-announcement').classList.remove('visible'), 2700);
   } else if (event.type === 'hit') {
+    if (event.number) floatDamage(event.damage, event.number);
     $('#hit-marker').classList.add('active');
     $('#hit-marker').classList.toggle('kill', event.kill);
     clearTimeout(hitTimer);
@@ -286,6 +325,9 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       <div class="settings-row"><div><label for="sound-toggle">Audio</label><p>Efek suara sihir dan gerakan.</p></div><label class="switch"><input id="sound-toggle" type="checkbox" ${settings.sound ? 'checked' : ''} aria-label="Audio"/><span></span></label></div>
       <div class="settings-row slider-row"><div><label for="volume">Volume efek</label><b id="volume-label">${Math.round(settings.volume * 100)}%</b></div><input id="volume" type="range" min="0" max="1" step="0.05" value="${settings.volume}" /></div>
       <div class="settings-row"><div><label for="camera-mode">Sudut pandang</label><p>Kamera pengejar di belakang tubuh,<br>atau dari mata avatar (<kbd>V</kbd> saat bermain).</p></div><select id="camera-mode"><option value="third" ${settings.camera === 'third' ? 'selected' : ''}>Orang ketiga</option><option value="first" ${settings.camera === 'first' ? 'selected' : ''}>Orang pertama</option></select></div>
+      <div class="settings-row slider-row"><div><label for="fov-third">Bidang pandang · orang ketiga</label><b id="fov-third-label">${Math.round(settings.fovThird)}°</b></div><input id="fov-third" type="range" min="${CAMERA_RANGES.fovThird.min}" max="${CAMERA_RANGES.fovThird.max}" step="1" value="${settings.fovThird}" /></div>
+      <div class="settings-row slider-row"><div><label for="fov-first">Bidang pandang · orang pertama</label><b id="fov-first-label">${Math.round(settings.fovFirst)}°</b></div><input id="fov-first" type="range" min="${CAMERA_RANGES.fovFirst.min}" max="${CAMERA_RANGES.fovFirst.max}" step="1" value="${settings.fovFirst}" /></div>
+      <div class="settings-row slider-row"><div><label for="camera-distance">Jarak kamera pengejar</label><b id="camera-distance-label">${settings.cameraDistance.toFixed(1)} m</b></div><input id="camera-distance" type="range" min="${CAMERA_RANGES.cameraDistance.min}" max="${CAMERA_RANGES.cameraDistance.max}" step="0.1" value="${settings.cameraDistance}" /></div>
       <div class="settings-row"><div><label for="comfort">Efek nyaman</label><p>Kurangi kilatan, goyangan kamera,<br>dan perubahan bidang pandang.</p></div><label class="switch"><input id="comfort" type="checkbox" ${settings.reducedEffects ? 'checked' : ''} aria-label="Efek nyaman"/><span></span></label></div>
       <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render.</p>
       <button class="primary-button full-width" id="panel-done"><span>SIMPAN & KEMBALI</span>${icons.arrow}</button>`;
@@ -356,6 +398,22 @@ function renderPanel(type: Exclude<typeof panel, null>) {
     };
     $<HTMLSelectElement>('#camera-mode').onchange = (e) => {
       settings.camera = (e.target as HTMLSelectElement).value === 'first' ? 'first' : 'third';
+      applySettings();
+    };
+    // The camera sliders: the resting field of view of each view, and the chase distance.
+    $<HTMLInputElement>('#fov-third').oninput = (e) => {
+      settings.fovThird = Number((e.target as HTMLInputElement).value);
+      $('#fov-third-label').textContent = `${Math.round(settings.fovThird)}°`;
+      applySettings();
+    };
+    $<HTMLInputElement>('#fov-first').oninput = (e) => {
+      settings.fovFirst = Number((e.target as HTMLInputElement).value);
+      $('#fov-first-label').textContent = `${Math.round(settings.fovFirst)}°`;
+      applySettings();
+    };
+    $<HTMLInputElement>('#camera-distance').oninput = (e) => {
+      settings.cameraDistance = Number((e.target as HTMLInputElement).value);
+      $('#camera-distance-label').textContent = `${settings.cameraDistance.toFixed(1)} m`;
       applySettings();
     };
   }
@@ -457,13 +515,22 @@ function updateHud(s: Snapshot) {
   $('#session-time').textContent = timeLabel(s.elapsed);
   $('#hud-fps').textContent = `${s.fps} FPS`;
   $('#menu-fps').textContent = String(s.fps);
-  $('#speed-lines').classList.toggle(
-    'active',
-    (s.flight.speed > 25.5 || s.launched) && s.mode === 'playing' && !settings.reducedEffects,
-  );
+  const fast = (s.flight.speed > 25.5 || s.launched) && s.mode === 'playing';
+  $('#speed-lines').classList.toggle('active', fast && !settings.reducedEffects);
+  // The post-dash surge: the speed lines thicken and a thin vignette closes in while the
+  // motor runs hot, both easing away with the boost itself.
+  const surge = s.mode === 'playing' && !settings.reducedEffects ? s.flight.boost : 0;
+  $('#speed-lines').classList.toggle('surge', surge > 0.05);
+  experience.style.setProperty('--surge', surge.toFixed(3));
   document.querySelectorAll<HTMLElement>('.spell-slot').forEach((button, i) => {
     button.classList.toggle('selected', i === s.spell);
     button.classList.toggle('empty', s.energy < SPELLS[i].cost);
+    if (i === 2) {
+      // A held Nova fills the slot from the bottom; full charge lights it up.
+      button.classList.toggle('charging', s.charge > 0);
+      button.classList.toggle('charged', s.charged);
+      button.style.setProperty('--charge', s.charge.toFixed(3));
+    }
     button.setAttribute('aria-pressed', String(i === s.spell));
     button.style.setProperty('--cooldown', String(s.cooldowns[i]));
   });

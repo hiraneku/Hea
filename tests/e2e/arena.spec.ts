@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
-import type { Snapshot } from '../../src/game/types';
+import { CAMERA_RANGES, SPELLS, type Snapshot } from '../../src/game/types';
 import type { Game } from '../../src/game/Game';
-import { ATTACKS, DUEL } from '../../src/game/combat';
+import { ATTACKS, DUEL, NOVA_CHARGE } from '../../src/game/combat';
 import { ARENA, FLIGHT } from '../../src/game/config';
 import { beside } from '../../src/game/layout';
 
@@ -1214,4 +1214,189 @@ test('the solar sphere bursting beside a grounded player still throws them', asy
   expect(s.health).toBeGreaterThan(70);
   expect(s.craters).toBeGreaterThan(0);
   expect(d.ragdoll.player).toBe(true);
+});
+
+test('Nova charges while the fire button is held: a tap stays the ordinary blast, a full hold pays more for a harder launch, and hits float their damage', async ({
+  page,
+  context,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'nova');
+  const nova = async () => (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).nova;
+  const numbers = () =>
+    page.locator('.damage-number').evaluateAll((els) => els.map((el) => el.textContent));
+  // A tap casts at once, at the ordinary price, and the hit floats its damage off the boss.
+  await page.locator('#touch-fire').tap();
+  await step(page, 0.05);
+  let s = await state(page);
+  expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[2].damage);
+  expect(s.energy).toBeGreaterThan(100 - SPELLS[2].cost - 1);
+  expect(s.energy).toBeLessThan(100 - SPELLS[2].cost + 1.5);
+  expect((await nova()).chargedCasts).toBe(0);
+  expect(await numbers()).toContain(String(SPELLS[2].damage));
+  // Holding the button charges instead of casting; the HUD slot fills up with the hold.
+  await scenario(page, 'nova');
+  const cdp = await context.newCDPSession(page),
+    fire = (await page.locator('#touch-fire').boundingBox())!;
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ id: 1, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 }],
+  });
+  await step(page, NOVA_CHARGE.time / 2);
+  s = await state(page);
+  expect(s.boss.health).toBe(DUEL.bossHealth);
+  expect(s.charge).toBeGreaterThan(0.3);
+  expect(s.charge).toBeLessThan(0.7);
+  expect(s.charged).toBe(false);
+  await expect(page.locator('[data-spell="2"]')).toHaveClass(/charging/);
+  await step(page, NOVA_CHARGE.time / 2 + 0.05);
+  s = await state(page);
+  expect(s.charged).toBe(true);
+  expect(s.boss.health).toBe(DUEL.bossHealth);
+  await expect(page.locator('[data-spell="2"]')).toHaveClass(/charged/);
+  // Release: the charged blast lands for the same damage, costs 1.8x and throws the boss.
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await step(page, 0.05);
+  s = await state(page);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.nova.chargedCasts).toBe(1);
+  expect(d.nova.holding).toBe(false);
+  expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[2].damage);
+  const charged = Math.round(SPELLS[2].cost * NOVA_CHARGE.cost);
+  expect(s.energy).toBeGreaterThan(100 - charged - 1);
+  expect(s.energy).toBeLessThan(100 - charged + 1.5);
+  expect(d.ragdoll.boss).toBe(true);
+  expect(s.charge).toBe(0);
+  // Prisma still fires the instant the button goes down, and floats its own number.
+  await scenario(page, 'nova');
+  await page.locator('[data-spell="1"]').tap();
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ id: 2, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 }],
+  });
+  await step(page, 0.05);
+  expect((await state(page)).boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
+  expect(await numbers()).toContain(String(SPELLS[1].damage));
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+});
+
+test('the dash follows the stick in both views, and the surge after it dresses the frame until the speed settles', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page, false);
+  await scenario(page, 'flight');
+  const velocity = async () =>
+    (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).playerVelocity;
+  const dressing = () =>
+    page.evaluate(() => ({
+      surge: Number(document.getElementById('experience')!.style.getPropertyValue('--surge')),
+      lines: document.getElementById('speed-lines')!.classList.contains('surge'),
+    }));
+  // Facing -z, a dash with the stick held left goes left, not forward.
+  await page.keyboard.down('KeyA');
+  await step(page, 0.1);
+  await page.keyboard.press('ShiftLeft');
+  await step(page, 0.14);
+  let v = await velocity();
+  expect(v[0]).toBeLessThan(-FLIGHT.speed);
+  expect(Math.abs(v[2])).toBeLessThan(Math.abs(v[0]) * 0.2);
+  // Once the burst itself is over, the boost keeps the frame dressed: denser lines and the
+  // thin vignette, for as long as the motor runs hot.
+  await step(page, 0.5);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).dashMotion.active).toBe(
+    false,
+  );
+  expect((await state(page)).flight.boost).toBeGreaterThan(0.9);
+  await expect.poll(async () => (await dressing()).lines).toBe(true);
+  expect((await dressing()).surge).toBeGreaterThan(0.9);
+  expect(
+    await page.locator('#boost-vignette').evaluate((el) => getComputedStyle(el).display),
+  ).not.toBe('none');
+  await page.keyboard.up('KeyA');
+  await step(page, 2.5);
+  await expect.poll(dressing).toEqual({ surge: 0, lines: false });
+  // From the eyes, the stick still steers the dash: held right goes right.
+  await page.keyboard.press('KeyV');
+  await step(page, 0.1);
+  expect((await state(page)).camera).toBe('first');
+  await page.keyboard.down('KeyD');
+  await step(page, 0.1);
+  await page.keyboard.press('ShiftLeft');
+  await step(page, 0.14);
+  v = await velocity();
+  expect(v[0]).toBeGreaterThan(FLIGHT.speed);
+  expect(Math.abs(v[2])).toBeLessThan(Math.abs(v[0]) * 0.2);
+  await page.keyboard.up('KeyD');
+  // Comfort mode drops the dressing entirely.
+  await page.evaluate(() =>
+    document.getElementById('experience')!.classList.add('reduced-effects'),
+  );
+  expect(await page.locator('#boost-vignette').evaluate((el) => getComputedStyle(el).display)).toBe(
+    'none',
+  );
+});
+
+test('camera sliders change the field of view and chase distance live, within their ranges, and are remembered', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page, false);
+  const slide = (id: string, value: number) =>
+    page.locator(id).evaluate((el, value) => {
+      (el as HTMLInputElement).value = String(value);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    }, value);
+  const view = async () => {
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    const [cx, , cz] = d.cameraPosition,
+      [px, , pz] = d.playerPosition;
+    return { fov: d.fov, gap: Math.hypot(cx - px, cz - pz) };
+  };
+  await page.locator('#settings-button').click();
+  await expect(page.locator('#fov-third')).toHaveAttribute(
+    'min',
+    String(CAMERA_RANGES.fovThird.min),
+  );
+  await expect(page.locator('#fov-third')).toHaveAttribute(
+    'max',
+    String(CAMERA_RANGES.fovThird.max),
+  );
+  await slide('#fov-third', 88);
+  await slide('#fov-first', 100);
+  await slide('#camera-distance', 7.8);
+  await expect(page.locator('#fov-third-label')).toHaveText('88°');
+  await expect(page.locator('#camera-distance-label')).toHaveText('7.8 m');
+  await page.locator('#panel-done').click();
+  await scenario(page, 'flight');
+  await step(page, 1.5);
+  let v = await view();
+  expect(v.fov).toBeCloseTo(88, 0);
+  expect(v.gap).toBeGreaterThan(7.6);
+  expect(v.gap).toBeLessThan(8.2);
+  await page.keyboard.press('KeyV');
+  await step(page, 1);
+  expect((await view()).fov).toBeCloseTo(100, 0);
+  // The values are stored with the other settings and come back when the panel reopens.
+  const stored = JSON.parse((await page.evaluate(() => localStorage.getItem('hea-settings')))!);
+  expect(stored.fovThird).toBe(88);
+  expect(stored.fovFirst).toBe(100);
+  expect(stored.cameraDistance).toBe(7.8);
+  await page.keyboard.press('KeyP');
+  await page.locator('#pause-settings').click();
+  await expect(page.locator('#fov-third')).toHaveValue('88');
+  await expect(page.locator('#fov-first')).toHaveValue('100');
+  await expect(page.locator('#camera-distance')).toHaveValue('7.8');
+  await expect(page.locator('#camera-mode')).toHaveValue('first');
+  // The sliders cannot leave their ranges; a stored value outside them is clamped on load.
+  await slide('#camera-distance', 20);
+  await page.locator('#panel-done').click();
+  await expect(page.locator('#resume-button')).toBeVisible();
+  await page.locator('#resume-button').click();
+  await page.keyboard.press('KeyV');
+  await step(page, 1.5);
+  v = await view();
+  expect(v.gap).toBeLessThan(CAMERA_RANGES.cameraDistance.max + 0.3);
+  expect(v.gap).toBeGreaterThan(CAMERA_RANGES.cameraDistance.max - 0.3);
 });

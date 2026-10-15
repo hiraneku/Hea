@@ -11,7 +11,20 @@ export interface Settings {
   reducedEffects: boolean;
   /** Chase camera or a first-person view from the avatar's eyes (V toggles it in play). */
   camera: CameraMode;
+  /** Resting field of view of the chase camera, degrees; speed and dashes widen it further. */
+  fovThird: number;
+  /** Resting field of view from the eyes, degrees. */
+  fovFirst: number;
+  /** How far behind the body the chase camera rests, metres. */
+  cameraDistance: number;
 }
+
+/** The ranges the camera sliders cover (also the clamps applied to stored values). */
+export const CAMERA_RANGES = {
+  fovThird: { min: 65, max: 90 },
+  fovFirst: { min: 75, max: 105 },
+  cameraDistance: { min: 5, max: 8 },
+} as const;
 
 export const DEFAULT_SETTINGS: Settings = {
   sound: true,
@@ -20,6 +33,9 @@ export const DEFAULT_SETTINGS: Settings = {
   quality: 'auto',
   reducedEffects: false,
   camera: 'third',
+  fovThird: 74,
+  fovFirst: 82,
+  cameraDistance: 6.2,
 };
 
 export const SPELLS = [
@@ -58,6 +74,9 @@ export interface Snapshot {
   };
   dash: number;
   spell: SpellId;
+  /** A held Nova: 0..1 of the way to a charged blast, 0 when nothing is held. */
+  charge: number;
+  charged: boolean;
   cooldowns: number[];
   damageDealt: number;
   impacts: number;
@@ -68,6 +87,8 @@ export interface Snapshot {
     enabled: boolean;
     altitude: number;
     speed: number;
+    /** How much of the post-dash surge is still in the motor: 1 on the plateau, 0 at rest. */
+    boost: number;
     phase:
       | 'hover'
       | 'flying'
@@ -91,7 +112,14 @@ export interface Snapshot {
 
 export type GameEvent =
   | { type: 'mode'; mode: Mode }
-  | { type: 'hit'; kill: boolean; damage: number }
+  | {
+      type: 'hit';
+      kill: boolean;
+      damage: number;
+      /** For the spells that show a floating number: which spell, and where on screen (0..1)
+       * it lands plus the screen direction the hit travels in (unit vector, y down). */
+      number?: { spell: SpellId; x: number; y: number; dx: number; dy: number };
+    }
   | { type: 'damage'; amount: number }
   | { type: 'impact'; surface: 'wall' | 'ground'; actor: 'player' | 'boss'; strength: number }
   | { type: 'contact'; actor: 'player' | 'boss' }
@@ -120,10 +148,23 @@ export function readSettings(): Settings {
         : fallback.sensitivity,
       quality: ['auto', 'low', 'high'].includes(raw.quality) ? raw.quality : fallback.quality,
       camera: raw.camera === 'first' ? 'first' : fallback.camera,
+      fovThird: ranged(raw.fovThird, CAMERA_RANGES.fovThird, fallback.fovThird),
+      fovFirst: ranged(raw.fovFirst, CAMERA_RANGES.fovFirst, fallback.fovFirst),
+      cameraDistance: ranged(
+        raw.cameraDistance,
+        CAMERA_RANGES.cameraDistance,
+        fallback.cameraDistance,
+      ),
     };
   } catch {
     return fallback;
   }
+}
+
+function ranged(value: unknown, range: { min: number; max: number }, fallback: number) {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.max(range.min, Math.min(range.max, value))
+    : fallback;
 }
 
 export function saveSettings(settings: Settings): void {

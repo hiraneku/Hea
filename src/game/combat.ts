@@ -2,6 +2,31 @@ import { Vector3 } from 'three';
 import { clamp, segmentSphere, seededRandom, type Point3 } from './math';
 
 /** Main duel timings and thresholds; deliberately tunable against additional reference footage. */
+/**
+ * Nova can be held: a tap is the ordinary blast, a hold of `time` seconds charges it. The
+ * charged blast reaches further, throws harder and costs more; its damage is unchanged.
+ */
+export const NOVA_CHARGE = {
+  time: 0.6,
+  cost: 1.8,
+  radius: 1.5,
+  launch: 1.35,
+} as const;
+
+/** The state of a held Nova: how charged it is and what a release right now would do. */
+export function novaCharge(hold: number, energy: number, baseCost: number) {
+  const progress = Math.max(0, Math.min(1, hold / NOVA_CHARGE.time));
+  const cost = Math.round(baseCost * NOVA_CHARGE.cost);
+  const charged = progress >= 1 && energy >= cost;
+  return {
+    progress,
+    charged,
+    cost: charged ? cost : baseCost,
+    radius: charged ? NOVA_CHARGE.radius : 1,
+    launch: charged ? NOVA_CHARGE.launch : 1,
+  };
+}
+
 export const DUEL = {
   bossHealth: 1440,
   preferredRange: 21,

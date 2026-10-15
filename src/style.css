@@ -854,6 +854,24 @@ kbd {
 .spell-slot.selected::after {
   opacity: 1;
 }
+/* A held Nova: the slot fills from the bottom with the charge, and glows once it is full. */
+.spell-slot.charging::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: calc(var(--charge, 0) * 100%);
+  background: color-mix(in srgb, var(--element) 28%, transparent);
+  pointer-events: none;
+  transition: height 0.1s linear;
+}
+.spell-slot.charged {
+  border-color: #fff1c9;
+  box-shadow:
+    0 0 0 1px #fff1c966,
+    0 0 18px #ffd27a66;
+}
 .spell-slot:not(.selected):hover {
   background: #21332ed9;
 }
@@ -1270,6 +1288,58 @@ kbd {
 }
 #speed-lines.active {
   opacity: 0.75;
+}
+/* The post-dash surge: denser, brighter spokes for as long as the motor runs hot. */
+#speed-lines.surge {
+  opacity: calc(0.35 + 0.65 * var(--surge, 0));
+  background: repeating-conic-gradient(
+    from 20deg at 50% 50%,
+    #fff8 0deg 0.18deg,
+    transparent 0.18deg 11deg,
+    #fff3 11deg 11.3deg,
+    transparent 11.3deg 24deg
+  );
+}
+#damage-numbers {
+  position: absolute;
+  z-index: 9;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.damage-number {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font: 600 17px/1 var(--mono);
+  letter-spacing: 0.5px;
+  color: #8cedf7;
+  text-shadow:
+    0 0 10px #0a141a,
+    0 1px 2px #0a141aaa;
+  white-space: nowrap;
+  will-change: transform, opacity;
+}
+.damage-number.spell-2 {
+  font-size: 26px;
+  font-weight: 700;
+  color: #fff3d6;
+  text-shadow:
+    0 0 16px #ff9a3c,
+    0 0 6px #ff7a2a99,
+    0 0 10px #0a141a,
+    0 1px 2px #0a141acc;
+}
+#boost-vignette {
+  position: absolute;
+  z-index: 7;
+  inset: 0;
+  pointer-events: none;
+  opacity: var(--surge, 0);
+  background: radial-gradient(ellipse at 50% 50%, transparent 50%, #0a141a66 100%);
+  transition: opacity 0.08s;
+}
+.reduced-effects #boost-vignette {
+  display: none;
 }
 #toast {
   position: absolute;

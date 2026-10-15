@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { beforeAll, describe, it, expect } from 'vitest';
 import { Vector3 } from 'three';
 import {
   ATTACKS,
@@ -6,6 +6,8 @@ import {
   HitPause,
   PROJECTILES,
   guideMissile,
+  novaCharge,
+  NOVA_CHARGE,
   salvoSpread,
   shieldCovers,
   shieldScale,
@@ -13,6 +15,7 @@ import {
 import { flightWish, smoothFlight } from '../../src/game/flight';
 import { segmentSphere } from '../../src/game/math';
 import { FLIGHT } from '../../src/game/config';
+import { CAMERA_RANGES, DEFAULT_SETTINGS, SPELLS, readSettings } from '../../src/game/types';
 
 describe('front and peripheral Aegis', () => {
   const facing = new Vector3(0, 0, -1);
@@ -186,5 +189,68 @@ describe('smooth six-axis flight', () => {
       fine = smoothFlight(smoothFlight(velocity, zero, 0.05), zero, 0.05);
     expect(coarse.distanceTo(fine)).toBeLessThan(1e-8);
     expect(coarse.length()).toBeGreaterThan(0);
+  });
+});
+
+describe('held Nova', () => {
+  const cost = SPELLS[2].cost;
+  it('a tap or a short hold is the ordinary blast at the ordinary price', () => {
+    for (const hold of [0, 0.1, NOVA_CHARGE.time - 0.01]) {
+      const c = novaCharge(hold, 100, cost);
+      expect(c.charged).toBe(false);
+      expect(c.cost).toBe(cost);
+      expect(c.radius).toBe(1);
+      expect(c.launch).toBe(1);
+      expect(c.progress).toBeLessThan(1);
+    }
+  });
+  it('a full hold widens and hardens the blast and costs more, with the damage untouched', () => {
+    const c = novaCharge(NOVA_CHARGE.time, 100, cost);
+    expect(c.charged).toBe(true);
+    expect(c.progress).toBe(1);
+    expect(c.cost).toBe(Math.round(cost * NOVA_CHARGE.cost));
+    expect(c.radius).toBe(NOVA_CHARGE.radius);
+    expect(c.launch).toBe(NOVA_CHARGE.launch);
+    expect(SPELLS[2].damage).toBe(86);
+  });
+  it('without the energy for the charged price, a long hold falls back to the ordinary blast', () => {
+    const c = novaCharge(5, Math.round(cost * NOVA_CHARGE.cost) - 1, cost);
+    expect(c.progress).toBe(1);
+    expect(c.charged).toBe(false);
+    expect(c.cost).toBe(cost);
+  });
+});
+
+describe('camera settings', () => {
+  const storage = new Map<string, string>();
+  beforeAll(() => {
+    Object.assign(globalThis, {
+      matchMedia: () => ({ matches: false }),
+      localStorage: {
+        getItem: (k: string) => storage.get(k) ?? null,
+        setItem: (k: string, v: string) => storage.set(k, v),
+      },
+    });
+  });
+  it('defaults sit inside their slider ranges', () => {
+    expect(DEFAULT_SETTINGS.fovThird).toBeGreaterThanOrEqual(CAMERA_RANGES.fovThird.min);
+    expect(DEFAULT_SETTINGS.fovThird).toBeLessThanOrEqual(CAMERA_RANGES.fovThird.max);
+    expect(DEFAULT_SETTINGS.fovFirst).toBeGreaterThanOrEqual(CAMERA_RANGES.fovFirst.min);
+    expect(DEFAULT_SETTINGS.fovFirst).toBeLessThanOrEqual(CAMERA_RANGES.fovFirst.max);
+    expect(DEFAULT_SETTINGS.cameraDistance).toBeGreaterThanOrEqual(
+      CAMERA_RANGES.cameraDistance.min,
+    );
+    expect(DEFAULT_SETTINGS.cameraDistance).toBeLessThanOrEqual(CAMERA_RANGES.cameraDistance.max);
+  });
+  it('reads stored values, clamps them to the sliders and ignores junk', () => {
+    storage.set('hea-settings', JSON.stringify({ fovThird: 88, fovFirst: 999, cameraDistance: 1 }));
+    let s = readSettings();
+    expect(s.fovThird).toBe(88);
+    expect(s.fovFirst).toBe(CAMERA_RANGES.fovFirst.max);
+    expect(s.cameraDistance).toBe(CAMERA_RANGES.cameraDistance.min);
+    storage.set('hea-settings', JSON.stringify({ fovThird: 'wide', cameraDistance: null }));
+    s = readSettings();
+    expect(s.fovThird).toBe(DEFAULT_SETTINGS.fovThird);
+    expect(s.cameraDistance).toBe(DEFAULT_SETTINGS.cameraDistance);
   });
 });

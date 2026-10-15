@@ -26,6 +26,13 @@ export class AudioEngine {
   private settings: Settings;
   private noise?: AudioBuffer;
   private scrapes = new Map<Actor, ScrapeLoop>();
+  private windLoop?: {
+    source: AudioBufferSourceNode;
+    band: BiquadFilterNode;
+    gain: GainNode;
+    pan: StereoPannerNode | null;
+    fed: number;
+  };
   private recent = new Map<string, number[]>();
   constructor(settings: Settings) {
     this.settings = settings;
@@ -196,10 +203,61 @@ export class AudioEngine {
       0.05,
     );
   }
-  /** Let every scrape that has not been fed this frame die away. */
+  /**
+   * The rush of air past a body in flight: a soft hiss that is all but silent below 12 m/s,
+   * grows through the 21 m/s cruise, peaks with the post-dash surge, and leans towards the
+   * side the body is sweeping to. Fed every frame while flying; it dies away when it is not.
+   */
+  wind(speed: number, lateral: number, surge: number) {
+    if (!this.live) return;
+    const ctx = this.context!,
+      now = ctx.currentTime;
+    let loop = this.windLoop;
+    if (!loop) {
+      const source = ctx.createBufferSource(),
+        band = ctx.createBiquadFilter(),
+        gain = ctx.createGain(),
+        pan = typeof ctx.createStereoPanner === 'function' ? ctx.createStereoPanner() : null;
+      source.buffer = this.noise!;
+      source.loop = true;
+      source.loopStart = 0.137;
+      band.type = 'bandpass';
+      band.Q.value = 0.55;
+      band.frequency.value = 700;
+      gain.gain.value = 0;
+      source.connect(band);
+      band.connect(gain);
+      if (pan) {
+        gain.connect(pan);
+        pan.connect(this.bus!);
+      } else gain.connect(this.bus!);
+      source.start(now);
+      loop = this.windLoop = { source, band, gain, pan, fed: now };
+    }
+    loop.fed = now;
+    // Silent until 12 m/s, about two thirds at cruise, full at the surge's 33 m/s.
+    const t = Math.max(0, Math.min(1, (speed - 12) / 21)),
+      drive = t * t * (3 - 2 * t),
+      level = drive * (0.075 + 0.045 * surge);
+    loop.gain.gain.setTargetAtTime(level, now, 0.08);
+    loop.band.frequency.setTargetAtTime(650 + drive * 1900 + surge * 500, now, 0.1);
+    loop.pan?.pan.setTargetAtTime(Math.max(-0.6, Math.min(0.6, lateral * 0.6)), now, 0.12);
+  }
+  /** Let every scrape (and the wind) that has not been fed this frame die away. */
   update() {
     if (!this.context) return;
     const now = this.context.currentTime;
+    if (this.windLoop && now - this.windLoop.fed > 0.08) {
+      this.windLoop.gain.gain.setTargetAtTime(0, now, 0.14);
+      if (now - this.windLoop.fed > 2.5) {
+        this.windLoop.source.stop();
+        this.windLoop.source.disconnect();
+        this.windLoop.band.disconnect();
+        this.windLoop.gain.disconnect();
+        this.windLoop.pan?.disconnect();
+        this.windLoop = undefined;
+      }
+    }
     for (const [actor, loop] of this.scrapes) {
       if (now - loop.fed < 0.08) continue;
       loop.gain.gain.setTargetAtTime(0, now, 0.06);
@@ -216,6 +274,17 @@ export class AudioEngine {
     }
   }
 
+  /** The charged Nova: a deeper body under the ordinary cast, and a short bright crack. */
+  novaCharged() {
+    this.tone(140, 38, 0.5, 0.4, 'sine');
+    this.tone(2400, 900, 0.09, 0.2, 'square');
+    this.air(0.4, 1400, 0.3);
+  }
+  /** The tick that marks a Nova hold reaching full charge. */
+  chargeReady() {
+    this.tone(1320, 1760, 0.08, 0.16, 'sine');
+    this.tone(2640, 2640, 0.05, 0.06, 'triangle', 0.03);
+  }
   cast(spell: number) {
     if (spell === 0) {
       const duck = this.crowd('bolt', 0.05);

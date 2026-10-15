@@ -1423,12 +1423,12 @@ export class Effects {
     mesh.scale.setScalar(0.2);
     this.add(mesh, 0.6, radius / 0.6);
   }
-  impact(at: THREE.Vector3, color: THREE.ColorRepresentation, large = false) {
-    this.burst(at, color, large ? 70 : 28, large ? 9 : 4, large ? 0.65 : 0.35);
-    this.debris(at, large ? 20 : 7, large ? 6 : 3);
+  impact(at: THREE.Vector3, color: THREE.ColorRepresentation, large = false, scale = 1) {
+    this.burst(at, color, large ? 70 : 28, (large ? 9 : 4) * scale, large ? 0.65 : 0.35);
+    this.debris(at, large ? 20 : 7, (large ? 6 : 3) * scale);
     if (large) {
-      this.shock(at, color, 7);
-      this.burst(at, '#ffffff', 18, 5, 0.5, 1);
+      this.shock(at, color, 7 * scale);
+      this.burst(at, '#ffffff', 18, 5 * scale, 0.5, 1);
     }
   }
   /**
