@@ -34,6 +34,9 @@ export const FLIGHT = {
   braking: 7,
   hoverHeight: 0.85,
   dashSpeed: 48.5,
+  /** After a dash the flight motor runs this much faster, decaying over `boostDuration` s. */
+  boost: 0.65,
+  boostDuration: 1.5,
 } as const;
 
 export const GROUND = { speed: 8.5, gravity: 25, jump: 9.6, airJump: 8.6 } as const;

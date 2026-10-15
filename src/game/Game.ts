@@ -187,6 +187,8 @@ export class Game {
   private health = 100;
   private energy = 100;
   private dashCooldown = 0;
+  /** Seconds of post-dash flight boost left (the dash carries momentum into the glide). */
+  private flightBoost = 0;
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
   private dashBuffer = 0;
@@ -539,6 +541,7 @@ export class Game {
         strength: this.airDash.strength,
         age: this.airDash.age,
         invulnerable: this.airDash.invulnerable,
+        boost: this.flightBoost,
       },
       ragdoll: {
         player: this.playerTumble.active,
@@ -636,7 +639,7 @@ export class Game {
     this.playerWasPhysical = false;
     this.bossSkidTimer = 0;
     this.health = this.energy = 100;
-    this.dashCooldown = this.dashTime = this.knockTime = 0;
+    this.dashCooldown = this.dashTime = this.knockTime = this.flightBoost = 0;
     this.spell = 0;
     this.cooldowns = [0, 0, 0];
     this.pendingPlayerImpulse = null;
@@ -887,6 +890,13 @@ export class Game {
       this.flightEnabled ? this.pitch : 0,
     );
     if (!this.flightEnabled) wish.multiplyScalar(GROUND.speed / FLIGHT.speed);
+    // The dash leaves the flight motor running hot for a moment: a glide that is noticeably
+    // faster right after the burst and settles back over a second and a half.
+    this.flightBoost = Math.max(0, this.flightBoost - dt);
+    if (this.flightEnabled && this.flightBoost > 0) {
+      const k = this.flightBoost / FLIGHT.boostDuration;
+      wish.multiplyScalar(1 + FLIGHT.boost * k * k * (3 - 2 * k));
+    }
     if (showcase) {
       const target = new THREE.Vector3(
         Math.sin(this.time * 0.46) * 11,
@@ -957,11 +967,13 @@ export class Game {
         this.airDash.start(dashAim.normalize());
         this.ghostClock = 0;
         this.knockTime = Math.min(this.knockTime, 0.55);
+        if (this.flightEnabled) this.flightBoost = FLIGHT.boostDuration;
         this.audio.dash();
         const chest = this.player.clone().add(UP);
         this.fx.burst(chest, '#effaff', 22, 3.6, 0.26, 2);
-        // A flat ring at the chest, pointing the way the body is about to go.
-        this.fx.glyph(chest, this.airDash.direction, '#cfeeff', 1.1, 0.22);
+        // The launch disc: a flat white circle left hanging at the take-off point, facing the
+        // way the body goes, that tears open into a jagged ring as the body leaves it.
+        this.fx.dashRing(chest, this.airDash.direction);
         if (!this.flightEnabled) this.fx.dust(this.player, 8, 1.4);
       }
     }
@@ -1364,7 +1376,13 @@ export class Game {
     // A body dragged along the ground leaves a furrow, not a light trail.
     if (this.playerTumble.physical && this.playerTumble.grounded)
       this.playerTrail.reset(this.avatar.position);
-    else this.playerTrail.push(this.avatar.position, this.camera.position);
+    else
+      this.playerTrail.push(
+        this.avatar.position,
+        this.camera.position,
+        // The ribbon thickens while the post-dash glide is still fast, then thins back.
+        1 + 2.4 * Math.min(1, this.flightBoost / FLIGHT.boostDuration),
+      );
     this.world.focusShadow(this.player);
     this.boss.present(
       this.time,
@@ -2385,7 +2403,7 @@ export class Game {
     }
     this.velocity.set(0, 0, 0);
     this.impulse.set(0, 0, 0);
-    this.dashTime = 0;
+    this.dashTime = this.flightBoost = 0;
     this.knockTime = tuning.stagger;
     this.contactPause('player', incoming, tuning.pause * power, tuning.launch * power, tuning.slow);
     this.shake = 0.018;

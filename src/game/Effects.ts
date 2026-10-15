@@ -245,7 +245,7 @@ export class Ribbon {
     this.count = 0;
     this.geometry.setDrawRange(0, 0);
   }
-  push(point: THREE.Vector3, camera: THREE.Vector3) {
+  push(point: THREE.Vector3, camera: THREE.Vector3, widthScale = 1) {
     for (let i = this.length - 1; i > 0; i--) this.points[i].copy(this.points[i - 1]);
     this.points[0].copy(point);
     this.count = Math.min(this.count + 1, this.length);
@@ -257,7 +257,7 @@ export class Ribbon {
       v2.subVectors(camera, p).normalize();
       v1.cross(v2)
         .normalize()
-        .multiplyScalar(this.width * (1 - i / this.length));
+        .multiplyScalar(this.width * widthScale * (1 - i / this.length));
       const offset = i * 6;
       this.positions[offset] = p.x + v1.x;
       this.positions[offset + 1] = p.y + v1.y;
@@ -1266,6 +1266,74 @@ export class Effects {
         o.userData.baseOpacity = (o.material as THREE.Material).opacity;
     });
     this.timed.push({ object, life, max: life, grow, baseScale: object.scale.x, spin });
+  }
+  private readonly dashRingGeometry = new THREE.CircleGeometry(1, 72);
+  /**
+   * The dash launch disc. At the instant of the burst a solid white circle hangs at the
+   * take-off point, square to the dash direction, and stays there as the body leaves it. Over
+   * the next fifth of a second it widens from about 2.2 m to 4.5 m in radius while its middle
+   * erodes away, so it turns into a torn ring with pale blue-grey radial creases and jagged
+   * spikes around the rim, and is gone before the dash ends.
+   */
+  dashRing(at: THREE.Vector3, direction: THREE.Vector3) {
+    const material = new THREE.ShaderMaterial({
+      uniforms: { uPhase: { value: 0 }, uSeed: { value: Math.random() * 100 } },
+      vertexShader: `varying vec2 vUv;
+        void main() {
+          vUv = uv;
+          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }`,
+      fragmentShader: `uniform float uPhase;
+        uniform float uSeed;
+        varying vec2 vUv;
+        float hash(float n) { return fract(sin(n * 127.1 + uSeed) * 43758.5453); }
+        // Angular noise with a number of jagged steps around the circle, smoothed a little.
+        float banded(float angle, float bands, float salt) {
+          float x = angle / 6.28318 * bands;
+          float i = floor(x), f = fract(x);
+          f = f * f * (3.0 - 2.0 * f);
+          return mix(hash(i + salt), hash(i + 1.0 + salt), f);
+        }
+        void main() {
+          vec2 p = (vUv - 0.5) * 2.0;
+          float r = length(p);
+          float angle = atan(p.y, p.x) + 3.14159;
+          // The rim: a few broad lobes plus fine tears, growing more ragged as it spreads.
+          float lobes = banded(angle, 7.0, 1.0), tears = banded(angle, 41.0, 2.0);
+          float rim = 0.78 + 0.1 * lobes + (0.04 + 0.1 * uPhase) * tears;
+          float body = smoothstep(rim, rim - 0.06, r);
+          // Radial spikes shooting past the rim.
+          float spikeMask = step(0.9, banded(angle, 23.0, 3.0));
+          float spikes = spikeMask * smoothstep(rim + 0.22 + 0.12 * uPhase, rim - 0.02, r) * step(rim - 0.05, r);
+          // The middle erodes from the centre outwards along an uneven front.
+          float front = uPhase * 1.05 * (0.72 + 0.42 * banded(angle, 11.0, 4.0));
+          float hole = smoothstep(front - 0.08, front + 0.03, r);
+          float alpha = max(body, spikes) * hole;
+          // Pale blue-grey creases radiating from the centre within the white.
+          float crease = smoothstep(0.55, 0.9, banded(angle, 90.0, 5.0)) * smoothstep(0.15, 0.6, r);
+          vec3 colour = mix(vec3(1.0), vec3(0.78, 0.86, 0.92), crease * 0.9);
+          float fade = 1.0 - smoothstep(0.55, 1.0, uPhase);
+          gl_FragColor = vec4(colour, alpha * fade);
+          if (gl_FragColor.a < 0.01) discard;
+        }`,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      toneMapped: false,
+    });
+    const ring = new THREE.Mesh(this.dashRingGeometry, material);
+    ring.position.copy(at);
+    ring.lookAt(at.clone().add(direction));
+    ring.scale.setScalar(2.2);
+    ring.userData.kind = 'dash-ring';
+    ring.userData.keepGeometry = true;
+    this.add(ring, 0.2, 0, 0);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e, progress) => {
+      material.uniforms.uPhase.value = progress;
+      const grow = 1 - Math.pow(1 - progress, 2.2);
+      e.object.scale.setScalar(2.2 + 2.3 * grow);
+    };
   }
   glyph(
     at: THREE.Vector3,
