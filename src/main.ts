@@ -98,7 +98,7 @@ app.innerHTML = `
       <span class="look-label">GESER LAYAR UNTUK MELIHAT</span>
     </div>
     <div id="demo-ui" hidden><div class="demo-tag"><i></i><span>DEMONSTRASI LANGSUNG<small>Kamera otomatis · Efek real-time</small></span></div><button id="demo-play" class="primary-button"><span>GILIRANMU</span>${icons.arrow}</button><button id="demo-exit" class="icon-button" aria-label="Keluar dari demo">${icons.close}</button></div>
-    <div id="damage-vignette" aria-hidden="true"></div><div id="impact-flash" aria-hidden="true"></div><div id="speed-lines" aria-hidden="true"></div>
+    <div id="damage-vignette" aria-hidden="true"></div><div id="speed-lines" aria-hidden="true"></div>
     <div id="toast" role="status"></div>
     <dialog id="panel-dialog" aria-labelledby="panel-title"></dialog>
     <div id="boot" role="status"><span class="boot-wordmark">HEA.</span><span class="boot-loader"></span><span id="boot-status">MENYIAPKAN ARENA</span></div>
@@ -207,10 +207,6 @@ function event(event: GameEvent) {
     clearTimeout(damageTimer);
     damageTimer = setTimeout(() => $('#damage-vignette').classList.remove('active'), 300);
   } else if (event.type === 'impact') {
-    if (!settings.reducedEffects) {
-      experience.classList.add('impact');
-      setTimeout(() => experience.classList.remove('impact'), 80);
-    }
     $('#impact-caption').textContent =
       `${event.actor === 'boss' ? 'BOSS TERHEMPAS' : 'TERHEMPAS'} / ${event.surface === 'wall' ? 'BENTURAN DINDING' : 'BENTURAN TANAH'}`;
     $('#impact-caption').classList.add('visible');

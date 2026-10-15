@@ -4,6 +4,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 import { Controls } from './Controls';
+import { ImpactFrame } from './ImpactFrame';
 import { AudioEngine } from './Audio';
 import { Effects, Ribbon, makeSigil } from './Effects';
 import { World, contactShadowTexture } from './World';
@@ -119,6 +120,9 @@ export class Game {
   private boss: Boss;
   private aegis = new AutoShield();
   private composer: EffectComposer;
+  private bloomPass: UnrealBloomPass;
+  /** The two-tone graphic cut on heavy hits, applied as the last pass of the composer. */
+  private readonly impactFrame = new ImpactFrame();
   private settings: Settings;
   private settingsApplied = false;
   private mode: Mode = 'menu';
@@ -370,8 +374,11 @@ export class Game {
     this.scene.add(this.shadows);
     this.composer = new EffectComposer(this.renderer);
     this.composer.addPass(new RenderPass(this.scene, this.camera));
-    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(800, 600), 0.5, 0.45, 1.1));
+    this.bloomPass = new UnrealBloomPass(new THREE.Vector2(800, 600), 0.5, 0.45, 1.1);
+    this.composer.addPass(this.bloomPass);
     this.composer.addPass(new OutputPass());
+    // The impact frame works on the final display-space picture, after tone mapping.
+    this.composer.addPass(this.impactFrame.pass);
     try {
       const n = Number(localStorage.getItem('hea-duel-best'));
       this.bestTime = Number.isFinite(n) && n > 0 ? n : 0;
@@ -536,6 +543,11 @@ export class Game {
       heavyCircleRadius: this.boss.chargeRadius,
       playerPosition: this.player.toArray(),
       playerVelocity: this.velocity.clone().add(this.impulse).add(this.airDash.velocity).toArray(),
+      impactFrame: {
+        active: this.impactFrame.active,
+        phase: this.impactFrame.phase,
+        elapsed: this.impactFrame.elapsed,
+      },
       dashMotion: {
         active: this.airDash.active,
         strength: this.airDash.strength,
@@ -652,6 +664,7 @@ export class Game {
     this.damageTimer = 10;
     this.hitPause.reset();
     this.flashTimer = 0;
+    this.impactFrame.cancel();
     this.impactGate.player = this.impactGate.boss = this.skidTimer = 0;
     this.outcome = null;
     this.finishTimer = 0;
@@ -721,6 +734,7 @@ export class Game {
   }
   private configureQuality() {
     this.useBloom = !this.lowQuality;
+    this.bloomPass.enabled = this.useBloom;
     this.renderer.shadowMap.enabled = !this.lowQuality;
     this.world.setQuality(this.lowQuality);
     this.boss.setQuality(this.lowQuality);
@@ -789,8 +803,11 @@ export class Game {
       this.camera.lookAt(new THREE.Vector3().fromArray(this.testCamera.look));
       this.camera.updateMatrixWorld();
     }
-    if (this.useBloom) this.composer.render();
-    else this.renderer.render(this.scene, this.camera);
+    if (this.useBloom || this.impactFrame.active) {
+      const target = this.composer.renderTarget1;
+      this.impactFrame.prepare(this.camera, target.width, target.height);
+      this.composer.render();
+    } else this.renderer.render(this.scene, this.camera);
     this.renderNeeded = false;
   }
   private simulate(realDt: number) {
@@ -804,6 +821,7 @@ export class Game {
       this.setFlight(!this.flightEnabled);
     }
     this.flashTimer = Math.max(0, this.flashTimer - realDt);
+    this.impactFrame.update(realDt);
     // The camera punch runs on wall-clock time so it still plays while the world is frozen.
     this.punch = damp(this.punch, 0, 4.5, realDt);
     if (this.hitPause.active && this.mode === 'playing') this.updateCamera(0, false, realDt);
@@ -2276,8 +2294,10 @@ export class Game {
     at.addScaledVector(incoming.clone().normalize(), actor === 'player' ? -0.65 : -1.2);
     this.fx.contact(at, incoming, strength > 55 ? 1.4 : 0.8);
     this.hitPause.request(duration, slow);
-    // Heavy contact: a short zoom punch released through the slow-motion tail.
+    // Heavy contact: a short zoom punch released through the slow-motion tail, and the
+    // two-tone impact frame cut around the point of contact.
     if (slow > 0 && !this.settings.reducedEffects) this.punch = 1;
+    if (slow > 0) this.impactCut(at);
     this.contacts++;
     this.emit({ type: 'contact', actor });
   }
@@ -2434,11 +2454,16 @@ export class Game {
     if (this.mode !== 'menu') this.audio.crash(strength);
     this.shake = this.settings.reducedEffects ? 0 : Math.min(0.1, strength / 500);
     this.hitPause.request(0.035);
-    // Impact frames are caused by secondary world collisions, never by ordinary spell casts.
-    if (this.flashTimer <= 0) {
-      this.flashTimer = DUEL.impactInterval;
-      this.emit({ type: 'impact', surface, actor, strength });
-    }
+    // Impact frames are caused by heavy contact and by world collisions, never by ordinary
+    // spell casts; the caption follows the collision.
+    if (this.impactCut(at)) this.emit({ type: 'impact', surface, actor, strength });
+  }
+  /** The graphic cut, rate-limited so a hit and the crash that follows do not strobe. */
+  private impactCut(at: THREE.Vector3) {
+    if (this.flashTimer > 0 || this.mode === 'menu') return false;
+    this.flashTimer = DUEL.impactInterval;
+    this.impactFrame.trigger(at, this.settings.reducedEffects);
+    return true;
   }
 
   /** Explicit dev-only QA scenarios. Never exported to the production Pages build. */
@@ -2557,6 +2582,7 @@ export class Game {
     this.clearProjectiles();
     this.fx.clear();
     this.composer.dispose();
+    this.impactFrame.dispose();
     this.renderer.dispose();
   }
 }

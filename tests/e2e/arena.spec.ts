@@ -274,7 +274,12 @@ test('ground slam deforms terrain, produces collision impact, respects comfort m
   test.skip(info.project.name !== 'mobile');
   await load(page);
   await scenario(page, 'ground');
-  await step(page, 1.3);
+  // Comfort mode keeps the impact frame to the calm paper beat: no inverted flash.
+  await step(page, 0.18);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.impactFrame.active).toBe(true);
+  expect(d.impactFrame.phase).toBe('paper-again');
+  await step(page, 1.12);
   const s = await state(page);
   expect(s.craters).toBeGreaterThan(0);
   expect(s.impacts).toBeGreaterThan(0);
@@ -284,10 +289,9 @@ test('ground slam deforms terrain, produces collision impact, respects comfort m
   expect(await page.evaluate(() => window.__HEA_DEBUG__.harness!.groundAt(0, 24))).toBeLessThan(
     -0.3,
   );
-  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).lastImpact?.surface).toBe(
-    'ground',
-  );
-  await expect(page.locator('#experience')).not.toHaveClass(/\bimpact\b/);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.lastImpact?.surface).toBe('ground');
+  expect(d.impactFrame.active).toBe(false);
 });
 
 test('fire that reaches the ground leaves scorch marks that fade out within seconds', async ({
@@ -912,8 +916,14 @@ test('heavy contact freezes briefly, releases in slow motion with a camera punch
   expect(d.hitPause).toBeGreaterThan(0.1);
   expect(d.timeScale).toBe(0);
   expect(d.fov).toBeLessThan(70);
+  // The impact frame plays through the freeze in real time: one paper frame, then the negative.
+  expect(d.impactFrame.active).toBe(true);
+  expect(d.impactFrame.phase).toBe('paper');
   await step(page, 0.09);
   expect((await state(page)).position).toEqual(p);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).impactFrame.phase).toBe(
+    'negative',
+  );
   // After the 0.15 s freeze the world moves again, but in slow motion that ramps back up.
   await step(page, 0.1);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
@@ -928,6 +938,7 @@ test('heavy contact freezes briefly, releases in slow motion with a camera punch
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.timeScale).toBe(1);
   expect(d.fov).toBeGreaterThan(71);
+  expect(d.impactFrame.active).toBe(false);
   expect((await state(page)).position.z).toBeLessThan(p.z - 5);
   await scenario(page, 'nova-air');
   await page.locator('#touch-fire').tap();
