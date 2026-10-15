@@ -96,9 +96,9 @@ export const ATTACKS = {
     label: 'RENTETAN API',
     warning: 'SALVO API',
     tell: 0.9,
-    duration: 4.2,
+    duration: 5.6,
     recovery: 0.95,
-    shots: 40,
+    shots: 54,
     interval: 0.1,
   },
   missiles: {
@@ -255,11 +255,11 @@ export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer' | 'vortex'
 /** The same radius drives the visible core, shield size and swept collision. */
 export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, slow: 0, stagger: 0 },
-  fire: { radius: 0.32, speed: 30, life: 4, launch: 36, pause: 0.09, slow: 0, stagger: 0.85 },
-  missile: { radius: 0.34, speed: 25, life: 4.5, launch: 60, pause: 0.12, slow: 0, stagger: 1.2 },
+  fire: { radius: 0.32, speed: 36, life: 4, launch: 36, pause: 0.09, slow: 0, stagger: 0.85 },
+  missile: { radius: 0.34, speed: 30, life: 4.5, launch: 60, pause: 0.12, slow: 0, stagger: 1.2 },
   hammer: {
     radius: 1.25,
-    speed: 31,
+    speed: 37,
     life: 5,
     launch: 122,
     pause: DUEL.heavyFreeze,
@@ -269,7 +269,7 @@ export const PROJECTILES = {
   /** The vortex seed: harmless in flight, but its core detonation is a heavy contact. */
   vortex: {
     radius: 0.55,
-    speed: 26,
+    speed: 31,
     life: 3,
     launch: 80,
     pause: DUEL.heavyFreeze,
@@ -404,12 +404,13 @@ export class HitPause {
   }
 }
 
-/** Low-discrepancy spray: readable cone, wider than the previous pinpoint stream. */
+/** Low-discrepancy spray: a readable cone, wider than the previous pinpoint stream. */
 export function salvoSpread(index: number): { yaw: number; pitch: number } {
-  // Four-shot rakes; one centred bolt in each packet and a broad surrounding fan.
+  // Four-shot rakes; one centred bolt in each packet and a broad surrounding fan (about ±7.5°
+  // across, ±5° up and down) so the salvo sweeps the lane instead of drilling one point.
   const side = Math.floor(index / 4) % 2 ? -1 : 1;
-  const yaw = [-0.085, 0, 0.095, 0.035][index % 4] * side;
-  const pitch = [0.045, 0, -0.04, 0.065][index % 4];
+  const yaw = [-0.12, 0, 0.133, 0.05][index % 4] * side;
+  const pitch = [0.06, 0, -0.052, 0.085][index % 4];
   return { yaw, pitch };
 }
 
@@ -430,7 +431,7 @@ export function guideMissile(
     distance = offset.length();
   const alignment = velocity.clone().normalize().dot(offset.clone().normalize());
   if (distance <= 5.2 || age >= 1.35 || alignment < 0.05) state.committed = true;
-  const speed = Math.min(PROJECTILES.missile.speed, 15 + age * 8);
+  const speed = Math.min(PROJECTILES.missile.speed, 18 + age * 10);
   if (state.committed) return velocity.clone().normalize().multiplyScalar(speed);
   const lead = Math.min(0.18, distance / 60);
   const desired = offset.addScaledVector(targetVelocity, lead * 0.25);

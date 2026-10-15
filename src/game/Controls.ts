@@ -21,6 +21,9 @@ export class Controls {
   private lookX = 0;
   private lookY = 0;
   private stickOrigin = { x: 0, y: 0 };
+  /** Where the stick's origin sits relative to the pad centre (the pad re-centres under the thumb). */
+  private stickShift = { x: 0, y: 0 };
+  private lookTime = 0;
   private lockedBefore = false;
   private lockPending = false;
   private ignoreMouseUntil = 0;
@@ -185,8 +188,17 @@ export class Controls {
       e.preventDefault();
       e.stopPropagation();
       this.stickPointer = e.pointerId;
-      const rect = joystick.getBoundingClientRect();
-      this.stickOrigin = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+      const rect = joystick.getBoundingClientRect(),
+        cx = rect.left + rect.width / 2,
+        cy = rect.top + rect.height / 2;
+      // The stick's neutral point is wherever the thumb lands (within the inner part of the
+      // pad), so the first touch is not already a push in some direction.
+      const reach = rect.width * STICK.recentre;
+      this.stickShift = {
+        x: Math.max(-reach, Math.min(reach, e.clientX - cx)),
+        y: Math.max(-reach, Math.min(reach, e.clientY - cy)),
+      };
+      this.stickOrigin = { x: cx + this.stickShift.x, y: cy + this.stickShift.y };
       joystick.setPointerCapture(e.pointerId);
       joystick.classList.add('engaged');
       this.updateStick(e);
@@ -198,6 +210,7 @@ export class Controls {
       if (e.pointerId !== this.stickPointer) return;
       this.stickPointer = null;
       this.stickX = this.stickY = 0;
+      this.stickShift = { x: 0, y: 0 };
       this.knob.style.transform = '';
       joystick.classList.remove('engaged');
     };
@@ -209,14 +222,22 @@ export class Controls {
       this.lookPointer = e.pointerId;
       this.lookX = e.clientX;
       this.lookY = e.clientY;
+      this.lookTime = e.timeStamp;
       look.setPointerCapture(e.pointerId);
     });
     look.addEventListener('pointermove', (e) => {
       if (e.pointerId !== this.lookPointer) return;
-      this.dx += (e.clientX - this.lookX) * 1.4;
-      this.dy += (e.clientY - this.lookY) * 1.4;
+      const mx = e.clientX - this.lookX,
+        my = e.clientY - this.lookY,
+        elapsed = Math.max(4, e.timeStamp - this.lookTime);
+      this.lookTime = e.timeStamp;
       this.lookX = e.clientX;
       this.lookY = e.clientY;
+      // Slow drags stay fine for aiming; a flick turns further (gain rises with finger speed).
+      const speed = Math.hypot(mx, my) / elapsed,
+        gain = LOOK.base + Math.min(LOOK.flick, speed * LOOK.flickRate);
+      this.dx += mx * gain;
+      this.dy += my * gain;
     });
     const clearLook = (e: PointerEvent) => {
       if (e.pointerId === this.lookPointer) this.lookPointer = null;
@@ -277,7 +298,7 @@ export class Controls {
   }
 
   private updateStick(e: PointerEvent) {
-    const radius = this.joystick.clientWidth * 0.32;
+    const radius = this.joystick.clientWidth * STICK.throw;
     let x = e.clientX - this.stickOrigin.x,
       y = e.clientY - this.stickOrigin.y;
     const distance = Math.hypot(x, y);
@@ -285,8 +306,25 @@ export class Controls {
       x *= radius / distance;
       y *= radius / distance;
     }
-    this.stickX = x / radius;
-    this.stickY = y / radius;
-    this.knob.style.transform = `translate(${x}px, ${y}px)`;
+    const axes = stickResponse(x / radius, y / radius);
+    this.stickX = axes.x;
+    this.stickY = axes.y;
+    this.knob.style.transform = `translate(${this.stickShift.x + x}px, ${this.stickShift.y + y}px)`;
   }
+}
+
+/** Touch stick geometry: throw radius and re-centre reach as fractions of the pad width. */
+export const STICK = { throw: 0.36, recentre: 0.2, deadZone: 0.14, curve: 1.45 } as const;
+/** Touch look: px of camera turn per px of finger travel, rising with finger speed (px/ms). */
+export const LOOK = { base: 1.25, flick: 1.1, flickRate: 0.55 } as const;
+/**
+ * Radial dead zone and a gentle power curve: a resting thumb does not creep, small nudges are
+ * precise, and full deflection still reaches full speed in every direction.
+ */
+export function stickResponse(x: number, y: number): { x: number; y: number } {
+  const distance = Math.hypot(x, y);
+  if (distance <= STICK.deadZone) return { x: 0, y: 0 };
+  const t = Math.min(1, (distance - STICK.deadZone) / (1 - STICK.deadZone)),
+    magnitude = Math.pow(t, STICK.curve);
+  return { x: (x / distance) * magnitude, y: (y / distance) * magnitude };
 }

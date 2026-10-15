@@ -41,16 +41,17 @@ describe('adaptive terrain grid', () => {
     const centre = cellWidth(0, half, segments),
       rim = cellWidth(half - 0.1, half, segments),
       mid = cellWidth(60, half, segments);
-    expect(centre).toBeLessThan(1.1);
+    expect(centre).toBeLessThan(1.15);
     expect(rim).toBeGreaterThan(3.5);
     expect(mid).toBeGreaterThan(centre);
     expect(mid).toBeLessThan(rim);
   });
-  it('costs about 60 % fewer triangles than the old regular 190-segment grid', () => {
+  it('costs far fewer triangles than a regular grid with the same centre resolution', () => {
     const triangles = 2 * segments * segments,
-      before = 2 * 190 * 190;
-    expect(triangles).toBeLessThan(before * 0.41);
-    expect(triangles).toBe(28800);
+      regular = Math.ceil((half * 2) / cellWidth(0, half, segments)),
+      before = 2 * regular * regular;
+    expect(triangles).toBeLessThan(before * 0.25);
+    expect(triangles).toBe(2 * 152 * 152);
   });
   it('maps world coordinates to a cell and a continuous fraction across it', () => {
     for (const x of [-120, -33.3, -1, 0, 0.4, 17.25, 99, 141.9]) {

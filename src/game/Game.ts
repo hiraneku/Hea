@@ -9,6 +9,7 @@ import { Effects, Ribbon, makeSigil } from './Effects';
 import { World, contactShadowTexture } from './World';
 import { Boss } from './Boss';
 import { BossNavigator } from './BossNavigation';
+import { BOSS_MOTOR } from './BossTactics';
 import { ShieldPatchRegistry } from './ShieldPatches';
 import { SCENARIOS } from './TestScenarios';
 import {
@@ -725,6 +726,8 @@ export class Game {
     if (this.frameTime >= 0.75) {
       this.fps = Math.round(this.frames / this.frameTime);
       this.frames = this.frameTime = 0;
+      // The particle budget follows the real frame rate (not under the stepped test harness).
+      if (!this.manualSimulation && this.renderTime > 2) this.fx.load(this.fps);
       if (this.settings.quality === 'auto' && this.lowQuality && this.renderTime > 5) {
         this.slowFrames = this.fps < 26 ? this.slowFrames + 1 : 0;
         if (this.slowFrames >= 4 && this.autoResolution > 0.75) {
@@ -742,6 +745,7 @@ export class Game {
       }
     }
     if (!this.manualSimulation) this.simulate(Math.max(0, rawDt));
+    this.audio.update();
     this.renderer.info.reset();
     if (this.useBloom) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
@@ -890,7 +894,7 @@ export class Game {
       this.impulse.y = damp(this.impulse.y, 0, recovery * 6, dt);
       if (!this.flightEnabled) this.verticalVelocity -= GROUND.gravity * dt;
       else if (move.lift >= 0 && this.player.y < floor + FLIGHT.hoverHeight)
-        wish.y = Math.max(wish.y, (floor + FLIGHT.hoverHeight - this.player.y) * 4 * recovery);
+        wish.y = Math.max(wish.y, (floor + FLIGHT.hoverHeight - this.player.y) * 6 * recovery);
     }
     if (this.flightEnabled && !physical) {
       if (wish.y > 0) wish.y *= clamp((ARENA.ceiling - this.player.y) / 3, 0, 1);
@@ -957,6 +961,8 @@ export class Game {
       this.skidTimer = 0.045;
       this.fx.skid(this.player, this.impulse.clone().add(motor), 1, 'player');
     }
+    if (dragging && this.mode !== 'menu')
+      this.audio.scrape('player', Math.hypot(this.impulse.x + motor.x, this.impulse.z + motor.z));
     this.roll = damp(
       this.roll,
       this.settings.reducedEffects
@@ -1032,8 +1038,12 @@ export class Game {
         this.world.obstacles,
         this.world.surfaceHeight(nx, nz),
       );
-      if (total.y < 0 && ny <= floor) {
-        const force = Math.abs(total.y),
+      // A dragged body hugs the ground: on a falling slope it would otherwise lift off in
+      // tiny hops, lose its friction and creep along "unconscious" for seconds.
+      const snapped =
+        tumble.physical && tumble.landings > 0 && total.y <= 0.001 && ny <= floor + 0.35;
+      if ((total.y < 0 && ny <= floor) || snapped) {
+        const force = snapped ? 0 : Math.abs(total.y),
           contactFloor = floor;
         let throughRoof = false;
         if (knocked && force >= DUEL.groundBreakSpeed && this.impactGate[actor] <= 0) {
@@ -1071,7 +1081,7 @@ export class Game {
           impulse.copy(slide).sub(motor);
           impulse.y = 0;
           // New craters do not teleport a body to their bottom, nor throw it back upwards.
-          position.y = Math.max(ny, floor);
+          position.y = snapped ? floor : Math.max(ny, floor);
           if (position.y > floor + 0.06) impulse.y = -Math.min(8, Math.max(2, force * 0.12));
           else {
             position.y = floor;
@@ -1313,6 +1323,7 @@ export class Game {
     }
     this.blockedTime = this.bossLane.mode === 'blocked' ? this.blockedTime + dt : 0;
     const recovery = b.tumble.physical ? 0 : recoveryBlend(b.knockTime) * (1 - b.tumble.weight);
+    const eye = this.player.clone().addScaledVector(UP, 0.9);
     const motor = b.tactics.step(
       dt,
       b.position,
@@ -1320,6 +1331,11 @@ export class Game {
       b.director.attack,
       b.director.stage,
       b.director.pattern,
+      // A manoeuvre waypoint must keep the player in sight and be reachable in a straight
+      // flight; otherwise the local steering would climb over a monolith to get there.
+      (goal) =>
+        this.world.firingLane(goal, eye, b.director.attack).mode !== 'blocked' &&
+        !this.trace(b.position, goal, false, 1.2),
     );
     if (b.knockTime === 0)
       this.nav.steer(b.position, motor, b.tactics.goal, this.player, this.time);
@@ -1333,10 +1349,10 @@ export class Game {
         retreat = Math.min(12, (DUEL.nearRange - distance) * 2.5);
       if (outward < retreat) motor.addScaledVector(away, retreat - outward);
     }
-    motor.clampLength(0, 19);
+    motor.clampLength(0, BOSS_MOTOR.max);
     motor.multiplyScalar(0.035 + recovery * 0.965);
     b.impulse.y -= (b.tumble.physical ? HEAVY.gravity : 14 * (1 - recovery)) * dt;
-    b.velocity.lerp(motor, 1 - Math.exp(-dt * 4.5));
+    b.velocity.lerp(motor, 1 - Math.exp(-dt * 5.2));
     const extent =
         2.05 * (1 - b.tumble.weight) +
         supportHeight(b.tumble.orientation, new THREE.Vector3(1.85, 1.7, 0.575), -0.3375) *
@@ -1358,6 +1374,12 @@ export class Game {
       this.bossSkidTimer = 0.045;
       this.fx.skid(feet, b.impulse.clone().add(b.velocity), 1.8, 'boss');
     }
+    if (b.tumble.physical && b.tumble.grounded && this.mode !== 'menu')
+      this.audio.scrape(
+        'boss',
+        Math.hypot(b.impulse.x + b.velocity.x, b.impulse.z + b.velocity.z),
+        1.3,
+      );
     if (b.tumble.physical && b.tumble.grounded) groundFriction(b.impulse, dt);
     else {
       const drag = Math.exp(-dt * (b.tumble.physical ? 0.28 : 0.55 + recovery * 4.45));
@@ -1408,7 +1430,12 @@ export class Game {
     const b = this.boss,
       target = this.player.clone().add(new THREE.Vector3(0, 0.9, 0));
     this.bossLane = this.world.firingLane(b.position, target, b.director.attack);
-    if (this.bossLane.mode !== 'blocked') return;
+    if (this.bossLane.mode !== 'blocked') {
+      // Sight regained part-way along a route: the waypoint no longer needs protecting, so the
+      // ordinary range control may pull the boss in from the corner it peeked around.
+      b.tactics.routing = false;
+      return;
+    }
     this.pendingFire = [];
     this.firePacket = null;
     b.clearGates();
@@ -2009,6 +2036,8 @@ export class Game {
             );
           if (worldHit.ground && p.kind === 'hammer') this.world.crater(p.mesh.position, 36);
         }
+        if (worldHit.ground && (p.kind === 'fire' || p.kind === 'missile'))
+          this.fx.scorch(p.mesh.position, p.kind);
         this.removeProjectile(i);
         continue;
       }
@@ -2057,7 +2086,7 @@ export class Game {
   }
   /**
    * A shot connects with a standing patch. The projectile's body is left on the surface to
-   * crush and splash, the patch recoils and ripples and (from the second hit) cracks, until
+   * crush and the struck cell flashes, the patch recoils and (from the second hit) cracks, until
    * the hit budget is spent and it shatters — leaving that lane open for a moment.
    */
   private absorbOnPatch(patch: ShieldPatch, at: THREE.Vector3, p: Projectile) {

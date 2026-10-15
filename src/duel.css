@@ -492,7 +492,7 @@
 /* Vertical flight controls: hold, release to hover. Rear warning does not suggest cooldown. */
 .touch-actions #touch-rise {
   right: 1px;
-  top: -60px;
+  top: -66px;
 }
 .touch-actions #touch-descend svg {
   transform: rotate(180deg);
@@ -542,7 +542,7 @@
     gap: 6px;
   }
   .touch-actions #touch-rise {
-    top: -60px;
+    top: -64px;
   }
   .aegis-hud small {
     font-size: 6.5px;
@@ -550,7 +550,7 @@
 }
 @media (max-height: 540px) and (orientation: landscape) {
   .touch-actions #touch-rise {
-    top: -53px;
+    top: -60px;
   }
   .flight-hud {
     left: 29px;

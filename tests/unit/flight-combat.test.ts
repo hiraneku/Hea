@@ -98,8 +98,10 @@ describe('longer spread salvo and contact timing', () => {
   it('authors a longer, wider salvo without random per-frame aiming', () => {
     expect(ATTACKS.fire.duration).toBeGreaterThan(3);
     const spread = Array.from({ length: ATTACKS.fire.shots }, (_, i) => salvoSpread(i));
-    expect(spread.some((s) => s.yaw > 0.07)).toBe(true);
-    expect(spread.some((s) => s.yaw < -0.07)).toBe(true);
+    expect(spread.some((s) => s.yaw > 0.1)).toBe(true);
+    expect(spread.some((s) => s.yaw < -0.1)).toBe(true);
+    expect(spread.some((s) => s.pitch > 0.08)).toBe(true);
+    expect(spread.some((s) => s.pitch < -0.05)).toBe(true);
     expect(spread.filter((s) => s.yaw === 0 && s.pitch === 0).length).toBeGreaterThanOrEqual(5);
     expect(salvoSpread(4)).toEqual(salvoSpread(4));
   });

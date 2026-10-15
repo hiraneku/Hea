@@ -164,13 +164,13 @@ test.describe('golden frames', () => {
     await scene(page, 'flight');
     await page.evaluate(() => {
       const h = window.__HEA_DEBUG__.harness!;
-      h.place([30, 52, 78], [-2, 5.8, 1.5]);
-      h.face(0.35, -0.72);
+      h.place([44, 68, 112], [-2.6, 5.8, 2]);
+      h.face(0.38, -0.62);
     });
     await seededStep(page, 0.02, 51);
     await settle(page);
     expect((await page.evaluate(() => window.__HEA_DEBUG__.snapshot().position)).y).toBeCloseTo(
-      52,
+      68,
       0,
     );
     await expect(canvas(page)).toHaveScreenshot('arena-overview.png', SNAPSHOT);

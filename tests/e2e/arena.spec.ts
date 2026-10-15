@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import type { Snapshot } from '../../src/game/types';
 import type { Game } from '../../src/game/Game';
 import { ATTACKS, DUEL } from '../../src/game/combat';
-import { ARENA } from '../../src/game/config';
+import { ARENA, WORLD_SCALE } from '../../src/game/config';
 
 declare global {
   interface Window {
@@ -244,12 +244,17 @@ test('a hit launches the player through real wall collision; reset restores the 
   const s = await state(page),
     d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(s.health).toBeLessThan(100);
-  expect(s.position.x).toBeLessThan(-9.25);
+  expect(s.position.x).toBeLessThan(-9.25 * WORLD_SCALE);
   expect(s.wallsBroken).toBeGreaterThan(0);
   expect(s.impacts).toBeGreaterThan(0);
   expect(d.lastImpact?.surface).toBe('wall');
+  // The ray runs along the launch line, through the hole the body punched into the dark block.
+  const ray: [number[], number[]] = [
+    [-7 * WORLD_SCALE, 1, 12 * WORLD_SCALE],
+    [-13 * WORLD_SCALE, 1, 12 * WORLD_SCALE],
+  ];
   expect(
-    await page.evaluate(() => window.__HEA_DEBUG__.harness!.wallRay([-7, 1, 12], [-13, 1, 12])),
+    await page.evaluate((ray) => window.__HEA_DEBUG__.harness!.wallRay(ray[0], ray[1]), ray),
   ).toBeNull();
   await page.locator('#pause-button').tap();
   await page.locator('#restart-button').tap();
@@ -258,7 +263,7 @@ test('a hit launches the player through real wall collision; reset restores the 
   expect(reset.craters).toBe(0);
   expect(reset.health).toBe(100);
   expect(
-    await page.evaluate(() => window.__HEA_DEBUG__.harness!.wallRay([-7, 1, 12], [-13, 1, 12])),
+    await page.evaluate((ray) => window.__HEA_DEBUG__.harness!.wallRay(ray[0], ray[1]), ray),
   ).not.toBeNull();
 });
 
@@ -282,6 +287,22 @@ test('ground slam deforms terrain, produces collision impact, respects comfort m
     'ground',
   );
   await expect(page.locator('#experience')).not.toHaveClass(/\bimpact\b/);
+});
+
+test('fire that reaches the ground leaves scorch marks that fade out within seconds', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'scorch');
+  await step(page, 1.4);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.particles.scorches).toBe(6);
+  // Bolts and seekers burn the surface without cratering it (only the hammer digs).
+  expect((await state(page)).craters).toBe(0);
+  await step(page, 9);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.particles.scorches).toBe(0);
 });
 
 test('boss uses all patterns, missile guidance, victory and defeat end the duel without respawning', async ({
@@ -387,7 +408,7 @@ test('flight holds altitude, descends smoothly, and crosses the old map boundary
   await page.keyboard.up('KeyW');
   expect((await state(page)).position.z).toBeGreaterThan(70);
   const arena = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).arena;
-  expect(arena.size).toBe(260);
+  expect(arena.size).toBe(340);
   // 31 monoliths plus the low cover in the empty bands (13 of the 14 candidates find a clear spot).
   expect(arena.buildings).toBe(44);
 });
@@ -610,7 +631,15 @@ test('a body launched into open air rights itself before landing; the boss hunts
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   const q = (await state(page)).position;
   expect(Math.hypot(d.bossPosition[0] - q.x, d.bossPosition[2] - q.z)).toBeLessThan(40);
-  expect(d.bossLane.mode).not.toBe('blocked');
+  // Once close it keeps a firing lane open; its orbit may cross behind a monolith for a
+  // moment, so sight is sampled over the next few seconds rather than at one instant.
+  let sighted = d.bossLane.mode !== 'blocked';
+  for (let i = 0; i < 6 && !sighted; i++) {
+    await step(page, 0.5);
+    d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    sighted = d.bossLane.mode !== 'blocked';
+  }
+  expect(sighted).toBe(true);
 });
 
 test('fire comes from warmed satellite gates, seekers double, and boss altitude choices vary', async ({
@@ -812,7 +841,8 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   // Plus the low-cover band (1.5–2.6 m walls) between the cluster and the rings.
   expect(d.walls.length).toBeLessThan(50);
   expect(d.walls.filter((w) => w.top < 3).length).toBeGreaterThanOrEqual(10);
-  await step(page, 9.2);
+  // The hammer's telegraph follows the (longer) salvo and the seeker pair.
+  await step(page, 10.6);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.heavyCircleRadius).toBeGreaterThan(3.4);
 });

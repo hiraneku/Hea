@@ -1,16 +1,31 @@
 import * as THREE from 'three';
 import { seededRandom } from './math';
 import {
+  HEX_DEPTH,
+  HEX_NEIGHBORS,
   HEX_RADIUS,
   cellPoint,
   crackSegments,
   hexPrismGeometry,
   makeShieldPatch,
+  nearestCell,
   shieldPattern,
   type HexCell,
 } from './ShieldVisual';
 import { FurrowTrail } from './Furrows';
+import { ScorchMarks } from './Scorches';
 import { projectileNose, type ProjectileKind } from './combat';
+
+/**
+ * One step of the adaptive particle density for a measured frame rate: down fast
+ * (−0.15 per sample) below 30 fps, half density in the 30–42 band, back up slowly
+ * (+0.05 per sample) above that. Never below 0.3 so impacts always read.
+ */
+export function adaptDensity(current: number, fps: number): number {
+  const target = fps < 30 ? 0.3 : fps < 42 ? 0.6 : 1;
+  if (target < current) return Math.max(target, current - 0.15);
+  return Math.min(target, current + 0.05);
+}
 
 const UP = new THREE.Vector3(0, 1, 0);
 const v1 = new THREE.Vector3();
@@ -335,6 +350,9 @@ export class Effects {
       airRecoveries: this.airRecoveries,
       shieldImpacts: this.shieldImpacts,
       shards: this.timed.filter((e) => e.object.userData.kind === 'shield-shards').length,
+      scorches: this.scorches.count,
+      density: this.density,
+      budget: this.particleBudget,
     };
   }
   private skidCalls = 0;
@@ -343,9 +361,12 @@ export class Effects {
   private shieldImpacts = 0;
   private time = 0;
   readonly furrows = new FurrowTrail();
+  readonly scorches = new ScorchMarks();
   private attractors: Attractor[] = [];
   private readonly shardGeometry = hexPrismGeometry();
   private readonly shardRim = new THREE.RingGeometry(HEX_RADIUS * 0.78, HEX_RADIUS, 6);
+  /** Slightly proud hex plate laid over a struck cell while it flashes. */
+  private readonly flashGeometry = hexPrismGeometry(HEX_RADIUS * 0.97, HEX_DEPTH * 1.35);
   private sparkMesh: THREE.Points;
   private rockMesh: THREE.InstancedMesh;
   private position: Float32Array;
@@ -356,6 +377,10 @@ export class Effects {
   private rockCursor = 0;
   private capacity = 440;
   private particleBudget = 440;
+  /** Live particle density (0.3–1): the quality setting's ceiling, lowered under frame-rate load. */
+  private density = 1;
+  private baseDensity = 1;
+  private adaptive = 1;
   private rockCapacity = 150;
   private groundAt = (_x: number, _z: number) => 0;
   private dustMesh: THREE.Points;
@@ -448,6 +473,7 @@ export class Effects {
     this.rockMesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     scene.add(this.rockMesh);
     scene.add(this.furrows.mesh);
+    scene.add(this.scorches.mesh);
     for (let i = 0; i < this.capacity; i++)
       this.sparks.push({
         p: new THREE.Vector3(0, -1000, 0),
@@ -475,6 +501,7 @@ export class Effects {
   setGroundSampler(sampler: (x: number, z: number) => number) {
     this.groundAt = sampler;
     this.furrows.setGroundSampler(sampler);
+    this.scorches.setGroundSampler(sampler);
   }
   /**
    * A gravity well for loose matter: for this frame, sparks, dust and debris inside `radius`
@@ -486,7 +513,7 @@ export class Effects {
   /** Embers born on a ring around a well and streaming inwards: the pull made visible. */
   inflow(center: THREE.Vector3, radius: number, count: number, tint = '#ff9a5a') {
     const color = new THREE.Color(tint);
-    const n = this.particleBudget < this.capacity ? Math.ceil(count * 0.5) : count;
+    const n = this.emit(count);
     for (let i = 0; i < n; i++) {
       const p = this.sparks[this.cursor++ % this.particleBudget];
       const direction = new THREE.Vector3(
@@ -584,10 +611,12 @@ export class Effects {
   }
   /**
    * A shot connecting with a standing patch. The projectile is not simply deleted: its body is
-   * crushed flat against the surface and fades, the strike splashes sideways across the plane,
-   * the patch is punched back on its normal and springs home, its fade restarts, and from the
-   * second hit on white cracks spread from the strike while the hex pieces glow brighter — so a
-   * patch under sustained fire visibly carries that load right up to the hit that breaks it.
+   * crushed flat against the surface and fades, the struck hex cell flashes white-hot (its
+   * neighbours a little), the patch takes one clean punch back along its normal and settles,
+   * its fade restarts, and from the second hit on white cracks spread from the strike while
+   * the hex pieces glow brighter — so a patch under sustained fire visibly carries that load
+   * right up to the hit that breaks it. Deliberately no pulsing and no expanding ring: the
+   * shield is a rigid plate, not a pond.
    */
   shieldImpact(
     serial: number,
@@ -606,11 +635,11 @@ export class Effects {
     const frame = echo
       ? echo.object.getWorldQuaternion(new THREE.Quaternion())
       : new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), normal);
-    this.splash(at, frame, tint, size);
+    if (echo) this.cellFlash(echo.object, at, tint, kind);
+    else this.looseFlash(at, frame, tint, size);
     const ex = new THREE.Vector3(1, 0, 0).applyQuaternion(frame),
       ey = new THREE.Vector3(0, 1, 0).applyQuaternion(frame);
-    const sparks = kind === 'hammer' ? 26 : 14,
-      n = this.particleBudget < this.capacity ? Math.ceil(sparks * 0.6) : sparks;
+    const n = this.emit(kind === 'hammer' ? 26 : 14);
     for (let i = 0; i < n; i++) {
       const p = this.sparks[this.cursor++ % this.particleBudget],
         angle = Math.random() * Math.PI * 2,
@@ -644,11 +673,9 @@ export class Effects {
     echo.life = echo.max;
     const data = echo.object.userData;
     data.hits = hits;
-    data.ripple = 0.32;
     data.recoil = 0;
     data.recoilStrength = (kind === 'hammer' ? 0.22 : 0.12) * scale;
     data.recoilNormal = normal.clone();
-    this.ripple(echo.object, at, scale, '#9cf6ff');
     if (hits >= 2) {
       // Cracks live in patch-local space so they ride the recoil with the pieces.
       const local = echo.object.worldToLocal(at.clone());
@@ -713,38 +740,86 @@ export class Effects {
       e.object.position.copy(origin).addScaledVector(normal, -nose * squash * 0.85);
     };
   }
-  /** A flat splat spreading out from the strike along the surface of the patch. */
-  private splash(at: THREE.Vector3, frame: THREE.Quaternion, tint: string, size: number) {
-    const group = new THREE.Group();
-    const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(1, 24),
+  /**
+   * The struck cell lights up: a white-hot hex plate over the cell the shot landed on, its
+   * neighbours catching a dimmer, shorter flash. Children of the patch, so they ride its recoil
+   * and sit exactly on the lattice — no circle, no ring, nothing travels across the plate.
+   */
+  private cellFlash(patch: THREE.Object3D, at: THREE.Vector3, tint: string, kind: ProjectileKind) {
+    const data = patch.userData,
+      cells = (data.cells ?? []) as HexCell[],
+      centroid = (data.centroid ?? [0, 0]) as number[];
+    if (!cells.length) return;
+    const local = patch.worldToLocal(at.clone());
+    const guess = nearestCell(local.x + centroid[0], local.y + centroid[1]);
+    let hit = cells.find((c) => c.q === guess.q && c.r === guess.r);
+    if (!hit) {
+      // Struck on the rim between cells: light the nearest real one.
+      let best = Infinity;
+      for (const c of cells) {
+        const p = cellPoint(c.q, c.r),
+          d = Math.hypot(p.x - centroid[0] - local.x, p.y - centroid[1] - local.y);
+        if (d < best) {
+          best = d;
+          hit = c;
+        }
+      }
+    }
+    if (!hit) return;
+    const strong = kind === 'hammer' ? 1 : 0.85;
+    const plate = (cell: HexCell, opacity: number, life: number, colour: THREE.Color) => {
+      const mesh = new THREE.Mesh(
+        this.flashGeometry,
+        new THREE.MeshBasicMaterial({
+          color: colour,
+          transparent: true,
+          opacity,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+          blending: THREE.AdditiveBlending,
+          toneMapped: false,
+        }),
+      );
+      const point = cellPoint(cell.q, cell.r);
+      mesh.position.set(point.x - centroid[0], point.y - centroid[1], 0);
+      mesh.userData.flash = { age: 0, life, opacity };
+      mesh.userData.keepGeometry = true;
+      patch.add(mesh);
+    };
+    plate(hit, strong, 0.3, new THREE.Color('#ffffff').lerp(new THREE.Color(tint), 0.25));
+    for (const [dq, dr] of HEX_NEIGHBORS) {
+      const q = hit.q + dq,
+        r = hit.r + dr;
+      if (cells.some((c) => c.q === q && c.r === r))
+        plate(
+          { q, r },
+          0.3 * strong,
+          0.2,
+          new THREE.Color(tint).lerp(new THREE.Color('#ffffff'), 0.5),
+        );
+    }
+  }
+  /** The same single-cell flash for a hit with no visible patch to parent it to. */
+  private looseFlash(at: THREE.Vector3, frame: THREE.Quaternion, tint: string, size: number) {
+    const mesh = new THREE.Mesh(
+      this.flashGeometry,
       new THREE.MeshBasicMaterial({
-        color: new THREE.Color(tint).multiplyScalar(1.6),
-        transparent: true,
-        opacity: 0.55,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending,
-      }),
-    );
-    const rim = new THREE.Mesh(
-      new THREE.RingGeometry(0.82, 1, 24),
-      new THREE.MeshBasicMaterial({
-        color: '#ffffff',
+        color: new THREE.Color('#ffffff').lerp(new THREE.Color(tint), 0.25),
         transparent: true,
         opacity: 0.9,
         side: THREE.DoubleSide,
         depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
       }),
     );
-    group.add(disc, rim);
-    group.position.copy(at);
-    group.quaternion.copy(frame);
-    group.translateZ(0.025);
-    group.scale.setScalar(0.18 * size);
-    group.userData.kind = 'shield-splash';
-    const life = 0.22;
-    this.add(group, life, (1.25 * size) / life, 0);
+    mesh.position.copy(at);
+    mesh.quaternion.copy(frame);
+    mesh.translateZ(0.02);
+    mesh.scale.setScalar(Math.max(1, size));
+    mesh.userData.kind = 'shield-flash';
+    mesh.userData.keepGeometry = true;
+    this.add(mesh, 0.26, 0, 0);
   }
   /**
    * The last hit a patch can take. The pieces do not just vanish: for a beat the whole patch
@@ -759,7 +834,6 @@ export class Effects {
       const patch = echo.object,
         data = patch.userData;
       data.shattered = true;
-      data.ripple = 0;
       data.recoil = undefined;
       echo.max = echo.life = 0.45;
       echo.grow = 0;
@@ -930,28 +1004,6 @@ export class Effects {
     ring.scale.setScalar(0.3 * Math.sqrt(scale));
     this.add(ring, life, (2.8 * Math.sqrt(scale)) / life, 0);
   }
-  /** Thin expanding ring in the plane of a patch, centred on the strike. */
-  private ripple(patch: THREE.Object3D, at: THREE.Vector3, scale: number, color: string) {
-    const ring = new THREE.Mesh(
-      new THREE.RingGeometry(0.72, 0.9, 40),
-      new THREE.MeshBasicMaterial({
-        color,
-        transparent: true,
-        opacity: 0.85,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    ring.position.copy(at);
-    ring.quaternion.copy(patch.getWorldQuaternion(new THREE.Quaternion()));
-    ring.translateZ(0.02);
-    ring.userData.kind = 'shield-ripple';
-    const base = 0.35 * Math.sqrt(scale),
-      life = 0.34;
-    ring.scale.setScalar(base);
-    this.add(ring, life, (1.9 * Math.sqrt(scale)) / life, 0);
-  }
   /**
    * The body righting itself in mid-air: a soft ring of displaced air around the hips and a
    * few flakes, so the moment reads even against an empty sky.
@@ -1010,9 +1062,7 @@ export class Effects {
       this.clods++;
     }
     this.dust(base.clone().addScaledVector(back, 0.6 * scale), 1, 1.1 * scale, velocity);
-    const sparks = Math.round(
-      (1 + intensity * 2) * (this.particleBudget < this.capacity ? 0.6 : 1),
-    );
+    const sparks = this.emit(1 + intensity * 2);
     for (let i = 0; i < sparks; i++) {
       const p = this.sparks[this.cursor++ % this.particleBudget];
       p.p.copy(base).addScaledVector(side, (Math.random() - 0.5) * 0.9 * scale);
@@ -1071,7 +1121,28 @@ export class Effects {
     this.burst(at, '#e5fcff', 18, 5, 0.23, 1);
   }
   quality(low: boolean) {
-    this.particleBudget = low ? 180 : this.capacity;
+    this.baseDensity = low ? 0.45 : 1;
+    this.applyDensity();
+  }
+  /**
+   * Adaptive budget: feed the measured frame rate about once a second. Density sinks quickly
+   * when frames sag and climbs back slowly once they recover, so a long salvo on a weak phone
+   * thins its sparks instead of stuttering — and a fast machine keeps every particle.
+   */
+  load(fps: number) {
+    this.adaptive = adaptDensity(this.adaptive, fps);
+    this.applyDensity();
+  }
+  get particleDensity() {
+    return this.density;
+  }
+  private applyDensity() {
+    this.density = Math.min(this.baseDensity, this.adaptive);
+    this.particleBudget = Math.max(120, Math.round(this.capacity * this.density));
+  }
+  /** How many of `count` particles to actually emit under the current density (at least one). */
+  private emit(count: number) {
+    return Math.max(1, Math.round(count * Math.pow(this.density, 0.75)));
   }
   resize(height: number, pixelRatio: number) {
     (this.dustMesh.material as THREE.ShaderMaterial).uniforms.screenScale.value =
@@ -1088,7 +1159,7 @@ export class Effects {
     gravity = 5,
   ) {
     const color = new THREE.Color(tint);
-    const n = this.particleBudget < this.capacity ? Math.ceil(count * 0.55) : count;
+    const n = this.emit(count);
     for (let i = 0; i < n; i++) {
       const p = this.sparks[this.cursor++ % this.particleBudget];
       p.p.copy(at);
@@ -1103,7 +1174,8 @@ export class Effects {
     }
   }
   debris(at: THREE.Vector3, count = 10, force = 4, scale = 1, direction?: THREE.Vector3) {
-    for (let i = 0; i < count; i++) {
+    const n = this.emit(count);
+    for (let i = 0; i < n; i++) {
       const d = this.rocks[this.rockCursor++ % this.rockCapacity];
       this.tintRock(this.rockCursor - 1, '#67696a');
       d.p.copy(at);
@@ -1208,6 +1280,26 @@ export class Effects {
       this.burst(at, '#ffffff', 18, 5, 0.5, 1);
     }
   }
+  /**
+   * Fire reaching the ground leaves a burn: a ragged dark mark that lingers 6–8 s, plus a
+   * short curl of smoke. Bolts scorch about a metre across, a seeker's blast a little more.
+   */
+  scorch(at: THREE.Vector3, kind: ProjectileKind) {
+    const radius = (kind === 'missile' ? 1.7 : 1.15) * (0.85 + Math.random() * 0.3);
+    this.scorches.add(at.x, at.z, radius, 6 + Math.random() * 2, this.time);
+    const smoke = Math.max(1, Math.round(this.emit(kind === 'missile' ? 3 : 2)));
+    for (let i = 0; i < smoke; i++) {
+      const p = this.sparks[this.cursor++ % this.particleBudget];
+      p.p
+        .copy(at)
+        .add(new THREE.Vector3((Math.random() - 0.5) * 0.5, 0.15, (Math.random() - 0.5) * 0.5));
+      p.v.set((Math.random() - 0.5) * 0.6, 0.9 + Math.random() * 0.8, (Math.random() - 0.5) * 0.6);
+      p.color.set('#4a4440');
+      p.life = p.max = 0.7 + Math.random() * 0.5;
+      p.size = 0.3 + Math.random() * 0.25;
+      p.gravity = -0.6;
+    }
+  }
   /** Pull every live particle inside each attractor towards it (or away, for a detonation). */
   private applyAttractors(p: THREE.Vector3, v: THREE.Vector3, dt: number, weight: number) {
     for (const a of this.attractors) {
@@ -1229,6 +1321,7 @@ export class Effects {
   update(dt: number) {
     this.time += dt;
     this.furrows.update(dt);
+    this.scorches.update(this.time);
     const attracting = this.attractors.length > 0;
     this.dustClouds.forEach((p, i) => {
       p.life = Math.max(0, p.life - dt);
@@ -1319,24 +1412,37 @@ export class Effects {
         }
         continue;
       }
-      let scale = e.baseScale + progress * e.grow * e.max;
+      const scale = e.baseScale + progress * e.grow * e.max;
       if (data.kind === 'shield-echo') {
-        // Ripple: a quick swell that settles back, run on every hit the patch absorbs.
-        data.ripple = Math.max(0, (data.ripple ?? 0) - dt);
-        const swell = data.ripple > 0 ? Math.sin((1 - data.ripple / 0.32) * Math.PI) : 0;
-        scale *= 1 + swell * 0.1;
-        // Recoil: punched back along the strike, springing home with a small overshoot.
+        // Recoil: one clean punch back along the strike that eases home — no oscillation, no
+        // swelling; a rigid plate shoved and settling.
         if (typeof data.recoil === 'number' && data.base) {
           data.recoil += dt;
-          const a = data.recoil as number,
-            kick = Math.exp(-a * 7) * Math.sin(a * 16) * (data.recoilStrength ?? 0.12);
+          const a = (data.recoil as number) / 0.07,
+            kick = a * Math.exp(1 - a) * (data.recoilStrength ?? 0.12);
           e.object.position
             .copy(data.base as THREE.Vector3)
             .addScaledVector(data.recoilNormal as THREE.Vector3, -kick);
-          if (a > 0.6) {
+          if (a > 6) {
             data.recoil = undefined;
             e.object.position.copy(data.base as THREE.Vector3);
           }
+        }
+        // Cell flashes burn out fast and leave the patch as it was.
+        for (let c = e.object.children.length - 1; c >= 0; c--) {
+          const child = e.object.children[c];
+          const flash = child.userData.flash as
+            { age: number; life: number; opacity: number } | undefined;
+          if (!flash) continue;
+          flash.age += dt;
+          if (flash.age >= flash.life) {
+            e.object.remove(child);
+            ((child as THREE.Mesh).material as THREE.Material).dispose();
+            continue;
+          }
+          const k = 1 - flash.age / flash.life;
+          ((child as THREE.Mesh).material as THREE.Material & { opacity: number }).opacity =
+            flash.opacity * k * k;
         }
       }
       e.object.scale.setScalar(scale);
@@ -1344,6 +1450,7 @@ export class Effects {
       const load = data.kind === 'shield-echo' ? Math.min(4, Math.max(0, (data.hits ?? 1) - 1)) : 0;
       e.object.traverse((o) => {
         if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
+          if (o.userData.flash) return;
           const material = o.material as THREE.Material & { opacity: number };
           if (data.kind === 'shield-echo' && data.shattered) {
             // Ghost outline: the pieces are gone (the shards carry them); only the wires linger.
@@ -1372,6 +1479,7 @@ export class Effects {
     this.shieldImpacts = 0;
     this.attractors.length = 0;
     this.furrows.clear();
+    this.scorches.clear();
     this.dustClouds.forEach((p) => {
       p.life = 0;
     });

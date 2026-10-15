@@ -1,16 +1,21 @@
 /**
- * A 260 × 260 m playable square, with margin for the camera and crater geometry. The terrain
- * grid is warped (see terrainGrid.ts): 120 segments give ~1 m cells at the centre and ~3.7 m
+ * A 340 × 340 m playable square, with margin for the camera and crater geometry. The terrain
+ * grid is warped (see terrainGrid.ts): 152 segments give ~1.1 m cells at the centre and ~3.8 m
  * at the rim.
  */
 export const ARENA = {
-  halfSize: 130,
-  terrainHalf: 142,
-  terrainSegments: 120,
-  ceiling: 56,
+  halfSize: 170,
+  terrainHalf: 184,
+  terrainSegments: 152,
+  ceiling: 70,
   /** The sun's shadow map follows the player and covers this half-span around them. */
   shadowSpan: 80,
 } as const;
+/**
+ * The greybox plan (block positions and sizes, the low-cover bands, the wedge, the test
+ * fixtures that lean on particular walls) is drawn at this scale.
+ */
+export const WORLD_SCALE = 1.3;
 export const FLIGHT = {
   speed: 14.5,
   verticalSpeed: 10,

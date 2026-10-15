@@ -5,6 +5,9 @@ import type { AttackId, AttackStage } from './combat';
 
 export type Maneuver = 'strafe' | 'flank' | 'press' | 'low-pass' | 'rise' | 'recover';
 /** Finite-lived waypoints, not a permanent player-height-plus-offset tether. */
+/** Flight speed caps (m/s) of the boss's own motor: a quarter faster than v0.9 across the board. */
+export const BOSS_MOTOR = { cruise: 15, routing: 20, recover: 19, max: 24 } as const;
+
 export class BossTactics {
   readonly goal = new Vector3();
   maneuver: Maneuver = 'strafe';
@@ -39,6 +42,10 @@ export class BossTactics {
     this.goal.y = clamp(position.y + (this.random() - 0.5) * 2.5, 2.5, ARENA.ceiling);
     this.remaining = 2.1;
   }
+  /**
+   * `sighted` reports whether a candidate waypoint still has a firing lane to the player; a
+   * manoeuvre never deliberately flies back behind the cover it has just worked around.
+   */
   step(
     dt: number,
     position: Vector3,
@@ -46,6 +53,7 @@ export class BossTactics {
     attack: AttackId,
     stage: AttackStage,
     pattern: number,
+    sighted?: (goal: Vector3) => boolean,
   ) {
     this.remaining -= dt;
     const changed = pattern !== this.lastPattern;
@@ -64,14 +72,22 @@ export class BossTactics {
         position,
         player,
         options[(this.decisions + Math.floor(this.random() * 2)) % options.length],
+        sighted,
       );
     } else if (this.maneuver === 'recover' && this.remaining <= 0)
-      this.choose(position, player, 'flank');
+      this.choose(position, player, 'flank', sighted);
     // Emergency range control only; ordinary movement follows its chosen world-space waypoint.
     const delta = this.goal.clone().sub(position);
     const motor = delta
-      .multiplyScalar(stage === 'recover' ? 1.5 : 1.1)
-      .clampLength(0, stage === 'recover' ? 15 : this.routing ? 16 : 12);
+      .multiplyScalar(stage === 'recover' ? 1.6 : 1.25)
+      .clampLength(
+        0,
+        stage === 'recover'
+          ? BOSS_MOTOR.recover
+          : this.routing
+            ? BOSS_MOTOR.routing
+            : BOSS_MOTOR.cruise,
+      );
     const away = position.clone().sub(player);
     away.y = 0;
     const distance = away.length();
@@ -82,9 +98,14 @@ export class BossTactics {
       motor.addScaledVector(away.normalize(), -(distance - 33) * 1.1);
     if (attack === 'hammer' && stage === 'telegraph' && position.y < 6)
       motor.y = Math.max(motor.y, (6 - position.y) * 2);
-    return motor.clampLength(0, 19);
+    return motor.clampLength(0, BOSS_MOTOR.max);
   }
-  private choose(position: Vector3, player: Vector3, kind: Maneuver) {
+  private choose(
+    position: Vector3,
+    player: Vector3,
+    kind: Maneuver,
+    sighted?: (goal: Vector3) => boolean,
+  ) {
     this.maneuver = kind;
     this.routing = false;
     this.decisions++;
@@ -92,7 +113,7 @@ export class BossTactics {
     const from = position.clone().sub(player),
       angle = Math.atan2(from.z, from.x);
     const sweep = kind === 'flank' || kind === 'recover' ? 0.85 : kind === 'press' ? 0.22 : 0.5;
-    const nextAngle = angle + this.direction * (sweep + this.random() * 0.3);
+    const spin = this.random() * 0.3;
     const range =
       kind === 'press' ? 15 + this.random() * 3 : kind === 'recover' ? 26 : 19 + this.random() * 7;
     const eye = player.y + 0.9;
@@ -106,12 +127,28 @@ export class BossTactics {
             : kind === 'press'
               ? eye + 0.1
               : eye + (this.random() - 0.5) * 5;
-    this.goal.set(
-      clamp(player.x + Math.cos(nextAngle) * range, -ARENA.halfSize + 8, ARENA.halfSize - 8),
-      clamp(altitude, 2.5, ARENA.ceiling),
-      clamp(player.z + Math.sin(nextAngle) * range, -ARENA.halfSize + 8, ARENA.halfSize - 8),
-    );
-    this.remaining = 1.8 + this.random() * 1.6;
+    const place = (turn: number) =>
+      this.goal.set(
+        clamp(player.x + Math.cos(angle + turn) * range, -ARENA.halfSize + 8, ARENA.halfSize - 8),
+        clamp(altitude, 2.5, ARENA.ceiling),
+        clamp(player.z + Math.sin(angle + turn) * range, -ARENA.halfSize + 8, ARENA.halfSize - 8),
+      );
+    place(this.direction * (sweep + spin));
+    if (sighted && !sighted(this.goal)) {
+      // The preferred sweep ends behind cover: try the other way round, then shorter arcs on
+      // either side, and finally the current bearing. The first clear spot wins; when every
+      // option is covered the original goal stands and the navigator routes around.
+      const fallbacks = [
+        -this.direction * (sweep + spin),
+        this.direction * sweep * 0.45,
+        -this.direction * sweep * 0.45,
+        0,
+      ];
+      const found = fallbacks.find((turn) => sighted(place(turn)));
+      if (found === undefined) place(this.direction * (sweep + spin));
+      else if (found < 0 !== this.direction < 0 && found !== 0) this.direction *= -1;
+    }
+    this.remaining = 1.5 + this.random() * 1.4;
   }
 }
 

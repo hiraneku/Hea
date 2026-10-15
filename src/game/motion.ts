@@ -83,12 +83,15 @@ export class LaunchRelease {
 }
 
 /**
- * Shoulder-first tumble and frictional skid. No ground restitution or idle unconscious delay.
- * A body that keeps flying without touching anything rights itself in mid-air after
- * `airRecovery` seconds instead of waiting for the ground.
+ * Shoulder-first tumble and frictional skid. No ground restitution or idle unconscious delay:
+ * the moment the drag slows below `riseSpeed` the body gets up, finishing the last metre of
+ * the skid on its feet instead of lying still. A body that keeps flying without touching
+ * anything rights itself in mid-air after `airRecovery` seconds instead of waiting for the ground.
  */
 export class BodyTumble {
   static readonly airRecovery = 0.85;
+  /** Ground speed (m/s) below which a sliding body stands up — no unconscious pause. */
+  static readonly riseSpeed = 6.5;
   /** Recovery blend: a short rise from the ground, a longer deliberate flip in the air. */
   static readonly riseBlend = 0.22;
   static readonly flipBlend = 0.46;
@@ -109,7 +112,6 @@ export class BodyTumble {
   private wasGrounded = false;
   private groundSpeed = 0;
   private roll = new Vector3();
-  private settled = 0;
   private groundRoll = 0;
   private slidePose = new Quaternion();
   private riseStart = new Quaternion();
@@ -122,7 +124,6 @@ export class BodyTumble {
     this.active = this.grounded = this.wasGrounded = false;
     this.phase = 'idle';
     this.weight =
-      this.settled =
       this.recoveryTime =
       this.groundTravel =
       this.bounces =
@@ -144,7 +145,7 @@ export class BodyTumble {
     this.grounded = false;
     this.groundRoll = 0;
     this.airTime = 0;
-    this.settled = this.recoveryTime = this.bounces = this.landings = this.groundTravel = 0;
+    this.recoveryTime = this.bounces = this.landings = this.groundTravel = 0;
     const direction = impulse.clone().normalize(),
       axis = new Vector3().crossVectors(direction, new Vector3(0, 1, 0));
     if (axis.lengthSq() < 0.02) axis.set(1, 0, 0.35);
@@ -216,10 +217,9 @@ export class BodyTumble {
         );
         this.groundRoll += this.angularVelocity.length() * dt;
         if (this.groundRoll > 1.1) this.orientation.slerp(this.slidePose, 1 - Math.exp(-dt * 5));
-        if (this.groundSpeed <= 4) this.beginRecovery();
+        if (this.groundSpeed <= BodyTumble.riseSpeed) this.beginRecovery();
       } else {
         this.phase = 'air';
-        this.settled = 0;
         this.airTime += dt;
         this.angularVelocity.multiplyScalar(Math.exp(-dt * 0.7));
         if (this.airTime >= BodyTumble.airRecovery) {

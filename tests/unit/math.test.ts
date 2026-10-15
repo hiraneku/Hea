@@ -37,7 +37,7 @@ describe('movement and blockout collision', () => {
     expect(groundHeight(0, 0, 0, [box])).toBe(0);
   });
   it('bounds the arena in both directions', () => {
-    expect(resolveCircle(140, -150, 0, 0.4, [])).toEqual({ x: ARENA.halfSize, z: -ARENA.halfSize });
+    expect(resolveCircle(180, -190, 0, 0.4, [])).toEqual({ x: ARENA.halfSize, z: -ARENA.halfSize });
   });
   it('selects the highest valid landing surface', () => {
     expect(groundHeight(0, 0, 7, [box, { ...box, top: 6 }])).toBe(6);

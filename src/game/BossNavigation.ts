@@ -455,8 +455,10 @@ export class BossNavigator {
       if (this.ctx.trace(boss, point, 0.5)) continue;
       const onward = !this.ctx.trace(point, goal, 0.5),
         sameSide = this.lastDetourSide !== 0 && Math.sign(option.dot(side)) === this.lastDetourSide;
-      const score =
-        option.length() + point.distanceTo(goal) * 0.6 + (onward ? 0 : 14) + (sameSide ? -8 : 0);
+      // Climbing counts half as much again as flying round: slipping past a monolith's corner
+      // beats a forty-metre ascent, while hopping low cover stays cheap.
+      const effort = Math.hypot(option.x, option.z) + Math.abs(option.y) * 1.5;
+      const score = effort + point.distanceTo(goal) * 0.6 + (onward ? 0 : 14) + (sameSide ? -8 : 0);
       if (score < cost) {
         cost = score;
         best = option;

@@ -8,7 +8,7 @@ import {
   springVector,
 } from '../../src/game/motion';
 import { advanceFlight } from '../../src/game/flight';
-import { BossTactics, fireGateOffset } from '../../src/game/BossTactics';
+import { BOSS_MOTOR, BossTactics, fireGateOffset } from '../../src/game/BossTactics';
 import {
   ATTACKS,
   BossDirector,
@@ -210,7 +210,7 @@ describe('varied boss tactics and satellite circles', () => {
         'attack',
         Math.floor(i / 12),
       );
-      expect(motor.length()).toBeLessThanOrEqual(19.0001);
+      expect(motor.length()).toBeLessThanOrEqual(BOSS_MOTOR.max + 0.0001);
       heights.push(tactics.goal.y);
       modes.add(tactics.maneuver);
     }
@@ -220,6 +220,25 @@ describe('varied boss tactics and satellite circles', () => {
     tactics.displaced(new Vector3(20, 4, 30), player);
     expect(tactics.goal.y).toBeLessThan(6);
     expect(tactics.maneuver).toBe('recover');
+  });
+  it('keeps the player in sight when it picks a waypoint, instead of flying back behind cover', () => {
+    const boss = new Vector3(30, 4, 0),
+      player = new Vector3(0, 1.8, 0);
+    // Everything north of the player (z > 2) is "behind the monolith".
+    const sighted = (goal: Vector3) => goal.z <= 2;
+    const blind = new BossTactics(),
+      aware = new BossTactics();
+    let covered = 0,
+      exposed = 0;
+    for (let i = 0; i < 60; i++) {
+      blind.step(0.5, boss, player, 'fire', 'attack', Math.floor(i / 6));
+      aware.step(0.5, boss, player, 'fire', 'attack', Math.floor(i / 6), sighted);
+      if (!sighted(blind.goal)) covered++;
+      if (!sighted(aware.goal)) exposed++;
+    }
+    expect(covered).toBeGreaterThan(5);
+    expect(exposed).toBe(0);
+    expect(aware.decisions).toBeGreaterThan(8);
   });
   it('shuffles attack order after the learnable opening, with no consecutive identical attacks', () => {
     const director = new BossDirector(),
@@ -246,8 +265,12 @@ describe('varied boss tactics and satellite circles', () => {
       expect(
         Math.hypot(fireGateOffset(i, 0).local.x, fireGateOffset(i, 0).local.y - 0.1),
       ).toBeGreaterThan(2.8);
-    expect(ATTACKS.fire.duration).toBeCloseTo(4.2);
+    // v0.10: the salvo runs longer again (5.6 s, 54 bolts) and the boss flies a quarter faster.
+    expect(ATTACKS.fire.duration).toBeCloseTo(5.6);
+    expect(ATTACKS.fire.shots).toBe(54);
     expect(ATTACKS.fire.shots * ATTACKS.fire.interval + 0.12).toBeLessThan(ATTACKS.fire.duration);
+    expect(BOSS_MOTOR.max).toBeGreaterThanOrEqual(23);
+    expect(BOSS_MOTOR.cruise).toBeGreaterThan(12);
     expect(ATTACKS.missiles.shots * 2).toBe(12);
   });
   it('gives every seeker its own reproducible scatter point around the player', () => {

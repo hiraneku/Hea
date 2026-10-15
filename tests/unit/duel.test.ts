@@ -86,7 +86,7 @@ describe('maximum automatic Aegis', () => {
 describe('one boss, deliberate attack patterns', () => {
   it('fires salvos, missile pairs and a heavy shot in the authored order', () => {
     const d = new BossDirector(),
-      commands = d.step(14.1);
+      commands = d.step(15.6);
     const shots = commands.filter((c) => c.type === 'shot');
     expect(shots.filter((c) => c.attack === 'fire').length).toBe(ATTACKS.fire.shots);
     expect(shots.filter((c) => c.attack === 'missiles').length).toBe(ATTACKS.missiles.shots);

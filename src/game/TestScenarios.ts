@@ -1,4 +1,5 @@
 import type { ProjectileKind } from './combat';
+import { WORLD_SCALE } from './config';
 
 export interface ScenarioShot {
   /** World position, or chest-relative (player + 0.9 m up) when `relative` is set. */
@@ -31,6 +32,12 @@ export interface Scenario {
   /** Bolts spawned a few metres out on the given sides, flying at the chest. */
   incoming?: [IncomingSide, ProjectileKind][];
 }
+/** Ground-plan coordinates of the v0.8 greybox, scaled with the world (heights untouched). */
+const at = (x: number, y: number, z: number): [number, number, number] => [
+  x * WORLD_SCALE,
+  y,
+  z * WORLD_SCALE,
+];
 const hammer = (
   at: [number, number, number],
   velocity: [number, number, number],
@@ -74,7 +81,11 @@ export const SCENARIOS: Record<string, Scenario> = {
     orient: [0, 0],
     shots: [-3, -5.6, -8.2, -10.8, -13.4, -16].map((z) => fire([0.4, 0.2, z], [0, 0, 30], true)),
   },
-  wall: { player: [-7, 1.5, 12], aegis: false, shots: [hammer([-3, 2.4, 12], [-38, 0, 0])] },
+  wall: {
+    player: at(-7, 1.5, 12),
+    aegis: false,
+    shots: [hammer(at(-3, 2.4, 12), [-38, 0, 0])],
+  },
   ground: { player: [0, 8, 24], aegis: false, shots: [hammer([0, 13, 24], [0, -34, 0])] },
   'ground-skid': {
     player: [0, 5, 65],
@@ -102,41 +113,60 @@ export const SCENARIOS: Record<string, Scenario> = {
     shots: [hammer([0, 21, 60], [0, 31, 0])],
   },
   'pierce-player': {
-    player: [-2, 6, -15],
+    player: at(-2, 6, -15),
     aegis: false,
-    shots: [hammer([-2, 6.9, -5], [0, 0, -31])],
+    shots: [hammer(at(-2, 6.9, -5), [0, 0, -31])],
   },
   'pierce-ground': {
-    player: [60, 8, 60],
+    player: at(60, 8, 60),
     aegis: false,
-    shots: [hammer([-2, 3, -5], [0, -8, -31])],
+    shots: [hammer(at(-2, 3, -5), [0, -8, -31])],
   },
   'thick-cover': {
-    player: [-24, 2.1, 12],
+    player: at(-24, 2.1, 12),
     aegis: false,
-    shots: [hammer([-3, 3, 12], [-31, 0, 0])],
+    shots: [hammer(at(-3, 3, 12), [-31, 0, 0])],
   },
-  cover: { player: [-6.5, 0, 12], shots: [fire([-25, 0.95, 12], [30, 0, 0])] },
+  cover: { player: at(-6.5, 0, 12), shots: [fire(at(-25, 0.95, 12), [30, 0, 0])] },
+  scorch: {
+    note: 'A spread of bolts and one orb slam into the open ground ahead: soot marks must remain.',
+    player: [0, 1.8, 30],
+    boss: [0, 5, 0],
+    aegis: false,
+    shots: [
+      fire([-3.5, 7, 20], [1, -24, -4]),
+      fire([-1, 7, 17], [-2, -24, 2]),
+      fire([2, 7, 21], [0, -24, -3]),
+      fire([4, 7, 16], [-1, -24, 1]),
+      fire([0.5, 7, 23], [2, -24, -2]),
+      { at: [-2, 8, 13], velocity: [0, -16, -4], kind: 'missile', damage: 16, relative: false },
+    ],
+  },
   nova: { player: [0, 2, 10], boss: [0, 5, 0], spell: 2, lockOn: true },
   'nova-finish': { player: [0, 2, 10], boss: [0, 5, 0], spell: 2, lockOn: true, bossHealth: 1 },
   'nova-air': { player: [0, 34, 15], boss: [0, 37, 4], spell: 2, lockOn: true },
   victory: { bossHealth: 1, lockOn: true, spell: 1 },
   defeat: { aegis: false, health: 1, shots: [fire([0, 0.05, -3], [0, 0, 28], true)] },
-  'sight-thick': { player: [-4, 6, 12], boss: [-27, 6, 12] },
-  'sight-thin': { player: [-2, 7, -18], boss: [-2, 7, -3] },
-  'sight-live': { player: [-4, 6, 12], boss: [-27, 6, 12], idleBoss: false, invulnerable: true },
+  'sight-thick': { player: at(-4, 6, 12), boss: at(-27, 6, 12) },
+  'sight-thin': { player: at(-2, 7, -18), boss: at(-2, 7, -3) },
+  'sight-live': {
+    player: at(-4, 6, 12),
+    boss: at(-27, 6, 12),
+    idleBoss: false,
+    invulnerable: true,
+  },
   patterns: { player: [0, 35, 24], boss: [0, 39, 1.5], idleBoss: false, invulnerable: true },
   'far-cover': {
     note: 'Boss far away behind the thick south-west monoliths; it must work its way back.',
-    player: [-6.5, 1.8, 12],
-    boss: [-96, 5, -96],
+    player: at(-6.5, 1.8, 12),
+    boss: at(-96, 5, -96),
     idleBoss: false,
     invulnerable: true,
   },
   'far-north': {
     note: 'Same chase from the opposite diagonal, through the low-cover band.',
-    player: [8, 1.8, -10],
-    boss: [92, 4, 98],
+    player: at(8, 1.8, -7),
+    boss: at(92, 4, 98),
     idleBoss: false,
     invulnerable: true,
   },
