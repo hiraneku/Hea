@@ -2,7 +2,8 @@ import { test, expect, type Page } from '@playwright/test';
 import type { Snapshot } from '../../src/game/types';
 import type { Game } from '../../src/game/Game';
 import { ATTACKS, DUEL } from '../../src/game/combat';
-import { ARENA, WORLD_SCALE } from '../../src/game/config';
+import { ARENA } from '../../src/game/config';
+import { beside } from '../../src/game/layout';
 
 declare global {
   interface Window {
@@ -244,14 +245,14 @@ test('a hit launches the player through real wall collision; reset restores the 
   const s = await state(page),
     d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(s.health).toBeLessThan(100);
-  expect(s.position.x).toBeLessThan(-9.25 * WORLD_SCALE);
+  expect(s.position.x).toBeLessThan(beside('cover', 'east', 1.3, 0)[0] - 4.2);
   expect(s.wallsBroken).toBeGreaterThan(0);
   expect(s.impacts).toBeGreaterThan(0);
   expect(d.lastImpact?.surface).toBe('wall');
   // The ray runs along the launch line, through the hole the body punched into the dark block.
   const ray: [number[], number[]] = [
-    [-7 * WORLD_SCALE, 1, 12 * WORLD_SCALE],
-    [-13 * WORLD_SCALE, 1, 12 * WORLD_SCALE],
+    beside('cover', 'east', 0.4, 1),
+    beside('cover', 'east', -8.6, 1),
   ];
   expect(
     await page.evaluate((ray) => window.__HEA_DEBUG__.harness!.wallRay(ray[0], ray[1]), ray),
@@ -408,9 +409,10 @@ test('flight holds altitude, descends smoothly, and crosses the old map boundary
   await page.keyboard.up('KeyW');
   expect((await state(page)).position.z).toBeGreaterThan(70);
   const arena = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).arena;
-  expect(arena.size).toBe(380);
-  // 31 monoliths plus the low cover in the empty bands (13 of the 14 candidates find a clear spot).
-  expect(arena.buildings).toBe(44);
+  expect(arena.size).toBe(400);
+  // 25 monoliths (the slab's floor plate included) plus the low cover that found a clear spot.
+  expect(arena.buildings).toBeGreaterThanOrEqual(25 + 10);
+  expect(arena.buildings).toBeLessThanOrEqual(25 + 26);
 });
 
 test('close spell seeker connects; the solar sphere triggers a larger directional shield', async ({
@@ -502,7 +504,7 @@ test('a fatal Nova still pauses and launches the boss before the victory result'
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.bossVisible).toBe(true);
   expect(d.bossReaction).toBe('launch');
-  expect(d.bossPosition[2]).toBeLessThan(-6);
+  expect(d.bossPosition[2]).toBeLessThan(beside('slab', 'south', 13, 5, 6)[2] - 6);
   await step(page, 2);
   expect((await state(page)).mode).toBe('victory');
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossVisible).toBe(false);
@@ -834,12 +836,12 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   await step(page, 2.3);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.fireGates.some((g) => g.radius >= 1)).toBe(true);
-  // Fewer, bigger blocks: nearly every remaining monolith is at least 10 m wide and 15 m tall.
-  const monoliths = d.walls.filter((w) => w.maxX - w.minX >= 10 && w.top >= 15).length;
-  expect(monoliths).toBeGreaterThanOrEqual(28);
+  // Fewer, broader blocks: every remaining monolith is at least 20 m wide and 15 m tall.
+  const monoliths = d.walls.filter((w) => w.maxX - w.minX >= 20 && w.top >= 15).length;
+  expect(monoliths).toBeGreaterThanOrEqual(22);
   expect(monoliths).toBeLessThanOrEqual(d.walls.length);
-  // Plus the low-cover band (1.5–2.6 m walls) between the cluster and the rings.
-  expect(d.walls.length).toBeLessThan(50);
+  // Plus the low cover (1.5–2.6 m walls) in the gaps between the rings.
+  expect(d.walls.length).toBeLessThan(52);
   expect(d.walls.filter((w) => w.top < 3).length).toBeGreaterThanOrEqual(10);
   // The hammer's telegraph follows the (longer) salvo and the seeker pair.
   await step(page, 10.6);
@@ -888,7 +890,10 @@ test('a warmed fire gate cannot shoot after the player moves behind a wall', asy
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('fire'));
   await step(page, 0.03);
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).pendingFire).toBe(1);
-  await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([-4, 6, 12], [-27, 6, 12]));
+  await page.evaluate(
+    ([player, boss]) => window.__HEA_DEBUG__.harness!.place(player, boss),
+    [beside('cover', 'east', 6, 6), beside('cover', 'west', 6, 6)],
+  );
   await step(page, 0.3);
   const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.pendingFire).toBe(0);
@@ -1043,8 +1048,8 @@ test('on foot the boss never falls silent: it keeps casting at a grounded player
   expect((await state(page)).boss.stage).toBe('telegraph');
   await page.evaluate(() => {
     const h = window.__HEA_DEBUG__.harness!;
-    h.place([0, 0, 24], [62, 5, 26]);
-    h.face(-Math.PI / 2, 0);
+    h.place([0, 0, 24], [0, 5, -38]);
+    h.face(0, 0);
   });
   const before = fired(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics()));
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());

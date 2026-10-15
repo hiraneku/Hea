@@ -1,5 +1,5 @@
 import type { ProjectileKind } from './combat';
-import { WORLD_SCALE } from './config';
+import { beside } from './layout';
 
 export interface ScenarioShot {
   /** World position, or chest-relative (player + 0.9 m up) when `relative` is set. */
@@ -32,12 +32,8 @@ export interface Scenario {
   /** Bolts spawned a few metres out on the given sides, flying at the chest. */
   incoming?: [IncomingSide, ProjectileKind][];
 }
-/** Ground-plan coordinates of the v0.8 greybox, scaled with the world (heights untouched). */
-const at = (x: number, y: number, z: number): [number, number, number] => [
-  x * WORLD_SCALE,
-  y,
-  z * WORLD_SCALE,
-];
+// Fixtures that lean on scenery are placed relative to named monoliths (see layout.ts), so
+// they follow the city when it is re-laid.
 const hammer = (
   at: [number, number, number],
   velocity: [number, number, number],
@@ -82,15 +78,16 @@ export const SCENARIOS: Record<string, Scenario> = {
     shots: [-3, -5.6, -8.2, -10.8, -13.4, -16].map((z) => fire([0.4, 0.2, z], [0, 0, 30], true)),
   },
   wall: {
-    player: at(-6.4, 1.5, 12),
+    note: 'Thrown west into the low, thick "cover" block from 1.3 m off its east face.',
+    player: beside('cover', 'east', 1.3, 1.5),
     aegis: false,
-    shots: [hammer(at(-3, 2.4, 12), [-38, 0, 0])],
+    shots: [hammer(beside('cover', 'east', 6.4, 2.4), [-38, 0, 0])],
   },
   ground: { player: [0, 8, 24], aegis: false, shots: [hammer([0, 13, 24], [0, -34, 0])] },
   'ground-skid': {
-    player: [0, 5, 65],
+    player: [10, 5, -30],
     aegis: false,
-    shots: [hammer([0, 12, 70], [0, -28, -20])],
+    shots: [hammer([10, 12, -35], [0, -28, 20])],
   },
   contact: { player: [0, 4, 24], aegis: false, shots: [fire([0, 0, 1.7], [0, 0, -30], true)] },
   ragdoll: { player: [0, 12, 24], aegis: false, shots: [hammer([0, 12.9, 30], [0, 0, -34])] },
@@ -108,26 +105,31 @@ export const SCENARIOS: Record<string, Scenario> = {
   },
   'air-recover': {
     note: 'Struck from below in open sky: the body must right itself before it ever lands.',
-    player: [0, 30, 60],
+    player: [0, 30, -12],
     aegis: false,
-    shots: [hammer([0, 21, 60], [0, 31, 0])],
+    shots: [hammer([0, 21, -12], [0, 31, 0])],
   },
   'pierce-player': {
-    player: at(0, 6, -15),
+    note: 'The sphere bores through the thin slab and reaches the player behind it.',
+    player: beside('slab', 'north', 6.3, 6),
     aegis: false,
-    shots: [hammer(at(0, 6.9, -5), [0, 0, -31])],
+    shots: [hammer(beside('slab', 'south', 6.3, 6.9), [0, 0, -31])],
   },
   'pierce-ground': {
-    player: at(60, 8, 60),
+    player: [0, 8, 24],
     aegis: false,
-    shots: [hammer(at(-2, 3, -5), [0, -8, -31])],
+    shots: [hammer(beside('slab', 'south', 6.3, 3), [0, -8, -31])],
   },
   'thick-cover': {
-    player: at(-24, 2.1, 12),
+    note: 'The same sphere against the 36 m "cover" block: it must stop inside it.',
+    player: beside('cover', 'west', 5, 2.1),
     aegis: false,
-    shots: [hammer(at(-3, 3, 12), [-31, 0, 0])],
+    shots: [hammer(beside('cover', 'east', 16, 3), [-31, 0, 0])],
   },
-  cover: { player: at(-6, 0, 12), shots: [fire(at(-25, 0.95, 12), [30, 0, 0])] },
+  cover: {
+    player: beside('cover', 'east', 2, 0),
+    shots: [fire(beside('cover', 'west', 2, 0.95), [30, 0, 0])],
+  },
   scorch: {
     note: 'A spread of bolts and one orb slam into the open ground ahead: soot marks must remain.',
     player: [0, 1.8, 30],
@@ -142,31 +144,46 @@ export const SCENARIOS: Record<string, Scenario> = {
       { at: [-2, 8, 13], velocity: [0, -16, -4], kind: 'missile', damage: 16, relative: false },
     ],
   },
-  nova: { player: [0, 2, 10], boss: [0, 5, 0], spell: 2, lockOn: true },
-  'nova-finish': { player: [0, 2, 10], boss: [0, 5, 0], spell: 2, lockOn: true, bossHealth: 1 },
+  // Nova throws the boss north: 13 m behind it stands the thin slab for it to crash through.
+  nova: {
+    player: beside('slab', 'south', 23, 2, 6),
+    boss: beside('slab', 'south', 13, 5, 6),
+    spell: 2,
+    lockOn: true,
+  },
+  'nova-finish': {
+    player: beside('slab', 'south', 23, 2, 6),
+    boss: beside('slab', 'south', 13, 5, 6),
+    spell: 2,
+    lockOn: true,
+    bossHealth: 1,
+  },
   'nova-air': { player: [0, 34, 15], boss: [0, 37, 4], spell: 2, lockOn: true },
   victory: { bossHealth: 1, lockOn: true, spell: 1 },
   defeat: { aegis: false, health: 1, shots: [fire([0, 0.05, -3], [0, 0, 28], true)] },
-  'sight-thick': { player: at(-4, 6, 12), boss: at(-27, 6, 12) },
-  'sight-thin': { player: at(0, 7, -18), boss: at(0, 7, -3) },
+  'sight-thick': { player: beside('cover', 'east', 6, 6), boss: beside('cover', 'west', 6, 6) },
+  'sight-thin': {
+    player: beside('slab', 'north', 9, 7, 6),
+    boss: beside('slab', 'south', 11, 7, 6),
+  },
   'sight-live': {
-    player: at(-4, 6, 12),
-    boss: at(-27, 6, 12),
+    player: beside('cover', 'east', 6, 6),
+    boss: beside('cover', 'west', 6, 6),
     idleBoss: false,
     invulnerable: true,
   },
   patterns: { player: [0, 35, 24], boss: [0, 39, 1.5], idleBoss: false, invulnerable: true },
   'far-cover': {
-    note: 'Boss far away behind the thick south-west monoliths; it must work its way back.',
-    player: at(-6.5, 1.8, 12),
-    boss: at(-96, 5, -96),
+    note: 'Boss far away beyond the north-west rings; it must work its way back to the plaza.',
+    player: [-10, 1.8, 18],
+    boss: [-140, 5, -140],
     idleBoss: false,
     invulnerable: true,
   },
   'far-north': {
-    note: 'Same chase from the opposite diagonal, through the low-cover band.',
-    player: at(8, 1.8, -7),
-    boss: at(92, 4, 98),
+    note: 'Same chase from the opposite diagonal, through the ring gaps and low cover.',
+    player: [12, 1.8, -10],
+    boss: [136, 4, 144],
     idleBoss: false,
     invulnerable: true,
   },
@@ -176,11 +193,11 @@ export const SCENARIOS: Record<string, Scenario> = {
   },
   'ragdoll-ground': {
     note: 'A grounded player thrown along the open lane west of the start: the jointed body.',
-    player: [-20, 0, 32],
+    player: [-14, 0, 30],
     flight: false,
     aegis: false,
     orient: [-Math.PI / 2, 0],
-    shots: [hammer([-27, 2.2, 32], [34, -1, 0])],
+    shots: [hammer([-21, 2.2, 30], [34, -1, 0])],
   },
   splash: {
     note: "A grounded player beside the solar sphere's point of impact: the blast must reach them.",

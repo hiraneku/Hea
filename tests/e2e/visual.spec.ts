@@ -86,7 +86,7 @@ test.describe('golden frames', () => {
     await scene(page, 'ground-skid');
     await seededStep(page, 2.1, 11);
     // Look back along the slide so the strip laid behind the body is in frame.
-    await page.evaluate(() => window.__HEA_DEBUG__.harness!.face(Math.PI, -0.25));
+    await page.evaluate(() => window.__HEA_DEBUG__.harness!.face(0, -0.25));
     await seededStep(page, 0.02, 12);
     await settle(page);
     const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
@@ -215,14 +215,14 @@ test.describe('golden frames', () => {
   }) => {
     await load(page);
     await scene(page, 'flight');
-    // The 380 m city no longer fits under the 70 m flight ceiling: pin an observer camera
+    // The 400 m city does not fit under the 70 m flight ceiling: pin an observer camera
     // well above the outer ring instead of flying the player up there.
     await page.evaluate(() => window.__HEA_DEBUG__.harness!.observe([60, 110, 150], [0, 0, 10]));
     await seededStep(page, 0.02, 51);
     await settle(page);
     expect(
       (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).walls.length,
-    ).toBeGreaterThan(40);
+    ).toBeGreaterThan(30);
     await expect(canvas(page)).toHaveScreenshot('arena-overview.png', SNAPSHOT);
   });
 });

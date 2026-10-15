@@ -111,7 +111,7 @@ const direction = new THREE.Vector3();
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
-  readonly camera = new THREE.PerspectiveCamera(64, 1, 0.065, 640);
+  readonly camera = new THREE.PerspectiveCamera(64, 1, 0.065, 720);
   readonly controls: Controls;
   readonly audio: AudioEngine;
   private world: World;

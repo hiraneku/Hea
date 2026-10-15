@@ -1,6 +1,14 @@
 import * as THREE from 'three';
 import { Effects } from './Effects';
-import { ARENA, FOOTPRINT_SCALE, HEAVY, HEIGHT_SCALE, WORLD_SCALE } from './config';
+import { ARENA, FOOTPRINT_SCALE, HEAVY, HEIGHT_SCALE } from './config';
+import {
+  LOW_COVER_BANDS,
+  LOW_COVER_CLEARANCE,
+  MONOLITHS,
+  PLAZA_RADIUS,
+  WEDGE,
+  type Tone,
+} from './layout';
 import { assessFiringLane, type FiringLane } from './AttackSight';
 import { PROJECTILES, projectileOf, type AttackId } from './combat';
 
@@ -131,7 +139,7 @@ export class World {
     private fx: Effects,
   ) {
     scene.background = new THREE.Color('#b4cbd6');
-    scene.fog = new THREE.Fog('#b6c5cf', 165, 480);
+    scene.fog = new THREE.Fog('#b6c5cf', 175, 520);
     this.sky = new THREE.Mesh(
       new THREE.SphereGeometry(540, 32, 20),
       new THREE.MeshBasicMaterial({
@@ -263,89 +271,61 @@ export class World {
       this.obstacles.push(bounds);
       return mesh;
     };
-    // The layout is the v0.8 plan spread by `K`, with footprints grown by `F` and heights by
-    // `H` (see config.ts): fewer, broader and much thicker monoliths on a wider ground, while
-    // the handful of thin slabs stay thin for solar piercing.
-    const K = WORLD_SCALE,
-      F = FOOTPRINT_SCALE,
-      H = HEIGHT_SCALE;
-    const big = (
-      x: number,
-      z: number,
-      w: number,
-      h: number,
-      d: number,
-      m = material,
-      lean = 0,
-      thin = false,
-    ) => block(x * K, z * K, w * F, h * H, thin ? d : d * F, m, lean);
-    big(-2, -10, 11, 19, 2.4, dark, 0, true);
-    big(-2, -10, 12, 0.3 / H, 5, light);
-    big(-12, -24, 16, 40, 12, light);
-    big(16, -25, 16, 36, 11, dark, -0.1);
-    this.labelBuilding = this.buildings.length;
-    big(-27, -5, 15, 24, 13, material);
-    big(29, 6, 18, 34, 14, material);
-    big(-14, 12, 12, 16, 12, dark);
-    big(3, -38, 22, 20, 14, material);
-    big(-38, -30, 18, 42, 14, dark);
-    big(40, -16, 18, 28, 15, material);
-    big(31, 32, 22, 20, 15, dark);
-    big(-33, 32, 18, 30, 15, light);
-    big(10, 39, 16, 36, 11, material);
-    // Two sparse rings of massive, destructible blocks with wide aerial/ground corridors.
-    const layout = seededRandom(714);
-    for (let ring = 0; ring < 2; ring++) {
-      const count = ring === 0 ? 8 : 10,
-        radius = ring === 0 ? 70 : 105;
-      for (let i = 0; i < count; i++) {
-        const angle = ((i + (ring ? 0.4 : 0.5)) / count) * Math.PI * 2;
-        const x = Math.cos(angle) * radius,
-          z = Math.sin(angle) * radius;
-        const width = 20 + layout() * 10,
-          height = 24 + layout() * 22,
-          thin = i % 5 === 0,
-          depth = thin ? 2.6 : 10 + layout() * 7;
-        big(
-          x,
-          z,
-          width,
-          height,
-          depth,
-          i % 3 === 0 ? dark : i % 3 === 1 ? light : material,
-          i % 9 === 0 ? 0.065 : 0,
-          thin,
-        );
-      }
-    }
-    // Low cover in the empty bands between the central cluster and the rings (r ≈ 85 m and
-    // 132 m): 1.5–2.6 m walls to duck behind on foot, low enough for every flight route to
-    // pass over, each nudged inwards until it sits clear of the monoliths and the main lanes.
+    // The city is defined in layout.ts: a clear plaza, a hand-placed inner ring and two
+    // seeded outer rings of broad, destructible monoliths with wide corridors between them.
+    const tones: Record<Tone, THREE.MeshStandardMaterial> = { stone: material, dark, light };
+    MONOLITHS.forEach((m, i) => {
+      if (m.name === 'slab') this.labelBuilding = i;
+      block(m.x, m.z, m.w, m.h, m.d, tones[m.tone], m.lean ?? 0);
+    });
+    // The tilted prism keeps the intentionally simple greybox silhouette of the reference.
+    const wedge = new THREE.Mesh(new THREE.ConeGeometry(WEDGE.radius, WEDGE.height, 4), light);
+    wedge.position.set(WEDGE.x, WEDGE.height / 2, WEDGE.z);
+    wedge.rotation.y = Math.PI / 4;
+    wedge.castShadow = true;
+    wedge.receiveShadow = true;
+    scene.add(wedge);
+    const half = WEDGE.radius * 0.7071;
+    this.fixedObstacles.push({
+      minX: WEDGE.x - half,
+      maxX: WEDGE.x + half,
+      minZ: WEDGE.z - half,
+      maxZ: WEDGE.z + half,
+      top: WEDGE.height * 0.94,
+    });
+    // Low cover in the gaps between the rings: 1.5–2.6 m walls to duck behind on foot, low
+    // enough for every flight route to pass over, each slid along its spoke until it sits well
+    // clear of the monoliths and the main lanes — never into the plaza.
     const coverLayout = seededRandom(2201);
     const lowCover = (angle: number, radius: number, index: number) => {
-      const long = (6 + coverLayout() * 4) * (F / H),
+      const long = (6 + coverLayout() * 4) * 1.6,
         height = 1.5 + coverLayout() * 1.1,
-        thin = (1.2 + coverLayout() * 0.6) * (F / H),
+        thin = (1.2 + coverLayout() * 0.6) * 1.6,
         eastWest = Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle)),
         [w, d] = eastWest ? [thin, long] : [long, thin];
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const r = radius - attempt * 3,
+      const offsets = [0, 3, -3, 6, -6, 9, -9, 12, 15, 18, 21, 24, 27, 30];
+      for (const offset of offsets) {
+        const r = radius + offset,
           x = Math.cos(angle) * r,
-          z = Math.sin(angle) * r;
-        const clear = this.obstacles.every(
+          z = Math.sin(angle) * r,
+          c = LOW_COVER_CLEARANCE;
+        if (r < PLAZA_RADIUS + 6 || Math.max(Math.abs(x), Math.abs(z)) > ARENA.halfSize - 14)
+          continue;
+        const clear = [...this.obstacles, ...this.fixedObstacles].every(
           (o) =>
-            x + w / 2 + 2 < o.minX ||
-            x - w / 2 - 2 > o.maxX ||
-            z + d / 2 + 2 < o.minZ ||
-            z - d / 2 - 2 > o.maxZ,
+            x + w / 2 + c < o.minX ||
+            x - w / 2 - c > o.maxX ||
+            z + d / 2 + c < o.minZ ||
+            z - d / 2 - c > o.maxZ,
         );
         if (!clear || Math.abs(x) < 8 || Math.abs(z) < 8) continue;
         block(x, z, w, height, d, index % 2 ? light : material);
         return;
       }
     };
-    for (let i = 0; i < 8; i++) lowCover((i / 8) * Math.PI * 2 + 0.21, 57 * K, i);
-    for (let i = 0; i < 6; i++) lowCover((i / 6) * Math.PI * 2 + 0.7, 88 * K, i);
+    for (const band of LOW_COVER_BANDS)
+      for (let i = 0; i < band.count; i++)
+        lowCover((i / band.count) * Math.PI * 2 + band.phase, band.radius, i);
     for (const m of [material, dark, light]) {
       const ids = this.buildings.flatMap((b, i) => (b.mesh.material === m ? [i] : []));
       const mesh = new THREE.InstancedMesh(geometry, m, ids.length);
@@ -356,20 +336,6 @@ export class World {
       scene.add(mesh);
     }
     this.updateIntactBatches();
-    // The tilted prism keeps the intentionally simple greybox silhouette of the reference.
-    const wedge = new THREE.Mesh(new THREE.ConeGeometry(4.6 * F, 5.7 * H, 4), light);
-    wedge.position.set(6.5 * K, 2.5 * H, -14 * K);
-    wedge.rotation.y = Math.PI / 4;
-    wedge.castShadow = true;
-    wedge.receiveShadow = true;
-    scene.add(wedge);
-    this.fixedObstacles.push({
-      minX: 6.5 * K - 3.25 * F,
-      maxX: 6.5 * K + 3.25 * F,
-      minZ: -14 * K - 3.25 * F,
-      maxZ: -14 * K + 3.25 * F,
-      top: 5.35 * H,
-    });
     this.obstacles.push(...this.fixedObstacles);
     const random = seededRandom(137);
     const skyline = new THREE.InstancedMesh(geometry, material, 30),
@@ -421,7 +387,7 @@ export class World {
       }),
     );
     marker.position.set(
-      -22.9 * WORLD_SCALE,
+      MONOLITHS[this.labelBuilding].x,
       3.5,
       this.buildings[this.labelBuilding].volume.bounds.maxZ + 0.02,
     );

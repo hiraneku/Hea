@@ -1,24 +1,20 @@
 /**
- * A 380 × 380 m playable square, with margin for the camera and crater geometry. The terrain
- * grid is warped (see terrainGrid.ts): 168 segments give ~1.2 m cells at the centre and ~4 m
+ * A 400 × 400 m playable square, with margin for the camera and crater geometry. The terrain
+ * grid is warped (see terrainGrid.ts): 176 segments give ~1.2 m cells at the centre and ~4 m
  * at the rim.
  */
 export const ARENA = {
-  halfSize: 190,
-  terrainHalf: 204,
-  terrainSegments: 168,
+  halfSize: 200,
+  terrainHalf: 214,
+  terrainSegments: 176,
   ceiling: 70,
   /** The sun's shadow map follows the player and covers this half-span around them. */
   shadowSpan: 80,
 } as const;
 /**
- * The greybox plan is drawn from the v0.8 drawing at three scales: block positions (and the
- * test fixtures that lean on particular walls) spread by `WORLD_SCALE`, block footprints
- * (width and depth) grow by `FOOTPRINT_SCALE`, heights by `HEIGHT_SCALE`. Footprints grow
- * faster than positions, so the monoliths read as broad masses while the corridors between
- * them keep roughly their v0.10 width.
+ * The city layout itself lives in layout.ts (world metres). These scales only size the
+ * decorative skyline outside the arena, relative to the v0.8 drawing.
  */
-export const WORLD_SCALE = 1.5;
 export const FOOTPRINT_SCALE = 1.69;
 export const HEIGHT_SCALE = 1.3;
 /**
