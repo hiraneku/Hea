@@ -30,7 +30,7 @@ export const DUEL = {
   vortexStrength: 30,
   vortexCoreRadius: 3.2,
   vortexEmbers: 14,
-  novaLaunch: 112,
+  novaLaunch: 138,
   /** Heavy contact: a dead freeze, then a slow-motion release that ramps back to real time. */
   heavyFreeze: 0.15,
   heavySlow: 0.35,
@@ -265,13 +265,13 @@ export function projectileOf(attack: AttackId): Exclude<ProjectileKind, 'player'
 /** The same radius drives the visible core, shield size and swept collision. */
 export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, slow: 0, stagger: 0 },
-  fire: { radius: 0.32, speed: 36, life: 4, launch: 36, pause: 0.09, slow: 0, stagger: 0.85 },
-  missile: { radius: 0.34, speed: 30, life: 4.5, launch: 60, pause: 0.12, slow: 0, stagger: 1.2 },
+  fire: { radius: 0.32, speed: 36, life: 4, launch: 44, pause: 0.09, slow: 0, stagger: 0.85 },
+  missile: { radius: 0.34, speed: 30, life: 4.5, launch: 72, pause: 0.12, slow: 0, stagger: 1.2 },
   hammer: {
     radius: 1.25,
     speed: 37,
     life: 5,
-    launch: 122,
+    launch: 150,
     pause: DUEL.heavyFreeze,
     slow: DUEL.heavySlow,
     stagger: 1.5,
@@ -281,7 +281,7 @@ export const PROJECTILES = {
     radius: 0.55,
     speed: 31,
     life: 3,
-    launch: 80,
+    launch: 98,
     pause: DUEL.heavyFreeze,
     slow: DUEL.heavySlow,
     stagger: 1.4,

@@ -2405,7 +2405,7 @@ export class Game {
     vector
       .addScaledVector(this.velocity, 0.25)
       .addScaledVector(this.impulse, 0.2)
-      .clampLength(0, 140);
+      .clampLength(0, 175);
     vector.y += this.verticalVelocity * 0.2;
     this.verticalVelocity = 0;
     this.pendingPlayerImpulse = vector;
