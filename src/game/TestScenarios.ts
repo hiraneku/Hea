@@ -82,7 +82,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     shots: [-3, -5.6, -8.2, -10.8, -13.4, -16].map((z) => fire([0.4, 0.2, z], [0, 0, 30], true)),
   },
   wall: {
-    player: at(-7, 1.5, 12),
+    player: at(-6.4, 1.5, 12),
     aegis: false,
     shots: [hammer(at(-3, 2.4, 12), [-38, 0, 0])],
   },
@@ -113,9 +113,9 @@ export const SCENARIOS: Record<string, Scenario> = {
     shots: [hammer([0, 21, 60], [0, 31, 0])],
   },
   'pierce-player': {
-    player: at(-2, 6, -15),
+    player: at(0, 6, -15),
     aegis: false,
-    shots: [hammer(at(-2, 6.9, -5), [0, 0, -31])],
+    shots: [hammer(at(0, 6.9, -5), [0, 0, -31])],
   },
   'pierce-ground': {
     player: at(60, 8, 60),
@@ -127,7 +127,7 @@ export const SCENARIOS: Record<string, Scenario> = {
     aegis: false,
     shots: [hammer(at(-3, 3, 12), [-31, 0, 0])],
   },
-  cover: { player: at(-6.5, 0, 12), shots: [fire(at(-25, 0.95, 12), [30, 0, 0])] },
+  cover: { player: at(-6, 0, 12), shots: [fire(at(-25, 0.95, 12), [30, 0, 0])] },
   scorch: {
     note: 'A spread of bolts and one orb slam into the open ground ahead: soot marks must remain.',
     player: [0, 1.8, 30],
@@ -148,7 +148,7 @@ export const SCENARIOS: Record<string, Scenario> = {
   victory: { bossHealth: 1, lockOn: true, spell: 1 },
   defeat: { aegis: false, health: 1, shots: [fire([0, 0.05, -3], [0, 0, 28], true)] },
   'sight-thick': { player: at(-4, 6, 12), boss: at(-27, 6, 12) },
-  'sight-thin': { player: at(-2, 7, -18), boss: at(-2, 7, -3) },
+  'sight-thin': { player: at(0, 7, -18), boss: at(0, 7, -3) },
   'sight-live': {
     player: at(-4, 6, 12),
     boss: at(-27, 6, 12),
@@ -173,5 +173,28 @@ export const SCENARIOS: Record<string, Scenario> = {
   live: {
     note: 'A real duel from the start positions with a vulnerable, idle player (balance checks).',
     idleBoss: false,
+  },
+  'ragdoll-ground': {
+    note: 'A grounded player thrown along the open lane west of the start: the jointed body.',
+    player: [-20, 0, 32],
+    flight: false,
+    aegis: false,
+    orient: [-Math.PI / 2, 0],
+    shots: [hammer([-27, 2.2, 32], [34, -1, 0])],
+  },
+  splash: {
+    note: "A grounded player beside the solar sphere's point of impact: the blast must reach them.",
+    player: [0, 0, 24],
+    flight: false,
+    aegis: false,
+    orient: [0, 0],
+    shots: [hammer([2.3, 6, 24], [0, -30, 0])],
+  },
+  'walk-live': {
+    note: 'The same duel on foot: the boss must keep attacking a grounded player.',
+    player: [0, 0, 24],
+    flight: false,
+    idleBoss: false,
+    invulnerable: true,
   },
 };

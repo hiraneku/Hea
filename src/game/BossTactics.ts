@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { ARENA } from './config';
+import { ARENA, BOSS } from './config';
 import { clamp, seededRandom } from './math';
 import type { AttackId, AttackStage } from './combat';
 
@@ -39,12 +39,14 @@ export class BossTactics {
   displaced(position: Vector3, player: Vector3) {
     this.choose(position, player, 'recover');
     // Recover near the actual post-impact altitude, rather than snapping above the player.
-    this.goal.y = clamp(position.y + (this.random() - 0.5) * 2.5, 2.5, ARENA.ceiling);
+    this.goal.y = clamp(position.y + (this.random() - 0.5) * 2.5, BOSS.hover, ARENA.ceiling);
     this.remaining = 2.1;
   }
   /**
    * `sighted` reports whether a candidate waypoint still has a firing lane to the player; a
    * manoeuvre never deliberately flies back behind the cover it has just worked around.
+   * `clear` says the boss can see the player right now: far out with a clear lane it stands
+   * and casts from range instead of closing first, and only moves in while it recovers.
    */
   step(
     dt: number,
@@ -54,6 +56,7 @@ export class BossTactics {
     stage: AttackStage,
     pattern: number,
     sighted?: (goal: Vector3) => boolean,
+    clear = false,
   ) {
     this.remaining -= dt;
     const changed = pattern !== this.lastPattern;
@@ -92,9 +95,13 @@ export class BossTactics {
     away.y = 0;
     const distance = away.length();
     if (distance < 10) motor.addScaledVector(away.normalize(), (10 - distance) * 2);
+    // Long-range casting: a boss that can see its target from far away holds its ground and
+    // delivers the spell from there (a slow drift towards its waypoint at most).
+    const sniping = clear && stage !== 'recover' && distance > 30 && !this.routing;
+    if (sniping) motor.multiplyScalar(0.25);
     // A boss thrown across the larger arena closes back in decisively rather than drifting —
     // unless it is following a routed waypoint around cover, which may lead away first.
-    if (distance > 33 && !this.routing)
+    if (distance > 33 && !this.routing && !sniping)
       motor.addScaledVector(away.normalize(), -(distance - 33) * 1.1);
     if (attack === 'hammer' && stage === 'telegraph' && position.y < 6)
       motor.y = Math.max(motor.y, (6 - position.y) * 2);
@@ -130,7 +137,7 @@ export class BossTactics {
     const place = (turn: number) =>
       this.goal.set(
         clamp(player.x + Math.cos(angle + turn) * range, -ARENA.halfSize + 8, ARENA.halfSize - 8),
-        clamp(altitude, 2.5, ARENA.ceiling),
+        clamp(altitude, BOSS.hover, ARENA.ceiling),
         clamp(player.z + Math.sin(angle + turn) * range, -ARENA.halfSize + 8, ARENA.halfSize - 8),
       );
     place(this.direction * (sweep + spin));

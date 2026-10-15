@@ -348,6 +348,7 @@ export class Effects {
       furrows: this.furrows.furrows,
       clods: this.clods,
       airRecoveries: this.airRecoveries,
+      afterimages: this.afterimages,
       shieldImpacts: this.shieldImpacts,
       shards: this.timed.filter((e) => e.object.userData.kind === 'shield-shards').length,
       scorches: this.scorches.count,
@@ -358,6 +359,7 @@ export class Effects {
   private skidCalls = 0;
   private clods = 0;
   private airRecoveries = 0;
+  private afterimages = 0;
   private shieldImpacts = 0;
   private time = 0;
   readonly furrows = new FurrowTrail();
@@ -1008,6 +1010,29 @@ export class Effects {
    * The body righting itself in mid-air: a soft ring of displaced air around the hips and a
    * few flakes, so the moment reads even against an empty sky.
    */
+  /**
+   * A ghost of `mesh` left where it is right now: an additive, unlit copy of the same geometry
+   * that fades over a quarter of a second. Used for the dash's afterimage trail.
+   */
+  afterimage(mesh: THREE.Mesh) {
+    this.afterimages++;
+    const ghost = new THREE.Mesh(
+      mesh.geometry,
+      new THREE.MeshBasicMaterial({
+        color: '#8fe3ff',
+        transparent: true,
+        opacity: 0.42,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    ghost.userData.keepGeometry = true;
+    ghost.userData.kind = 'afterimage';
+    mesh.updateWorldMatrix(true, false);
+    mesh.matrixWorld.decompose(ghost.position, ghost.quaternion, ghost.scale);
+    this.add(ghost, 0.26, 0.3, 0);
+  }
   airRecover(at: THREE.Vector3, scale = 1) {
     this.airRecoveries++;
     const ring = new THREE.Mesh(
@@ -1157,6 +1182,7 @@ export class Effects {
     force = 5,
     size = 0.35,
     gravity = 5,
+    drift?: THREE.Vector3,
   ) {
     const color = new THREE.Color(tint);
     const n = this.emit(count);
@@ -1167,6 +1193,7 @@ export class Effects {
         .set(Math.random() - 0.5, Math.random() - 0.25, Math.random() - 0.5)
         .normalize()
         .multiplyScalar(force * (0.2 + Math.random() * 0.8));
+      if (drift) p.v.add(drift);
       p.color.copy(color);
       p.life = p.max = 0.3 + Math.random() * 0.65;
       p.size = size * (0.4 + Math.random());
@@ -1476,6 +1503,7 @@ export class Effects {
     this.skidCalls = 0;
     this.clods = 0;
     this.airRecoveries = 0;
+    this.afterimages = 0;
     this.shieldImpacts = 0;
     this.attractors.length = 0;
     this.furrows.clear();

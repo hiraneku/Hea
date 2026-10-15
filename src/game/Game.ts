@@ -48,8 +48,9 @@ import {
   type SpellId,
 } from './types';
 
-import { ARENA, FLIGHT, GROUND, HEAVY } from './config';
+import { ARENA, BOSS, FLIGHT, GROUND, HEAVY } from './config';
 import { flightWish, advanceFlight } from './flight';
+import { Ragdoll, type RagdollSurface } from './Ragdoll';
 import type { FiringLane } from './AttackSight';
 import {
   AirDash,
@@ -80,6 +81,8 @@ interface Projectile {
   claim: number | null;
   /** Set once this shot has been let through an open hole in the shell. */
   leaked: boolean;
+  /** Set once this shot has passed through a dashing player, so it rewards only one dodge. */
+  dodged: boolean;
   /** Vortex seeds anchor here (or at the first wall) instead of expiring. */
   anchor: THREE.Vector3 | null;
 }
@@ -99,6 +102,10 @@ interface TraceHit {
 }
 const START = new THREE.Vector3(0, 1.8, 24);
 const UP = new THREE.Vector3(0, 1, 0);
+/** Reach (m) of the solar sphere's blast when it bursts against the world. */
+const HAMMER_SPLASH = 3.6;
+/** Height of the ragdoll's pelvis above the physics root (the lying body's thickness). */
+const RAGDOLL_ROOT = 0.3;
 const direction = new THREE.Vector3();
 
 export class Game {
@@ -136,6 +143,8 @@ export class Game {
   private flightAcceleration = new THREE.Vector3();
   private cameraSpringVelocity = new THREE.Vector3();
   private playerTumble = new BodyTumble(true);
+  private ragdoll: Ragdoll;
+  private ragdollSurface: RagdollSurface;
   private playerRelease = new LaunchRelease();
   private bank = new THREE.Vector3();
   private bossLane: FiringLane = { mode: 'clear', walls: [], thickness: 0 };
@@ -147,7 +156,8 @@ export class Game {
   private blockedTime = 0;
   private readonly nav = new BossNavigator({
     trace: (start, end, radius) => this.trace(start, end, false, radius),
-    lane: (from, target) => this.world.firingLane(from, target, 'fire').mode,
+    // Vantage points are judged for the attack the boss actually wants to cast.
+    lane: (from, target) => this.world.firingLane(from, target, this.boss.director.attack).mode,
     bounds: () => this.world.wallBounds,
   });
   private firePacket: { packet: number; pattern: number; origin: THREE.Vector3 } | null = null;
@@ -159,6 +169,7 @@ export class Game {
   private pull = new THREE.Vector3();
   private vortexCoreHits = 0;
   private vortexDetonations = 0;
+  private splashHits = 0;
   /** 1 right after a heavy contact, decaying in real time: drives the camera zoom punch. */
   private punch = 0;
   private punchClock = 0;
@@ -176,6 +187,11 @@ export class Game {
   private health = 100;
   private energy = 100;
   private dashCooldown = 0;
+  private testCamera: { at: number[]; look: number[] } | null = null;
+  /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
+  private dashBuffer = 0;
+  private ghostClock = 0;
+  private perfectDodges = 0;
   private dashTime = 0;
   private knockTime = 0;
   private pendingPlayerImpulse: THREE.Vector3 | null = null;
@@ -328,6 +344,15 @@ export class Game {
     face.rotation.y = Math.PI;
     this.avatar.add(face);
     this.scene.add(this.avatar, this.playerTrail.mesh);
+    this.ragdoll = new Ragdoll(this.scene, this.avatar.material as THREE.Material);
+    const world = this.world;
+    this.ragdollSurface = {
+      height: (x, z) => world.surfaceHeight(x, z),
+      // Live view: wall damage rebuilds the collider list, so it must not be captured once.
+      get obstacles() {
+        return world.obstacles;
+      },
+    };
     this.shadows = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(1, 1),
       new THREE.MeshBasicMaterial({
@@ -498,6 +523,8 @@ export class Game {
       pull: this.pull.toArray(),
       vortexCoreHits: this.vortexCoreHits,
       vortexDetonations: this.vortexDetonations,
+      splashHits: this.splashHits,
+      perfectDodges: this.perfectDodges,
       particles: this.fx.activity,
       heavyPenetrations: this.heavyPenetrations,
       groundReactions: this.groundReactions,
@@ -505,6 +532,7 @@ export class Game {
       verticalVelocity: this.verticalVelocity,
       walls: this.world.wallBounds,
       heavyCircleRadius: this.boss.chargeRadius,
+      playerPosition: this.player.toArray(),
       playerVelocity: this.velocity.clone().add(this.impulse).add(this.airDash.velocity).toArray(),
       dashMotion: {
         active: this.airDash.active,
@@ -525,6 +553,9 @@ export class Game {
         playerAirTime: this.playerTumble.airTime,
         bossAirTime: this.boss.tumble.airTime,
         playerAirRecoveries: this.playerTumble.airRecoveries,
+        playerFigure: this.ragdoll.active ? this.ragdoll.shape : null,
+        playerFigureSpawns: this.ragdoll.spawns,
+        playerFigureContacts: this.ragdoll.contacts,
         bossAirRecoveries: this.boss.tumble.airRecoveries,
         playerFlipping: this.playerTumble.flipping,
         bossFlipping: this.boss.tumble.flipping,
@@ -592,6 +623,7 @@ export class Game {
     this.flightAcceleration.set(0, 0, 0);
     this.cameraSpringVelocity.set(0, 0, 0);
     this.playerTumble.reset();
+    this.ragdoll.reset();
     this.playerRelease.cancel();
     this.bank.set(0, 0, 0);
     this.pendingFire = [];
@@ -625,7 +657,8 @@ export class Game {
     this.attacksFired = { fire: 0, missile: 0, hammer: 0, vortex: 0 };
     this.clearWells();
     this.pull.set(0, 0, 0);
-    this.vortexCoreHits = this.vortexDetonations = 0;
+    this.vortexCoreHits = this.vortexDetonations = this.splashHits = this.perfectDodges = 0;
+    this.dashBuffer = 0;
     this.lockedOn = this.controls.touch;
     this.avatar.visible = true;
     this.avatar.rotation.set(0, 0, 0);
@@ -747,6 +780,12 @@ export class Game {
     if (!this.manualSimulation) this.simulate(Math.max(0, rawDt));
     this.audio.update();
     this.renderer.info.reset();
+    if (this.testCamera) {
+      // Test harness only: a pinned observer camera for close-up screenshots.
+      this.camera.position.fromArray(this.testCamera.at);
+      this.camera.lookAt(new THREE.Vector3().fromArray(this.testCamera.look));
+      this.camera.updateMatrixWorld();
+    }
     if (this.useBloom) this.composer.render();
     else this.renderer.render(this.scene, this.camera);
     this.renderNeeded = false;
@@ -906,18 +945,45 @@ export class Game {
         wish[axis] *= clamp((ARENA.halfSize - Math.abs(this.player[axis])) / 4, 0, 1);
     if (this.controls.dashRequested) {
       this.controls.dashRequested = false;
+      this.dashBuffer = 0.18;
+    }
+    if (this.dashBuffer > 0) {
+      this.dashBuffer -= dt;
       if (this.dashCooldown === 0 && this.damageTimer > 0.25 && !this.outcome && !physical) {
+        this.dashBuffer = 0;
         this.dashCooldown = 1.65;
         const dashAim = wish.lengthSq() > 0.01 ? wish.clone() : this.facing.clone();
         if (!this.flightEnabled) dashAim.y = 0;
         this.airDash.start(dashAim.normalize());
+        this.ghostClock = 0;
         this.knockTime = Math.min(this.knockTime, 0.55);
         this.audio.dash();
-        this.fx.burst(this.player.clone().add(UP), '#effaff', 16, 3, 0.25, 2);
+        const chest = this.player.clone().add(UP);
+        this.fx.burst(chest, '#effaff', 22, 3.6, 0.26, 2);
+        // A flat ring at the chest, pointing the way the body is about to go.
+        this.fx.glyph(chest, this.airDash.direction, '#cfeeff', 1.1, 0.22);
+        if (!this.flightEnabled) this.fx.dust(this.player, 8, 1.4);
       }
     }
     this.airDash.step(dt, wish);
     this.dashTime = this.airDash.active ? AirDash.duration - this.airDash.age : 0;
+    if (this.airDash.active && !this.settings.reducedEffects) {
+      // Afterimages of the body peel off along the dash, with a few streaks pulled past it.
+      this.ghostClock -= dt;
+      if (this.airDash.strength > 0.3 && this.ghostClock <= 0) {
+        this.ghostClock = 0.032;
+        this.fx.afterimage(this.avatar);
+        this.fx.burst(
+          this.player.clone().add(UP).addScaledVector(this.airDash.direction, -0.4),
+          '#dff6ff',
+          3,
+          0.6,
+          0.18,
+          0.9,
+          this.airDash.direction.clone().multiplyScalar(-9),
+        );
+      }
+    }
     advanceFlight(this.velocity, this.flightAcceleration, wish, dt);
     const motor = this.velocity.clone().add(this.airDash.velocity);
     if (!this.flightEnabled && !physical) motor.y = this.verticalVelocity;
@@ -934,11 +1000,8 @@ export class Game {
       this.knockTime > 0 || physical,
       'player',
       0.38 + this.playerTumble.weight * 0.4,
-      1.7 * (1 - this.playerTumble.weight) +
-        2 *
-          (supportHeight(this.playerTumble.orientation, new THREE.Vector3(0.325, 0.65, 0.325)) +
-            0.025) *
-          this.playerTumble.weight,
+      // A thrown body is a jointed figure lying low, not a standing box.
+      1.7 * (1 - this.playerTumble.weight) + RAGDOLL_ROOT * 2.4 * this.playerTumble.weight,
     );
     if (motor.y === 0 && this.velocity.y < 0) {
       this.velocity.y = 0;
@@ -1187,10 +1250,13 @@ export class Game {
     if (snap) this.camera.quaternion.copy(targetRotation);
     else this.camera.quaternion.slerp(targetRotation, 1 - Math.exp(-dt * 22));
     const speed = this.velocity.clone().add(this.impulse).add(this.airDash.velocity).length();
+    // Speed widens the view; a dash kicks it wider still for its first instants.
     this.fovBase = damp(
       this.fovBase,
-      this.settings.reducedEffects ? 74 : 74 + clamp((speed - 14) * 0.25, 0, 11),
-      8,
+      this.settings.reducedEffects
+        ? 74
+        : 74 + clamp((speed - 14) * 0.25, 0, 11) + this.airDash.strength * 7,
+      this.airDash.active ? 16 : 8,
       dt,
     );
     this.applyPunch(0);
@@ -1280,7 +1346,25 @@ export class Game {
       restingPivot * (1 - this.playerTumble.weight) +
       (supportHeight(this.avatar.quaternion, new THREE.Vector3(0.325, 0.65, 0.325)) + 0.025) *
         this.playerTumble.weight;
-    this.playerTrail.push(this.avatar.position, this.camera.position);
+    if (this.ragdoll.active) {
+      // The jointed body rides the physics root while the tumble lasts, then gathers itself
+      // into the avatar's standing pose as the tumble recovers and hands back to the box.
+      const rise = this.playerTumble.phase === 'recover' ? 1 - this.playerTumble.weight : 0;
+      this.ragdoll.step(
+        dt,
+        this.player.clone().addScaledVector(UP, RAGDOLL_ROOT),
+        this.ragdollSurface,
+        rise,
+        this.avatar.position,
+        this.avatar.quaternion,
+      );
+      if (!this.playerTumble.active) this.ragdoll.finish();
+    }
+    this.avatar.visible = !this.ragdoll.active;
+    // A body dragged along the ground leaves a furrow, not a light trail.
+    if (this.playerTumble.physical && this.playerTumble.grounded)
+      this.playerTrail.reset(this.avatar.position);
+    else this.playerTrail.push(this.avatar.position, this.camera.position);
     this.world.focusShadow(this.player);
     this.boss.present(
       this.time,
@@ -1291,7 +1375,7 @@ export class Game {
     [this.player, this.boss.position].forEach((p, i) => {
       this.stamp.position.set(p.x, this.world.surfaceHeight(p.x, p.z) + 0.035, p.z);
       this.stamp.rotation.set(-Math.PI / 2, 0, 0);
-      const size = i === 0 ? 1.6 + Math.max(0, p.y) * 0.2 : this.boss.alive ? 3.3 : 0;
+      const size = i === 0 ? 1.6 + Math.max(0, p.y) * 0.2 : this.boss.alive ? 3.3 * BOSS.scale : 0;
       this.stamp.scale.set(size, size, 1);
       this.stamp.updateMatrix();
       this.shadows.setMatrixAt(i, this.stamp.matrix);
@@ -1336,6 +1420,7 @@ export class Game {
       (goal) =>
         this.world.firingLane(goal, eye, b.director.attack).mode !== 'blocked' &&
         !this.trace(b.position, goal, false, 1.2),
+      this.bossLane.mode === 'clear',
     );
     if (b.knockTime === 0)
       this.nav.steer(b.position, motor, b.tactics.goal, this.player, this.time);
@@ -1354,8 +1439,12 @@ export class Game {
     b.impulse.y -= (b.tumble.physical ? HEAVY.gravity : 14 * (1 - recovery)) * dt;
     b.velocity.lerp(motor, 1 - Math.exp(-dt * 5.2));
     const extent =
-        2.05 * (1 - b.tumble.weight) +
-        supportHeight(b.tumble.orientation, new THREE.Vector3(1.85, 1.7, 0.575), -0.3375) *
+        BOSS.extent * (1 - b.tumble.weight) +
+        supportHeight(
+          b.tumble.orientation,
+          new THREE.Vector3(1.85, 1.7, 0.575).multiplyScalar(BOSS.scale),
+          -0.3375 * BOSS.scale,
+        ) *
           b.tumble.weight,
       feet = b.position.clone().addScaledVector(UP, -extent);
     this.moveBody(
@@ -1365,7 +1454,7 @@ export class Game {
       dt,
       b.knockTime > 0,
       'boss',
-      1.15 + b.tumble.weight * 0.75,
+      (1.15 + b.tumble.weight * 0.75) * BOSS.scale,
       extent * 2,
     );
     b.position.copy(feet).addScaledVector(UP, extent);
@@ -1419,6 +1508,16 @@ export class Game {
         }
       } else this.bossAttack(command.attack, command.index);
     }
+    // The last third of a second of the hammer tell draws the shot line to the locked point,
+    // so the sphere's path can be read and sidestepped before it leaves the glyph.
+    if (
+      b.director.attack === 'hammer' &&
+      b.director.stage === 'telegraph' &&
+      b.director.charge >= 1 - 0.3 / b.director.duration
+    ) {
+      const muzzle = b.muzzle(PROJECTILES.hammer.radius);
+      this.fx.beam(muzzle, b.lockedTarget, '#ffd9a0', 0.028, 0.07);
+    }
     if (b.director.attack === 'vortex' && b.director.stage === 'telegraph' && b.alive) {
       // The tell: loose embers drawn into the glyph, so the pull is announced before it exists.
       const glyph = b.muzzle();
@@ -1440,15 +1539,24 @@ export class Game {
     this.firePacket = null;
     b.clearGates();
     if (!this.testIdleBoss && this.breachClock <= 0) {
-      for (const attack of ['missiles', 'hammer'] as const) {
+      // Whenever the player can be seen at all, something is cast: an attack whose corridor
+      // fits (a thin bolt stream past a corner, a seeker that curves, a sphere that breaches a
+      // slab) replaces the one that does not, instead of the boss going quiet while it looks
+      // for a better spot. Clear lanes beat breaches.
+      let pick: { attack: AttackId; lane: FiringLane } | null = null;
+      for (const attack of ['fire', 'missiles', 'hammer', 'vortex'] as const) {
+        if (attack === b.director.attack) continue;
         const lane = this.world.firingLane(b.position, target, attack);
-        if (lane.mode === 'breach' && b.director.redirect(attack)) {
-          this.bossLane = lane;
-          this.breachClock = 4;
-          b.lockedTarget.copy(target);
-          if (this.mode !== 'menu') this.audio.charge();
-          return;
-        }
+        if (lane.mode === 'blocked') continue;
+        if (!pick || (pick.lane.mode === 'breach' && lane.mode === 'clear'))
+          pick = { attack, lane };
+      }
+      if (pick && b.director.redirect(pick.attack)) {
+        this.bossLane = pick.lane;
+        this.breachClock = 4;
+        b.lockedTarget.copy(target);
+        if (this.mode !== 'menu') this.audio.charge();
+        return;
       }
     }
     if (this.seekClock > 0 || this.testIdleBoss) return;
@@ -1462,10 +1570,11 @@ export class Game {
     attack: AttackId,
     origin?: THREE.Vector3,
     target = this.player.clone().add(new THREE.Vector3(0, 0.9, 0)),
+    count = true,
   ) {
     const core = this.world.firingLane(this.boss.position, target, attack);
     if (core.mode === 'blocked') {
-      this.blockedCasts++;
+      if (count) this.blockedCasts++;
       return false;
     }
     if (
@@ -1473,7 +1582,7 @@ export class Game {
       (!this.clearSight(this.boss.position, origin) ||
         this.world.firingLane(origin, target, attack).mode === 'blocked')
     ) {
-      this.blockedCasts++;
+      if (count) this.blockedCasts++;
       return false;
     }
     return true;
@@ -1489,11 +1598,19 @@ export class Game {
         this.firePacket.packet !== packet ||
         this.firePacket.pattern !== pattern
       ) {
-        const origin = this.boss.fireGate(
-          packet,
-          this.player.clone().addScaledVector(UP, 0.9),
-          (x, z) => this.world.surfaceHeight(x, z),
-        );
+        // The packet's own ring slot is preferred; when a wall or the ground masks that
+        // slot, the gate opens at the nearest slot around the ring with a clear lane.
+        const eye = this.player.clone().addScaledVector(UP, 0.9),
+          floor = (x: number, z: number) => this.world.surfaceHeight(x, z);
+        let slot = packet;
+        for (let k = 0; k < 8; k++) {
+          const candidate = packet + k;
+          if (this.permittedCast('fire', this.boss.gateOriginFor(candidate, floor), eye, false)) {
+            slot = candidate;
+            break;
+          }
+        }
+        const origin = this.boss.fireGate(packet, eye, floor, slot);
         this.firePacket = { packet, pattern, origin };
       }
       this.pendingFire.push({
@@ -1517,14 +1634,19 @@ export class Game {
           aimOffset = right.multiplyScalar(scatter.side).addScaledVector(UP, scatter.up),
           forward = center.add(aimOffset).sub(port).normalize();
         const radial = port.clone().sub(this.boss.muzzle()).normalize();
+        // Seekers leave on an outward, rising arc off the glyph and only then turn and dive
+        // on the player, so every salvo blooms open before it converges.
+        const near = Math.min(1, port.distanceTo(this.player) / 12);
         const launch = forward
-          .multiplyScalar(0.8)
-          .addScaledVector(radial, 0.45 * Math.min(1, port.distanceTo(this.player) / 12))
+          .multiplyScalar(0.55)
+          .addScaledVector(radial, 0.6 * near)
+          .addScaledVector(UP, 0.5 * near)
           .normalize()
-          .multiplyScalar(15);
+          .multiplyScalar(17);
         if (!this.permittedCast('missiles', port)) continue;
         this.spawn(port, launch, 'missile', 16, false, aimOffset);
-        this.fx.glyph(port, forward, '#ffbc80', 0.32, 0.32);
+        this.fx.glyph(port, launch.clone().normalize(), '#ffbc80', 0.42, 0.3);
+        this.fx.burst(port, '#ffb98a', 8, 2.5, 0.22, 0.7);
       }
       if (this.mode !== 'menu') this.audio.cast(0);
     } else if (attack === 'vortex') {
@@ -1556,8 +1678,11 @@ export class Game {
       if (!this.permittedCast('hammer', muzzle, this.boss.lockedTarget)) return;
       const aim = this.boss.lockedTarget.clone().sub(muzzle).normalize();
       this.spawn(muzzle, aim.clone().multiplyScalar(PROJECTILES.hammer.speed), 'hammer', 29);
-      this.fx.glyph(muzzle, aim, '#fff0b8', 2.3, 0.55);
-      this.fx.burst(muzzle, '#ffe7ae', 40, 5, 0.8, 1);
+      this.fx.glyph(muzzle, aim, '#fff0b8', 2.6, 0.55);
+      this.fx.glyph(muzzle.clone().addScaledVector(aim, 0.6), aim, '#ffd28a', 1.4, 0.3);
+      this.fx.burst(muzzle, '#ffe7ae', 48, 6, 0.8, 1.1);
+      // The heave kicks the caster backwards and off its line.
+      if (!this.boss.tumble.physical) this.boss.impulse.addScaledVector(aim, -7.5);
       if (this.mode !== 'menu') this.audio.cast(2);
     }
   }
@@ -1696,10 +1821,15 @@ export class Game {
         )
         .sub(origin)
         .normalize();
+      // The salvo's fan narrows with distance, so a long-range stream still brackets the
+      // target instead of scattering harmlessly around it.
       const spread = salvoSpread(shot.index),
+        focus = clamp(30 / Math.max(1, origin.distanceTo(this.player)), 0.4, 1),
         right = new THREE.Vector3().crossVectors(aim, UP).normalize();
-      aim.applyAxisAngle(UP, spread.yaw).applyAxisAngle(right, spread.pitch);
-      this.spawn(origin, aim.multiplyScalar(PROJECTILES.fire.speed), 'fire', 9);
+      aim.applyAxisAngle(UP, spread.yaw * focus).applyAxisAngle(right, spread.pitch * focus);
+      this.spawn(origin, aim.clone().multiplyScalar(PROJECTILES.fire.speed), 'fire', 9);
+      // Each bolt ignites in the gate: a short flash plate pushed just ahead of the ring.
+      this.fx.glyph(origin.clone().addScaledVector(aim, 0.35), aim, '#ffc478', 0.42, 0.14);
       if (this.mode !== 'menu' && shot.index % 3 === 0) this.audio.cast(0);
     }
   }
@@ -1775,7 +1905,7 @@ export class Game {
     const ground = this.world.traceGround(start, end, radius);
     if (ground !== null && (!best || ground < best.t)) best = { t: ground, ground: true };
     if (boss && this.boss.alive) {
-      const t = segmentSphere(start, end, this.boss.position, 1.48 + radius);
+      const t = segmentSphere(start, end, this.boss.position, BOSS.radius + radius);
       if (t !== null && (!best || t < best.t)) best = { t, boss: true };
     }
     return best;
@@ -1835,6 +1965,7 @@ export class Game {
       claim: null,
       anchor: null,
       leaked: false,
+      dodged: false,
     });
     if (kind !== 'player') this.attacksFired[kind]++;
   }
@@ -2010,11 +2141,19 @@ export class Game {
             this.removeProjectile(i, true);
             continue;
           }
-          if (!this.airDash.invulnerable) this.damagePlayer(p.damage, p.velocity, p.kind, !covered);
-          this.fx.burst(p.mesh.position, '#ff9a62', 18, 3.5, 0.36);
-          this.removeProjectile(i);
-          if (this.hitPause.remaining > 0) break;
-          continue;
+          if (this.airDash.invulnerable) {
+            // The dash phases through: the shot flies on, and the near miss is rewarded.
+            if (!p.dodged) {
+              p.dodged = true;
+              this.perfectDodge(center);
+            }
+          } else {
+            this.damagePlayer(p.damage, p.velocity, p.kind, !covered);
+            this.fx.burst(p.mesh.position, '#ff9a62', 18, 3.5, 0.36);
+            this.removeProjectile(i);
+            if (this.hitPause.remaining > 0) break;
+            continue;
+          }
         }
       }
       if (worldHit) {
@@ -2035,6 +2174,7 @@ export class Game {
               p.kind === 'hammer' ? 4.2 : 1.8,
             );
           if (worldHit.ground && p.kind === 'hammer') this.world.crater(p.mesh.position, 36);
+          if (p.kind === 'hammer') this.hammerSplash(p.mesh.position, !!worldHit.ground);
         }
         if (worldHit.ground && (p.kind === 'fire' || p.kind === 'missile'))
           this.fx.scorch(p.mesh.position, p.kind);
@@ -2127,8 +2267,8 @@ export class Game {
     this.boss.deathDelay = -1;
     this.boss.group.visible = this.boss.ribbon.mesh.visible = false;
     this.fx.impact(this.boss.position, '#ffe0a1', true);
-    this.fx.debris(this.boss.position, 35, 8, 3);
-    this.fx.dust(this.boss.position, 15, 2.5);
+    this.fx.debris(this.boss.position, Math.round(35 * BOSS.scale), 8 * BOSS.scale, 3 * BOSS.scale);
+    this.fx.dust(this.boss.position, Math.round(15 * BOSS.scale), 2.5 * BOSS.scale);
   }
   private damageBoss(amount: number, impulse: THREE.Vector3) {
     if (!this.boss.alive || this.outcome || this.mode !== 'playing') return;
@@ -2166,11 +2306,51 @@ export class Game {
       }
     }
   }
+  /**
+   * A shot that would have landed during the dash's phasing window: a beat of slow motion to
+   * savour it, a ring of light, a chime, a shot of energy and the next dash almost at once.
+   */
+  private perfectDodge(center: THREE.Vector3) {
+    this.perfectDodges++;
+    this.hitPause.request(0, 0.5);
+    this.energy = Math.min(100, this.energy + 20);
+    this.dashCooldown = Math.min(this.dashCooldown, 0.4);
+    this.fx.shock(center, '#bdf6ff', 3.4);
+    this.fx.burst(center, '#dffbff', 22, 4, 0.32, 1.3);
+    if (!this.settings.reducedEffects) this.punch = 0.7;
+    this.audio.perfect();
+    this.emit({ type: 'dodge' });
+  }
+  /**
+   * The solar sphere bursting against the world: a shock ring and embers, and anyone standing
+   * within `HAMMER_SPLASH` metres is launched away from the blast — weaker at the rim, never
+   * as hard as the direct hit. This is what lets the boss punish a player on foot.
+   */
+  private hammerSplash(at: THREE.Vector3, ground: boolean) {
+    const up = ground ? UP : new THREE.Vector3(0, 0.6, 0);
+    this.fx.shock(at.clone().addScaledVector(UP, 0.12), '#ffb46e', 7.5);
+    this.fx.burst(at, '#ff9c4a', 36, 8, 0.45, 2.2);
+    const center = this.player.clone().addScaledVector(UP, 0.9),
+      away = center.clone().sub(at),
+      distance = away.length();
+    if (distance > HAMMER_SPLASH || this.airDash.invulnerable) return;
+    const falloff = 1 - distance / HAMMER_SPLASH,
+      direction = away.divideScalar(Math.max(0.01, distance)).add(up).normalize();
+    this.splashHits++;
+    this.damagePlayer(
+      Math.round(29 * (0.3 + 0.4 * falloff)),
+      direction,
+      'hammer',
+      false,
+      0.55 + 0.35 * falloff,
+    );
+  }
   private damagePlayer(
     amount: number,
     incoming: THREE.Vector3,
     kind: ProjectileKind,
     blind: boolean,
+    power = 1,
   ) {
     if (this.outcome || this.damageTimer < 0.14 || this.testInvulnerable) return;
     this.damageTimer = 0;
@@ -2178,7 +2358,10 @@ export class Game {
     if (this.mode === 'playing' && !this.testInvulnerable)
       this.health = Math.max(0, this.health - amount);
     const tuning = PROJECTILES[kind],
-      vector = incoming.clone().normalize().multiplyScalar(tuning.launch);
+      vector = incoming
+        .clone()
+        .normalize()
+        .multiplyScalar(tuning.launch * power);
     if (kind === 'hammer') vector.y = vector.y < -10 ? vector.y : clamp(vector.y + 4, -10, 18);
     else vector.y = Math.max(kind === 'missile' ? 5 : 2.5, vector.y * 0.6 + 3);
     vector
@@ -2191,12 +2374,20 @@ export class Game {
     this.playerRelease.cancel();
     this.flightAcceleration.set(0, 0, 0);
     this.airDash.reset();
-    if (kind === 'hammer') this.playerTumble.kick(this.avatar.quaternion, vector);
+    if (kind === 'hammer') {
+      this.playerTumble.kick(this.avatar.quaternion, vector);
+      this.ragdoll.spawn(
+        this.avatar.position,
+        this.avatar.quaternion,
+        vector,
+        this.playerTumble.angularVelocity,
+      );
+    }
     this.velocity.set(0, 0, 0);
     this.impulse.set(0, 0, 0);
     this.dashTime = 0;
     this.knockTime = tuning.stagger;
-    this.contactPause('player', incoming, tuning.pause, tuning.launch, tuning.slow);
+    this.contactPause('player', incoming, tuning.pause * power, tuning.launch * power, tuning.slow);
     this.shake = 0.018;
     if (this.mode !== 'menu') this.audio.damage();
     this.emit({ type: 'damage', amount });
@@ -2274,6 +2465,10 @@ export class Game {
         this.renderNeeded = true;
       },
       face: orient,
+      observe: (at: number[] | null, look: number[] = [0, 0, 0]) => {
+        this.testCamera = at ? { at, look } : null;
+        this.renderNeeded = true;
+      },
       castBoss: (attack: AttackId, index = 0) => this.bossAttack(attack, index),
       place: (player: number[], boss: number[]) => {
         this.player.fromArray(player);

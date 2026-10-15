@@ -238,8 +238,15 @@ export class AudioEngine {
     this.air(0.12, 2800, 0.2);
   }
   dash() {
-    this.air(0.35, 1800, 0.45);
-    this.tone(95, 42, 0.3, 0.2);
+    this.air(0.3, 2400, 0.42);
+    this.air(0.18, 900, 0.2);
+    this.tone(140, 48, 0.26, 0.2);
+  }
+  /** A perfect dodge: a bright two-note chime over the dash's whoosh. */
+  perfect() {
+    this.tone(1320, 1980, 0.16, 0.16, 'sine');
+    this.tone(1980, 2640, 0.26, 0.12, 'sine', 0.07);
+    this.air(0.3, 5200, 0.14);
   }
   /** An Aegis piece snapping up in front of the body: quiet, the hit itself comes later. */
   raise() {

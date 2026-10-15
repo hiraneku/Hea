@@ -1,5 +1,5 @@
 import { Vector3 } from 'three';
-import { ARENA } from './config';
+import { ARENA, BOSS } from './config';
 import { DUEL } from './combat';
 import { clamp, type Obstacle } from './math';
 
@@ -206,7 +206,7 @@ export class BossNavigator {
       key = included.map((b) => bounds.indexOf(b)).join(',');
     let graph = this.graphs.get(key);
     if (!graph) {
-      graph = new NavGraph(included);
+      graph = new NavGraph(included, BOSS.radius + 1.2);
       this.graphs.set(key, graph);
       if (this.graphs.size > 8) this.graphs.delete(this.graphs.keys().next().value!);
     }
@@ -252,7 +252,7 @@ export class BossNavigator {
       : [DUEL.preferredRange, DUEL.nearRange + 2, DUEL.farRange];
     const heights = [
       boss.y,
-      Math.max(2.5, player.y + 0.9),
+      Math.max(BOSS.hover, player.y + 0.9),
       Math.min(ARENA.ceiling, (obstruction?.top ?? boss.y) + 4),
       Math.min(ARENA.ceiling, player.y + 14),
     ];
@@ -273,11 +273,11 @@ export class BossNavigator {
           )
             continue;
           if (
-            this.ctx.trace(candidate, candidate, 1.3) ||
+            this.ctx.trace(candidate, candidate, BOSS.radius) ||
             this.ctx.lane(candidate, target) !== 'clear'
           )
             continue;
-          const reachable = !this.ctx.trace(boss, candidate, 1.2);
+          const reachable = !this.ctx.trace(boss, candidate, BOSS.radius * 0.85);
           const score =
             candidate.distanceTo(boss) +
             Math.abs(height - boss.y) * 1.2 +
@@ -333,7 +333,9 @@ export class BossNavigator {
         clamp((bounds.minZ + bounds.maxZ) / 2, -ARENA.halfSize + 6, ARENA.halfSize - 6),
       );
       // Climb in place first when the diagonal would clip the near edge of the slab.
-      return this.ctx.trace(from, above, 1.2) ? new Vector3(from.x, above.y, from.z) : above;
+      return this.ctx.trace(from, above, BOSS.radius * 0.85)
+        ? new Vector3(from.x, above.y, from.z)
+        : above;
     }
     if (!path || path.length < 2) return this.corner(from, to, bounds);
     const total = Math.max(1e-6, pathLength(path));
@@ -343,14 +345,14 @@ export class BossNavigator {
       this.route.push(
         new Vector3(
           path[i].x,
-          Math.max(2.5, from.y + (to.y - from.y) * (travelled / total)),
+          Math.max(BOSS.hover, from.y + (to.y - from.y) * (travelled / total)),
           path[i].z,
         ),
       );
     }
     // A waypoint hidden behind terrain or a slab lip falls back to single-corner routing.
     const first = this.route[0];
-    if (this.ctx.trace(from, first, 1.2)) return this.corner(from, to, bounds);
+    if (this.ctx.trace(from, first, BOSS.radius * 0.85)) return this.corner(from, to, bounds);
     // Intermediate corners get a carrot 10 m beyond them, so the arrive-damping of the motor
     // does not slow the boss at every corner of a long route.
     if (this.route.length > 1) {
@@ -361,9 +363,9 @@ export class BossNavigator {
         if (
           Math.abs(carrot.x) <= ARENA.halfSize - 4 &&
           Math.abs(carrot.z) <= ARENA.halfSize - 4 &&
-          carrot.y >= 2.5 &&
+          carrot.y >= BOSS.hover &&
           carrot.y <= ARENA.ceiling &&
-          !this.ctx.trace(from, carrot, 1.2)
+          !this.ctx.trace(from, carrot, BOSS.radius * 0.85)
         )
           return carrot;
       }
@@ -390,10 +392,10 @@ export class BossNavigator {
       if (
         Math.abs(point.x) > ARENA.halfSize - 4 ||
         Math.abs(point.z) > ARENA.halfSize - 4 ||
-        point.y < 2.5 ||
+        point.y < BOSS.hover ||
         point.y > ARENA.ceiling ||
-        this.ctx.trace(point, point, 1.6) ||
-        this.ctx.trace(from, point, 1.4)
+        this.ctx.trace(point, point, BOSS.radius + 0.1) ||
+        this.ctx.trace(from, point, BOSS.radius * 0.9)
       )
         continue;
       const leg = from.distanceTo(point),
@@ -448,7 +450,7 @@ export class BossNavigator {
       if (
         Math.abs(point.x) > ARENA.halfSize - 4 ||
         Math.abs(point.z) > ARENA.halfSize - 4 ||
-        point.y < 2 ||
+        point.y < BOSS.hover - 0.6 ||
         point.y > ARENA.ceiling
       )
         continue;

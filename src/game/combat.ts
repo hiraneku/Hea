@@ -252,6 +252,16 @@ export function rangeCorrection(distance: number): number {
 }
 
 export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer' | 'vortex';
+/** The projectile each boss attack launches (the vortex seed for the vortex). */
+export function projectileOf(attack: AttackId): Exclude<ProjectileKind, 'player'> {
+  return attack === 'missiles'
+    ? 'missile'
+    : attack === 'fire'
+      ? 'fire'
+      : attack === 'vortex'
+        ? 'vortex'
+        : 'hammer';
+}
 /** The same radius drives the visible core, shield size and swept collision. */
 export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, slow: 0, stagger: 0 },

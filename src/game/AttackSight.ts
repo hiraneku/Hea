@@ -1,7 +1,7 @@
 import { Vector3 } from 'three';
 import { rayBoxSpan, type Obstacle } from './math';
 import { HEAVY } from './config';
-import { PROJECTILES, type AttackId } from './combat';
+import { PROJECTILES, projectileOf, type AttackId } from './combat';
 
 export interface FiringLane {
   mode: 'clear' | 'breach' | 'blocked';
@@ -19,16 +19,7 @@ export function assessFiringLane(
     distance = ray.length();
   if (distance < 0.001) return { mode: 'blocked', walls: [], thickness: 0 };
   ray.divideScalar(distance);
-  const radius =
-    PROJECTILES[
-      attack === 'missiles'
-        ? 'missile'
-        : attack === 'fire'
-          ? 'fire'
-          : attack === 'vortex'
-            ? 'vortex'
-            : 'hammer'
-    ].radius;
+  const radius = PROJECTILES[projectileOf(attack)].radius;
   const limit = Math.max(0, distance - radius - 0.72),
     groups = new Map<number, { enter: number; exit: number }[]>();
   for (const box of obstacles) {

@@ -1,8 +1,11 @@
 import * as THREE from 'three';
 import { Effects } from './Effects';
-import { ARENA, HEAVY, WORLD_SCALE } from './config';
+import { ARENA, FOOTPRINT_SCALE, HEAVY, HEIGHT_SCALE, WORLD_SCALE } from './config';
 import { assessFiringLane, type FiringLane } from './AttackSight';
-import { PROJECTILES, type AttackId } from './combat';
+import { PROJECTILES, projectileOf, type AttackId } from './combat';
+
+/** How far short of the target (m) a projectile may meet the ground and still count as a hit. */
+const GROUND_MISS = { fire: 0.8, missile: 1, hammer: 3.2, vortex: 3.2, player: 0 } as const;
 import { DestructibleVolume, TerrainDeformation, type Cell } from './destruction';
 import { seededRandom, firstSolidSpan, type Obstacle } from './math';
 import { gridCell, warpAxis } from './terrainGrid';
@@ -128,7 +131,7 @@ export class World {
     private fx: Effects,
   ) {
     scene.background = new THREE.Color('#b4cbd6');
-    scene.fog = new THREE.Fog('#b6c5cf', 150, 440);
+    scene.fog = new THREE.Fog('#b6c5cf', 165, 480);
     this.sky = new THREE.Mesh(
       new THREE.SphereGeometry(540, 32, 20),
       new THREE.MeshBasicMaterial({
@@ -260,9 +263,12 @@ export class World {
       this.obstacles.push(bounds);
       return mesh;
     };
-    // The whole layout is drawn at `K` times the v0.8 plan: fewer, broader and much thicker
-    // monoliths on a wider ground, while the handful of thin slabs stay thin for solar piercing.
-    const K = WORLD_SCALE;
+    // The layout is the v0.8 plan spread by `K`, with footprints grown by `F` and heights by
+    // `H` (see config.ts): fewer, broader and much thicker monoliths on a wider ground, while
+    // the handful of thin slabs stay thin for solar piercing.
+    const K = WORLD_SCALE,
+      F = FOOTPRINT_SCALE,
+      H = HEIGHT_SCALE;
     const big = (
       x: number,
       z: number,
@@ -272,9 +278,9 @@ export class World {
       m = material,
       lean = 0,
       thin = false,
-    ) => block(x * K, z * K, w * K, h * K, thin ? d : d * K, m, lean);
+    ) => block(x * K, z * K, w * F, h * H, thin ? d : d * F, m, lean);
     big(-2, -10, 11, 19, 2.4, dark, 0, true);
-    big(-2, -10, 12, 0.3 / K, 5, light);
+    big(-2, -10, 12, 0.3 / H, 5, light);
     big(-12, -24, 16, 40, 12, light);
     big(16, -25, 16, 36, 11, dark, -0.1);
     this.labelBuilding = this.buildings.length;
@@ -312,14 +318,14 @@ export class World {
         );
       }
     }
-    // Low cover in the empty bands between the central cluster and the rings (r ≈ 74 m and
-    // 114 m): 1.5–2.6 m walls to duck behind on foot, low enough for every flight route to
+    // Low cover in the empty bands between the central cluster and the rings (r ≈ 85 m and
+    // 132 m): 1.5–2.6 m walls to duck behind on foot, low enough for every flight route to
     // pass over, each nudged inwards until it sits clear of the monoliths and the main lanes.
     const coverLayout = seededRandom(2201);
     const lowCover = (angle: number, radius: number, index: number) => {
-      const long = 6 + coverLayout() * 4,
+      const long = (6 + coverLayout() * 4) * (F / H),
         height = 1.5 + coverLayout() * 1.1,
-        thin = 1.2 + coverLayout() * 0.6,
+        thin = (1.2 + coverLayout() * 0.6) * (F / H),
         eastWest = Math.abs(Math.cos(angle)) > Math.abs(Math.sin(angle)),
         [w, d] = eastWest ? [thin, long] : [long, thin];
       for (let attempt = 0; attempt < 4; attempt++) {
@@ -351,18 +357,18 @@ export class World {
     }
     this.updateIntactBatches();
     // The tilted prism keeps the intentionally simple greybox silhouette of the reference.
-    const wedge = new THREE.Mesh(new THREE.ConeGeometry(4.6 * K, 5.7 * K, 4), light);
-    wedge.position.set(6.5 * K, 2.5 * K, -14 * K);
+    const wedge = new THREE.Mesh(new THREE.ConeGeometry(4.6 * F, 5.7 * H, 4), light);
+    wedge.position.set(6.5 * K, 2.5 * H, -14 * K);
     wedge.rotation.y = Math.PI / 4;
     wedge.castShadow = true;
     wedge.receiveShadow = true;
     scene.add(wedge);
     this.fixedObstacles.push({
-      minX: 3.25 * K,
-      maxX: 9.75 * K,
-      minZ: -17.25 * K,
-      maxZ: -10.75 * K,
-      top: 5.35 * K,
+      minX: 6.5 * K - 3.25 * F,
+      maxX: 6.5 * K + 3.25 * F,
+      minZ: -14 * K - 3.25 * F,
+      maxZ: -14 * K + 3.25 * F,
+      top: 5.35 * H,
     });
     this.obstacles.push(...this.fixedObstacles);
     const random = seededRandom(137);
@@ -371,8 +377,12 @@ export class World {
     for (let i = 0; i < 30; i++) {
       const a = (i / 30) * Math.PI * 2,
         r = ARENA.halfSize + 24 + random() * 46,
-        h = (28 + random() * 34) * WORLD_SCALE;
-      tower.scale.set((12 + random() * 12) * WORLD_SCALE, h, (10 + random() * 10) * WORLD_SCALE);
+        h = (28 + random() * 34) * HEIGHT_SCALE;
+      tower.scale.set(
+        (12 + random() * 12) * FOOTPRINT_SCALE,
+        h,
+        (10 + random() * 10) * FOOTPRINT_SCALE,
+      );
       tower.position.set(Math.cos(a) * r, h * 0.5, Math.sin(a) * r);
       tower.updateMatrix();
       skyline.setMatrixAt(i, tower.matrix);
@@ -608,15 +618,21 @@ export class World {
   get wallBounds() {
     return this.buildings.map((b) => ({ ...b.volume.bounds }));
   }
+  /**
+   * Can `attack` be cast from `from` at `target`? Ground contact only blocks the lane when it
+   * happens well short of the target: a heavy sphere that ploughs into the dirt at a grounded
+   * player's feet still lands (its blast reaches them), and the vortex seed anchors short of
+   * the body by design. Without that allowance a low boss could never fire at anyone on foot.
+   */
   firingLane(from: THREE.Vector3, target: THREE.Vector3, attack: AttackId): FiringLane {
-    const radius =
-      PROJECTILES[attack === 'missiles' ? 'missile' : attack === 'fire' ? 'fire' : 'hammer'].radius;
+    const kind = projectileOf(attack),
+      radius = PROJECTILES[kind].radius;
     const toward = target.clone().sub(from),
-      distance = toward.length();
-    const end = from
-      .clone()
-      .addScaledVector(toward.normalize(), Math.max(0, distance - radius - 0.72));
-    if (this.traceGround(from, end, radius) !== null)
+      distance = toward.length(),
+      reach = Math.max(0, distance - radius - 0.72);
+    const end = from.clone().addScaledVector(toward.normalize(), reach);
+    const t = this.traceGround(from, end, radius);
+    if (t !== null && (1 - t) * reach > GROUND_MISS[kind])
       return { mode: 'blocked', walls: [], thickness: Infinity };
     return assessFiringLane(from, target, attack, this.obstacles);
   }

@@ -157,22 +157,72 @@ test.describe('golden frames', () => {
     await expect(canvas(page)).toHaveScreenshot('heavy-contact.png', SNAPSHOT);
   });
 
+  test('the jointed ragdoll mid-drag: a crumpled figure, limbs trailing, nothing underground', async ({
+    page,
+  }) => {
+    await load(page);
+    await scene(page, 'ragdoll-ground');
+    await seededStep(page, 0.62, 61);
+    // Pin an observer camera beside the figure; the chase camera lags a body thrown this fast.
+    await page.evaluate(() => {
+      const h = window.__HEA_DEBUG__.harness!,
+        figure = window.__HEA_DEBUG__.diagnostics().ragdoll.playerFigure!;
+      const [x, y, z] = figure.pelvis;
+      h.observe([x + 2.4, y + 1.1, z + 2.6], [x, y + 0.1, z]);
+    });
+    await seededStep(page, 0.02, 62);
+    await settle(page);
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    expect(d.ragdoll.player).toBe(true);
+    expect(d.ragdoll.playerFigure!.span).toBeGreaterThan(0.3);
+    await expect(canvas(page)).toHaveScreenshot('ragdoll-drag.png', SNAPSHOT);
+  });
+
+  test('the boss mid-cast: the enlarged body leaning into its sigils with the gates lit', async ({
+    page,
+  }) => {
+    await load(page);
+    await scene(page, 'walk-live');
+    // Run the duel until the first salvo is in the air, then look at the boss from the side.
+    for (let t = 0; t < 8; t += 0.25) {
+      await seededStep(page, 0.25, 71 + t * 4);
+      const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+      if (d.fireGates.length > 0 && d.attacksFired.fire > 0) break;
+    }
+    await page.evaluate(() => {
+      const h = window.__HEA_DEBUG__.harness!,
+        d = window.__HEA_DEBUG__.diagnostics();
+      const [x, y, z] = d.bossPosition,
+        [px, , pz] = d.playerPosition;
+      // Three quarters behind the player's shoulder, framing boss and gates together.
+      const dx = x - px,
+        dz = z - pz,
+        len = Math.hypot(dx, dz) || 1;
+      h.observe(
+        [x - (dx / len) * 9 - (dz / len) * 5, y + 1.5, z - (dz / len) * 9 + (dx / len) * 5],
+        [x, y + 0.6, z],
+      );
+    });
+    await seededStep(page, 0.02, 72);
+    await settle(page);
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    expect(d.fireGates.length).toBeGreaterThan(0);
+    await expect(canvas(page)).toHaveScreenshot('boss-cast.png', SNAPSHOT);
+  });
+
   test('the arena from above: warped terrain grid, rooftops and the low-cover band', async ({
     page,
   }) => {
     await load(page);
     await scene(page, 'flight');
-    await page.evaluate(() => {
-      const h = window.__HEA_DEBUG__.harness!;
-      h.place([44, 68, 112], [-2.6, 5.8, 2]);
-      h.face(0.38, -0.62);
-    });
+    // The 380 m city no longer fits under the 70 m flight ceiling: pin an observer camera
+    // well above the outer ring instead of flying the player up there.
+    await page.evaluate(() => window.__HEA_DEBUG__.harness!.observe([60, 110, 150], [0, 0, 10]));
     await seededStep(page, 0.02, 51);
     await settle(page);
-    expect((await page.evaluate(() => window.__HEA_DEBUG__.snapshot().position)).y).toBeCloseTo(
-      68,
-      0,
-    );
+    expect(
+      (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).walls.length,
+    ).toBeGreaterThan(40);
     await expect(canvas(page)).toHaveScreenshot('arena-overview.png', SNAPSHOT);
   });
 });

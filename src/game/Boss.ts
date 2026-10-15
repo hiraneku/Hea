@@ -3,6 +3,10 @@ import { BossDirector, DUEL } from './combat';
 import { Effects, makeSigil, Ribbon } from './Effects';
 import { BodyTumble, LaunchRelease, ease } from './motion';
 import { BossTactics, fireGateLocal, fireGateOffset } from './BossTactics';
+import { BOSS } from './config';
+
+/** Satellite fire gates relative to their v0.10 size. */
+const GATE_SCALE = 1.25;
 
 /** A single floating spellcaster: dark blockout body and an animated, front-facing solar sigil. */
 export class Boss {
@@ -34,9 +38,15 @@ export class Boss {
   pendingImpulse: THREE.Vector3 | null = null;
   deathDelay = -1;
   private castRotation = 0;
+  /** Forward lunge after a release (1 at the moment of casting, decays to 0). */
+  private snap = 0;
+  private lastStage: BossDirector['stage'] = 'recover';
   private spellSeeds: THREE.Mesh[] = [];
   private plate: THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>;
+  private lower: THREE.Mesh;
+  private body = new THREE.Group();
   private sigil: THREE.Group;
+  private innerSigil: THREE.Group;
   private chargeRing: THREE.Group;
   private ember: THREE.Mesh;
   private shards: THREE.Mesh[] = [];
@@ -51,16 +61,23 @@ export class Boss {
       emissive: '#612813',
       emissiveIntensity: 0.025,
     });
+    // The stone body sits in its own pivot so the telegraph can lean it back and the release
+    // can lunge it forward without disturbing the glyph, ports and gates in the group frame.
+    this.group.add(this.body);
     this.plate = new THREE.Mesh(new THREE.BoxGeometry(2.35, 2.7, 0.85), stone);
     this.plate.castShadow = this.plate.receiveShadow = true;
-    this.group.add(this.plate);
-    const lower = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.65, 1), stone);
-    lower.position.set(0, -1.7, -0.1);
-    lower.rotation.z = 0.05;
-    this.group.add(lower);
+    this.body.add(this.plate);
+    this.lower = new THREE.Mesh(new THREE.BoxGeometry(1.45, 0.65, 1), stone);
+    this.lower.position.set(0, -1.7, -0.1);
+    this.lower.rotation.z = 0.05;
+    this.body.add(this.lower);
     this.sigil = makeSigil(fx.sigilMap, 1.22, '#ff9e37');
     this.sigil.position.set(0, 0.1, 0.45);
     this.group.add(this.sigil);
+    // A second, counter-rotating circle wakes up inside the main one while a spell charges.
+    this.innerSigil = makeSigil(fx.sigilMap, 0.8, '#ffd79a');
+    this.innerSigil.position.set(0, 0.1, 0.5);
+    this.group.add(this.innerSigil);
     this.chargeRing = makeSigil(fx.sigilMap, 3.4, '#ffc25c');
     this.chargeRing.position.set(0, 0.1, 0.52);
     this.chargeRing.visible = false;
@@ -79,7 +96,8 @@ export class Boss {
     }
     for (let i = 0; i < 4; i++) {
       const shard = new THREE.Mesh(new THREE.BoxGeometry(0.33, 0.7, 0.65), stone);
-      this.group.add(shard);
+      shard.castShadow = true;
+      this.body.add(shard);
       this.shards.push(shard);
     }
     this.light = new THREE.PointLight('#ff9a4f', 8, 7, 2);
@@ -147,6 +165,10 @@ export class Boss {
     this.pendingImpulse = null;
     this.deathDelay = -1;
     this.castRotation = 0;
+    this.snap = 0;
+    this.lastStage = 'recover';
+    this.body.rotation.set(0, 0, 0);
+    this.body.position.set(0, 0, 0);
     this.director.reset();
     this.tactics.reset();
     this.tumble.reset();
@@ -155,7 +177,7 @@ export class Boss {
     this.gateHistory.length = 0;
     this.gateCursor = 0;
     this.group.visible = true;
-    this.group.scale.setScalar(1);
+    this.group.scale.setScalar(BOSS.scale);
     this.ribbon.reset(this.position);
     this.ribbon.mesh.visible = true;
   }
@@ -183,16 +205,32 @@ export class Boss {
         radius: 1.3 * g.object.scale.x,
       }));
   }
-  fireGate(index: number, target: THREE.Vector3, floor: (x: number, z: number) => number) {
-    const { local, side, angle, radius, spin } = fireGateOffset(index, this.director.pattern);
-    this.floor = floor;
+  /** Where a gate opened in ring slot `slot` would sit right now, without opening it. */
+  gateOriginFor(slot: number, floor: (x: number, z: number) => number) {
+    const { local } = fireGateOffset(slot, this.director.pattern);
     this.group.updateMatrixWorld(true);
     const origin = this.group.localToWorld(local.clone());
     origin.y = Math.max(origin.y, floor(origin.x, origin.z) + 1.2);
+    return origin;
+  }
+  /**
+   * Opens the gate for bolt packet `index`. The gate normally takes the packet's own ring slot;
+   * the caller may hand it another `slot` whose lane is clear when the packet's own is masked.
+   */
+  fireGate(
+    index: number,
+    target: THREE.Vector3,
+    floor: (x: number, z: number) => number,
+    slot = index,
+  ) {
+    const { local, angle, radius, spin } = fireGateOffset(slot, this.director.pattern),
+      side = fireGateOffset(index, this.director.pattern).side;
+    this.floor = floor;
+    const origin = this.gateOriginFor(slot, floor);
     const gate = this.gates[this.gateCursor++ % this.gates.length];
     gate.object.position.copy(origin);
     gate.object.lookAt(target);
-    gate.object.scale.setScalar(0.2);
+    gate.object.scale.setScalar(0.2 * GATE_SCALE);
     gate.object.visible = true;
     gate.age = 0;
     gate.packet = index;
@@ -230,9 +268,23 @@ export class Boss {
     this.group.updateMatrixWorld(true);
     this.flash = Math.max(0, this.flash - dt);
     this.plate.material.emissiveIntensity = this.flash > 0 ? 2.1 : 0.025;
-    const charge = this.director.charge;
+    const charge = this.director.charge,
+      stage = this.director.stage;
+    // Body language: the construct rears back while a spell charges, then lunges forward as
+    // it releases — the heavier the spell, the longer the wind-up and the harder the snap.
+    if (stage === 'attack' && this.lastStage === 'telegraph')
+      this.snap = this.director.attack === 'hammer' ? 1.35 : 1;
+    this.lastStage = stage;
+    this.snap = Math.max(0, this.snap - dt * 3.2);
+    const rear = this.director.attack === 'hammer' ? 0.19 : 0.11,
+      pose = -ease(charge) * rear + ease(Math.min(1, this.snap)) * 0.14;
+    this.body.rotation.x = pose;
+    this.body.position.z = ease(Math.min(1, this.snap)) * 0.38 - ease(charge) * 0.12;
+    this.body.position.y = ease(charge) * 0.1;
     this.sigil.rotation.z += dt * (0.35 + charge * 2.2);
-    this.sigil.scale.setScalar(1 + charge * 0.13);
+    this.sigil.scale.setScalar(1 + charge * 0.13 + this.snap * 0.08);
+    this.innerSigil.rotation.z -= dt * (0.5 + charge * 3.6 + this.snap * 4);
+    this.innerSigil.scale.setScalar(0.3 + ease(charge) * 0.8 + Math.min(1, this.snap) * 0.25);
     this.chargeRing.visible = this.director.stage !== 'recover' && this.director.attack !== 'fire';
     this.chargeRing.rotation.z -= dt * 0.8;
     this.chargeRing.scale.setScalar(
@@ -265,7 +317,7 @@ export class Boss {
         g.roll += dt * 0.5;
         g.object.rotateZ(g.roll);
       } else g.object.rotateZ(dt * 0.5);
-      g.object.scale.setScalar(0.45 + ease(g.age / 0.1) * 0.55);
+      g.object.scale.setScalar((0.45 + ease(g.age / 0.1) * 0.55) * GATE_SCALE);
       g.object.children.forEach((o) => {
         if (o instanceof THREE.Mesh)
           (o.material as THREE.Material).opacity =
@@ -278,15 +330,28 @@ export class Boss {
       seed.position.copy(this.seedPosition(i));
       seed.scale.setScalar(0.4 + charge * 1.9);
     });
+    // The loose shards draw in tight against the plate during the tell and fling outwards on
+    // the release, trailing the lunge. While the construct tumbles they are flung out by the
+    // spin and rattle, so the body reads as a cluster of parts rather than one rigid prop.
+    const pull = ease(charge),
+      fling = Math.min(1, this.snap),
+      spin = this.tumble.physical ? Math.min(1, this.tumble.angularVelocity.length() / 5) : 0;
     this.shards.forEach((shard, i) => {
       const side = i % 2 ? 1 : -1;
       shard.position.set(
-        side * (1.52 + charge * 0.18),
-        (i < 2 ? 0.8 : -0.9) + Math.sin(time * 1.3 + i) * 0.12,
-        -0.05,
+        side * (1.52 - pull * 0.42 + fling * 0.75 + spin * 0.55),
+        (i < 2 ? 0.8 : -0.9) * (1 - pull * 0.25 + spin * 0.3) +
+          Math.sin(time * 1.3 + i) * 0.12 +
+          Math.sin(time * 17 + i * 2.1) * spin * 0.1,
+        -0.05 - pull * 0.35 + fling * 0.3 + Math.sin(time * 13 + i) * spin * 0.2,
       );
-      shard.rotation.z = side * (0.16 + Math.sin(time + i) * 0.08);
+      shard.rotation.z =
+        side * (0.16 + Math.sin(time + i) * 0.08 + pull * 0.45 - fling * 0.3) +
+        Math.sin(time * 11 + i) * spin * 0.5;
+      shard.rotation.x = -pull * 0.2 + fling * 0.35 + Math.sin(time * 9 + i * 1.7) * spin * 0.6;
     });
+    this.lower.rotation.x = Math.sin(time * 12) * spin * 0.25;
+    this.lower.position.y = -1.7 - spin * 0.25;
     if (this.group.visible) this.ribbon.push(this.position, camera);
   }
 }

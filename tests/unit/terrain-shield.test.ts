@@ -51,7 +51,7 @@ describe('adaptive terrain grid', () => {
       regular = Math.ceil((half * 2) / cellWidth(0, half, segments)),
       before = 2 * regular * regular;
     expect(triangles).toBeLessThan(before * 0.25);
-    expect(triangles).toBe(2 * 152 * 152);
+    expect(triangles).toBe(2 * 168 * 168);
   });
   it('maps world coordinates to a cell and a continuous fraction across it', () => {
     for (const x of [-120, -33.3, -1, 0, 0.4, 17.25, 99, 141.9]) {

@@ -408,7 +408,7 @@ test('flight holds altitude, descends smoothly, and crosses the old map boundary
   await page.keyboard.up('KeyW');
   expect((await state(page)).position.z).toBeGreaterThan(70);
   const arena = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).arena;
-  expect(arena.size).toBe(340);
+  expect(arena.size).toBe(380);
   // 31 monoliths plus the low cover in the empty bands (13 of the 14 candidates find a clear spot).
   expect(arena.buildings).toBe(44);
 });
@@ -1014,4 +1014,117 @@ test('the fourth attack of the opening is the vortex, and its tell shrinks the e
   await step(page, ATTACKS.vortex.tell + 0.3);
   const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.attacksFired.vortex + d.blockedCasts).toBeGreaterThanOrEqual(1);
+});
+
+test('on foot the boss never falls silent: it keeps casting at a grounded player, and from long range while it can see them', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'walk-live');
+  let longestBlock = 0,
+    shots = 0;
+  const fired = (d: Game['diagnostics']) =>
+    d.attacksFired.fire + d.attacksFired.missile + d.attacksFired.hammer + d.attacksFired.vortex;
+  for (let i = 0; i < 8; i++) {
+    await step(page, 5);
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    longestBlock = Math.max(longestBlock, d.bossBlockedTime);
+    shots = fired(d);
+  }
+  // Forty seconds against a standing target: no stretch without a lane, plenty of casting.
+  expect(longestBlock).toBeLessThan(4.5);
+  expect(shots).toBeGreaterThan(20);
+  expect((await state(page)).health).toBe(100);
+  // Long range: a boss that can see the player while it winds up a spell holds its ground and
+  // casts from there — here from 60 m down the open lane — instead of closing in first.
+  for (let t = 0; t < 8 && (await state(page)).boss.stage !== 'telegraph'; t += 0.1)
+    await step(page, 0.1);
+  expect((await state(page)).boss.stage).toBe('telegraph');
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([0, 0, 24], [62, 5, 26]);
+    h.face(-Math.PI / 2, 0);
+  });
+  const before = fired(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics()));
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  for (let t = 0; t < 6 && fired(d) === before; t += 0.25) {
+    await step(page, 0.25);
+    d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  }
+  expect(fired(d)).toBeGreaterThan(before);
+  const origin = d.shots[d.shots.length - 1].origin;
+  expect(Math.hypot(origin[0], origin[2] - 24)).toBeGreaterThan(40);
+});
+
+test('a dash phases through a shot that would have landed, and the near miss is rewarded', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'contact');
+  // A bolt three metres ahead, flying at the chest; the dash goes straight through it.
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.incoming('front', 'fire'));
+  await page.locator('#touch-dash').tap();
+  await step(page, 0.14);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics()),
+    s = await state(page);
+  expect(d.dashMotion.active).toBe(true);
+  expect(d.perfectDodges).toBeGreaterThanOrEqual(1);
+  expect(s.health).toBe(100);
+  expect(d.contacts).toBe(0);
+  // The reward: the next dash is almost ready at once (a 1.65 s cooldown would read ~0.08).
+  expect(s.dash).toBeGreaterThan(0.6);
+});
+
+test('a thrown player is a jointed figure that crumples, drags and gathers itself back up', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'ragdoll-ground');
+  await step(page, 0.45);
+  const spans: number[] = [];
+  for (let i = 0; i < 6; i++) {
+    const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    expect(d.ragdoll.player).toBe(true);
+    const figure = d.ragdoll.playerFigure!;
+    expect(figure).not.toBeNull();
+    // Head to heel: a real body, never a point nor a stretched chain.
+    expect(figure.span).toBeGreaterThan(0.3);
+    expect(figure.span).toBeLessThan(1.5);
+    // Nothing sinks into the ground.
+    const ground = await page.evaluate(
+      (p) => window.__HEA_DEBUG__.harness!.groundAt(p[0], p[2]),
+      figure.pelvis,
+    );
+    expect(figure.lowest).toBeGreaterThan(ground - 0.08);
+    spans.push(figure.span);
+    await step(page, 0.12);
+  }
+  // The limbs move relative to the trunk: the figure's extent changes as it tumbles.
+  expect(Math.max(...spans) - Math.min(...spans)).toBeGreaterThan(0.1);
+  let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.playerFigureSpawns).toBe(1);
+  expect(d.ragdoll.playerFigureContacts).toBeGreaterThan(50);
+  await step(page, 6);
+  d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.ragdoll.player).toBe(false);
+  expect(d.ragdoll.playerFigure).toBeNull();
+});
+
+test('the solar sphere bursting beside a grounded player still throws them', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'splash');
+  await step(page, 0.4);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics()),
+    s = await state(page);
+  expect(d.splashHits).toBe(1);
+  expect(s.health).toBeLessThan(100);
+  expect(s.health).toBeGreaterThan(70);
+  expect(s.craters).toBeGreaterThan(0);
+  expect(d.ragdoll.player).toBe(true);
 });

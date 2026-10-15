@@ -24,24 +24,33 @@ export function springVector(
   }
 }
 
+/**
+ * The burst dash: an almost instant rise to full speed, a short hold, then a long, fast-
+ * decaying glide, so the body snaps away and settles instead of sliding at a constant speed.
+ * The first `invulnerableFor` seconds phase through anything the boss throws; a shot that
+ * would have landed in that window counts as a perfect dodge.
+ */
 export class AirDash {
   readonly direction = new Vector3(0, 0, -1);
   readonly velocity = new Vector3();
   age = 10;
-  static readonly rise = 0.06;
-  static readonly hold = 0.09;
-  static readonly fall = 0.35;
+  static readonly rise = 0.045;
+  static readonly hold = 0.1;
+  static readonly fall = 0.33;
+  static readonly speed = 37;
+  static readonly invulnerableFor = 0.26;
   static readonly duration = AirDash.rise + AirDash.hold + AirDash.fall;
   get active() {
     return this.age < AirDash.duration;
   }
   get invulnerable() {
-    return this.age < 0.23;
+    return this.age < AirDash.invulnerableFor;
   }
   get strength() {
     if (!this.active) return 0;
     if (this.age < AirDash.rise) return ease(this.age / AirDash.rise);
-    return 1 - ease((this.age - AirDash.rise - AirDash.hold) / AirDash.fall);
+    const t = clamp((this.age - AirDash.rise - AirDash.hold) / AirDash.fall, 0, 1);
+    return Math.pow(1 - t, 1.7);
   }
   start(direction: Vector3) {
     this.direction.copy(direction).normalize();
@@ -57,7 +66,7 @@ export class AirDash {
     this.age += dt;
     if (steering.lengthSq() > 0.1)
       this.direction.copy(steerMissile(this.direction, steering, 1.5, dt, 1));
-    this.velocity.copy(this.direction).multiplyScalar(34 * this.strength);
+    this.velocity.copy(this.direction).multiplyScalar(AirDash.speed * this.strength);
   }
 }
 
@@ -94,6 +103,8 @@ export class BodyTumble {
   static readonly riseSpeed = 6.5;
   /** Recovery blend: a short rise from the ground, a longer deliberate flip in the air. */
   static readonly riseBlend = 0.22;
+  /** A jointed human figure takes a little longer to gather itself off the ground. */
+  static readonly humanRise = 0.3;
   static readonly flipBlend = 0.46;
   /** True while the current recovery is the mid-air somersault. */
   flipping = false;
@@ -240,7 +251,11 @@ export class BodyTumble {
         .normalize();
     if (this.phase === 'recover') {
       this.recoveryTime += dt;
-      const blend = this.flipping ? BodyTumble.flipBlend : BodyTumble.riseBlend,
+      const blend = this.flipping
+          ? BodyTumble.flipBlend
+          : this.humanLike
+            ? BodyTumble.humanRise
+            : BodyTumble.riseBlend,
         k = ease(this.recoveryTime / blend);
       this.orientation.slerpQuaternions(this.riseStart, desired, k);
       if (this.flipping) {

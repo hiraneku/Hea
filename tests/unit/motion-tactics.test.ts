@@ -51,9 +51,9 @@ describe('continuous flight and dash', () => {
     dash.start(new Vector3(0, 0, -1));
     expect(dash.velocity.length()).toBe(0);
     dash.step(1 / 120, new Vector3());
-    expect(dash.velocity.length()).toBeLessThan(1);
+    expect(dash.velocity.length()).toBeLessThan(3);
     for (let i = 0; i < 14; i++) dash.step(1 / 120, new Vector3());
-    expect(dash.velocity.length()).toBeCloseTo(34);
+    expect(dash.velocity.length()).toBeCloseTo(AirDash.speed);
     let previous = dash.velocity.clone(),
       largestEndStep = 0;
     for (let i = 0; i < 60; i++) {
@@ -239,6 +239,30 @@ describe('varied boss tactics and satellite circles', () => {
     expect(covered).toBeGreaterThan(5);
     expect(exposed).toBe(0);
     expect(aware.decisions).toBeGreaterThan(8);
+  });
+  it('holds its ground and casts from long range while it can see the player, closing in only to recover', () => {
+    const boss = new Vector3(60, 5, 0),
+      player = new Vector3(0, 0, 0),
+      inward = new Vector3(-1, 0, 0);
+    const sniper = new BossTactics(),
+      chaser = new BossTactics();
+    // Same seed, same decisions: only the sight flag differs.
+    const held = sniper.step(1 / 60, boss, player, 'fire', 'telegraph', 0, undefined, true),
+      rushed = chaser.step(1 / 60, boss, player, 'fire', 'telegraph', 0, undefined, false);
+    expect(held.length()).toBeLessThan(6);
+    expect(rushed.dot(inward)).toBeGreaterThan(15);
+    // Recovery after the cast is never a stand-off: the boss comes back in at full speed.
+    const closing = sniper.step(1 / 60, boss, player, 'fire', 'recover', 0, undefined, true);
+    expect(closing.dot(inward)).toBeGreaterThan(15);
+    // Inside thirty metres the flag changes nothing.
+    const near = new Vector3(20, 5, 0),
+      a = new BossTactics(),
+      b = new BossTactics();
+    expect(
+      a
+        .step(1 / 60, near, player, 'fire', 'telegraph', 0, undefined, true)
+        .distanceTo(b.step(1 / 60, near, player, 'fire', 'telegraph', 0, undefined, false)),
+    ).toBeLessThan(1e-9);
   });
   it('shuffles attack order after the learnable opening, with no consecutive identical attacks', () => {
     const director = new BossDirector(),

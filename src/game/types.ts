@@ -92,6 +92,7 @@ export type GameEvent =
   | { type: 'duel' }
   | { type: 'block'; direction: { x: number; y: number; z: number } }
   | { type: 'toast'; text: string }
+  | { type: 'dodge' }
   | { type: 'lock'; locked: boolean };
 
 export function readSettings(): Settings {

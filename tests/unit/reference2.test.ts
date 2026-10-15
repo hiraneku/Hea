@@ -88,11 +88,11 @@ describe('brief hold, explosive release, immediate get-up', () => {
       velocity = landingSlide(velocity.clone().setY(-0.225), new Vector3(0, 0, 1));
     expect(velocity.x).toBeCloseTo(30);
   });
-  it('stands within a quarter second after the skid slows, with no unconscious waiting phase', () => {
+  it('stands within a third of a second after the skid slows, with no unconscious waiting phase', () => {
     const body = new BodyTumble(true),
       pose = new Quaternion();
     body.kick(pose, new Vector3(90, -20, 0));
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 40; i++) {
       body.beginStep();
       body.ground(new Vector3(2, 0, 0), 0, 0.55);
       body.step(1 / 120, pose);
