@@ -8,7 +8,7 @@ export const DUEL = {
   nearRange: 15,
   farRange: 27,
   bossSpeed: 12,
-  shieldPrediction: 0.15,
+  shieldPrediction: 0.24,
   bodyRadius: 0.72,
   shieldArcDegrees: 240,
   shieldShell: 3.1,

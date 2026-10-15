@@ -2226,7 +2226,7 @@ export class Game {
   }
   /**
    * A shot connects with a standing patch. The projectile's body is left on the surface to
-   * crush and the struck cell flashes, the patch recoils and (from the second hit) cracks, until
+   * crush and the struck cell flashes, the patch (from the second hit) cracks like glass, until
    * the hit budget is spent and it shatters — leaving that lane open for a moment.
    */
   private absorbOnPatch(patch: ShieldPatch, at: THREE.Vector3, p: Projectile) {

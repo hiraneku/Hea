@@ -5,7 +5,8 @@ import {
   HEX_NEIGHBORS,
   HEX_RADIUS,
   cellPoint,
-  crackSegments,
+  crackGeometry,
+  type ShieldReveal,
   hexPrismGeometry,
   makeShieldPatch,
   nearestCell,
@@ -275,6 +276,9 @@ export class Ribbon {
   }
 }
 
+/** Seconds a shield patch takes to materialise cell by cell, and to dissolve again. */
+export const SHIELD_APPEAR = 0.14;
+export const SHIELD_DISSOLVE = 0.16;
 interface Particle {
   p: THREE.Vector3;
   v: THREE.Vector3;
@@ -329,7 +333,7 @@ export class Effects {
         serial: e.object.userData.serial as number,
         pattern: e.object.userData.pattern as string,
         cells: e.object.userData.count as number,
-        // The anchored world position: recoil is a cosmetic offset around it.
+        // The anchored world position (patches never move once raised).
         position: (
           (e.object.userData.base as THREE.Vector3 | undefined) ?? e.object.position
         ).toArray(),
@@ -601,10 +605,47 @@ export class Effects {
     patch.scale.setScalar(scale);
     patch.userData.base = at.clone();
     patch.userData.hits = 0;
+    patch.userData.age = 0;
     // This remains in WORLD space. It is a visual afterimage, never a moving player attachment.
+    // It materialises cell by cell over the next fifth of a second (see ShieldVisual).
     this.add(patch, life, 0, 0);
-    this.burst(at, '#7af1ff', scale > 2 ? 26 : 12, 3, 0.24 * Math.sqrt(scale), 0.5);
+    this.burst(at, '#7af1ff', scale > 2 ? 14 : 6, 2.4, 0.2 * Math.sqrt(scale), 0.4);
     return { serial, pattern: shieldPattern(serial), life };
+  }
+  /** The cells of a dissolving patch each leave a curl of grey vapour and glittering motes. */
+  private shieldDissolve(patch: THREE.Object3D) {
+    const cells = (patch.userData.cells ?? []) as HexCell[],
+      centroid = (patch.userData.centroid ?? [0, 0]) as number[],
+      scale = patch.scale.x || 1;
+    patch.updateMatrixWorld(true);
+    const normal = new THREE.Vector3(0, 0, 1).applyQuaternion(
+      patch.getWorldQuaternion(new THREE.Quaternion()),
+    );
+    cells.forEach((cell, index) => {
+      const point = cellPoint(cell.q, cell.r),
+        at = patch.localToWorld(new THREE.Vector3(point.x - centroid[0], point.y - centroid[1], 0));
+      const wisp = this.dustClouds[this.dustCursor++ % this.dustClouds.length];
+      wisp.p.copy(at).addScaledVector(normal, (Math.random() - 0.5) * 0.1);
+      wisp.v
+        .set((Math.random() - 0.5) * 0.4, 0.35 + Math.random() * 0.3, (Math.random() - 0.5) * 0.4)
+        .addScaledVector(normal, 0.2);
+      wisp.size = (0.26 + Math.random() * 0.1) * scale;
+      wisp.life = wisp.max = 0.45 + Math.random() * 0.2;
+      const motes = index % 2 === 0 ? 2 : 1;
+      for (let i = 0; i < motes; i++) {
+        const p = this.sparks[this.cursor++ % this.particleBudget];
+        p.p.copy(at);
+        p.v.set(
+          (Math.random() - 0.5) * 0.9,
+          0.2 + Math.random() * 0.6,
+          (Math.random() - 0.5) * 0.9,
+        );
+        p.color.set(i ? '#ffffff' : '#bdf6ff');
+        p.life = p.max = 0.35 + Math.random() * 0.3;
+        p.size = (0.035 + Math.random() * 0.03) * scale;
+        p.gravity = 1.4;
+      }
+    });
   }
   private findEcho(serial: number) {
     return this.timed.find(
@@ -614,11 +655,11 @@ export class Effects {
   /**
    * A shot connecting with a standing patch. The projectile is not simply deleted: its body is
    * crushed flat against the surface and fades, the struck hex cell flashes white-hot (its
-   * neighbours a little), the patch takes one clean punch back along its normal and settles,
-   * its fade restarts, and from the second hit on white cracks spread from the strike while
-   * the hex pieces glow brighter — so a patch under sustained fire visibly carries that load
-   * right up to the hit that breaks it. Deliberately no pulsing and no expanding ring: the
-   * shield is a rigid plate, not a pond.
+   * neighbours a little), the patch's fade restarts, and from the second hit on a glass
+   * spiderweb of cracks spreads from the strike while the hex pieces glow brighter — so a
+   * patch under sustained fire visibly carries that load right up to the hit that breaks it.
+   * Deliberately no pulsing, no expanding ring and no recoil: the plate is anchored and
+   * rigid; only its surface reacts.
    */
   shieldImpact(
     serial: number,
@@ -675,31 +716,31 @@ export class Effects {
     echo.life = echo.max;
     const data = echo.object.userData;
     data.hits = hits;
-    data.recoil = 0;
-    data.recoilStrength = (kind === 'hammer' ? 0.22 : 0.12) * scale;
-    data.recoilNormal = normal.clone();
     if (hits >= 2) {
-      // Cracks live in patch-local space so they ride the recoil with the pieces.
+      // Cracks live in patch-local space, clipped to the patch's own cells.
       const local = echo.object.worldToLocal(at.clone());
-      const lines = new THREE.LineSegments(
-        new THREE.BufferGeometry().setAttribute(
-          'position',
-          new THREE.Float32BufferAttribute(
-            crackSegments(local.x, local.y, 0.35 + hits * 0.08, serial * 31 + hits),
-            3,
-          ),
+      const cracks = new THREE.Mesh(
+        crackGeometry(
+          local.x,
+          local.y,
+          0.3 + hits * 0.09,
+          serial * 31 + hits,
+          (data.cells ?? []) as HexCell[],
+          (data.centroid ?? [0, 0]) as number[],
         ),
-        new THREE.LineBasicMaterial({
-          color: '#ffffff',
+        new THREE.MeshBasicMaterial({
+          vertexColors: true,
           transparent: true,
-          opacity: Math.min(1, 0.55 + hits * 0.1),
+          opacity: Math.min(1, 0.45 + hits * 0.12),
+          side: THREE.DoubleSide,
           depthWrite: false,
+          blending: THREE.AdditiveBlending,
           toneMapped: false,
         }),
       );
-      lines.userData.baseOpacity = lines.material.opacity;
-      lines.userData.crack = true;
-      echo.object.add(lines);
+      cracks.userData.baseOpacity = cracks.material.opacity;
+      cracks.userData.crack = true;
+      echo.object.add(cracks);
     }
     return true;
   }
@@ -744,8 +785,8 @@ export class Effects {
   }
   /**
    * The struck cell lights up: a white-hot hex plate over the cell the shot landed on, its
-   * neighbours catching a dimmer, shorter flash. Children of the patch, so they ride its recoil
-   * and sit exactly on the lattice — no circle, no ring, nothing travels across the plate.
+   * neighbours catching a dimmer, shorter flash. Children of the patch, so they sit exactly on
+   * the lattice — no circle, no ring, nothing travels across the plate.
    */
   private cellFlash(patch: THREE.Object3D, at: THREE.Vector3, tint: string, kind: ProjectileKind) {
     const data = patch.userData,
@@ -836,7 +877,6 @@ export class Effects {
       const patch = echo.object,
         data = patch.userData;
       data.shattered = true;
-      data.recoil = undefined;
       echo.max = echo.life = 0.45;
       echo.grow = 0;
       patch.updateMatrixWorld(true);
@@ -1441,19 +1481,18 @@ export class Effects {
       }
       const scale = e.baseScale + progress * e.grow * e.max;
       if (data.kind === 'shield-echo') {
-        // Recoil: one clean punch back along the strike that eases home — no oscillation, no
-        // swelling; a rigid plate shoved and settling.
-        if (typeof data.recoil === 'number' && data.base) {
-          data.recoil += dt;
-          const a = (data.recoil as number) / 0.07,
-            kick = a * Math.exp(1 - a) * (data.recoilStrength ?? 0.12);
-          e.object.position
-            .copy(data.base as THREE.Vector3)
-            .addScaledVector(data.recoilNormal as THREE.Vector3, -kick);
-          if (a > 6) {
-            data.recoil = undefined;
-            e.object.position.copy(data.base as THREE.Vector3);
+        // Materialise cell by cell on arrival; dissolve the same way (in reverse) at the end,
+        // each vanishing cell leaving a wisp of grey vapour and a few glittering motes.
+        data.age = (data.age ?? 0) + dt;
+        const reveal = data.reveal as ShieldReveal | undefined;
+        if (reveal) {
+          const appear = Math.min(1, (data.age as number) / SHIELD_APPEAR),
+            vanish = data.shattered ? 1 : Math.min(1, e.life / SHIELD_DISSOLVE);
+          if (vanish < 1 && !data.dissolving) {
+            data.dissolving = true;
+            this.shieldDissolve(e.object);
           }
+          reveal.value = Math.min(appear, vanish);
         }
         // Cell flashes burn out fast and leave the patch as it was.
         for (let c = e.object.children.length - 1; c >= 0; c--) {
@@ -1489,7 +1528,7 @@ export class Effects {
           }
           const fade =
             data.kind === 'shield-echo'
-              ? Math.min(1, e.life / 0.65)
+              ? Math.min(1, e.life / SHIELD_DISSOLVE)
               : Math.min(1, (e.life / e.max) * 1.6);
           // Each absorbed hit brightens the patch: fill and glow step up with the load.
           const charge = 1 + load * (o.userData.glow ? 0.22 : 0.65);
