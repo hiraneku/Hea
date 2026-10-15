@@ -82,6 +82,15 @@ describe('spell seeker terminal guidance', () => {
     expect(intercept(3.5, Math.PI / 2, 1 / 120, new Vector3(0, 0, 8))).toBe(Infinity);
     expect(intercept(3.5, Math.PI, 1 / 120)).toBe(Infinity);
   });
+  it('locks on moderately: catches a slow drift at range, but not a full-speed strafe', () => {
+    const strafe = new Vector3(0, 0, 14.5),
+      drift = new Vector3(0, 0, 6);
+    for (const distance of [12, 20, 30])
+      expect(intercept(distance, 0, 1 / 120, strafe)).toBe(Infinity);
+    for (const distance of [30, 40])
+      expect(intercept(distance, 0, 1 / 120, drift)).toBeLessThan(2.5);
+    expect(PROJECTILES.missile.speed).toBeLessThan(30);
+  });
   it('commits to a terminal course that a late dodge can evade', () => {
     const state = { committed: false },
       p = new Vector3(0, 0, -4),

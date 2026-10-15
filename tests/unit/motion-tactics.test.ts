@@ -8,7 +8,12 @@ import {
   springVector,
 } from '../../src/game/motion';
 import { advanceFlight } from '../../src/game/flight';
-import { BOSS_MOTOR, BossTactics, fireGateOffset } from '../../src/game/BossTactics';
+import {
+  BOSS_MOTOR,
+  BossTactics,
+  fireGateOffset,
+  missileRetreat,
+} from '../../src/game/BossTactics';
 import {
   ATTACKS,
   BossDirector,
@@ -433,5 +438,49 @@ describe('local shield patches on actual trajectories', () => {
       0.13,
     )!;
     expect(large.offset.length()).toBeLessThanOrEqual(DUEL.shieldReach);
+  });
+});
+
+describe('the hunting spell opens with a break-away', () => {
+  it('backs the boss off hard early in the tell, settles before the cast, and skips it when far', () => {
+    expect(missileRetreat('missiles', 'telegraph', 0.1, 18)).toBeGreaterThan(30);
+    expect(missileRetreat('missiles', 'telegraph', 0.8, 18)).toBeLessThan(
+      missileRetreat('missiles', 'telegraph', 0.3, 18),
+    );
+    expect(missileRetreat('missiles', 'telegraph', 1.0, 18)).toBe(0);
+    expect(missileRetreat('missiles', 'telegraph', 0.1, 50)).toBe(0);
+    expect(missileRetreat('fire', 'telegraph', 0.1, 18)).toBe(0);
+    expect(missileRetreat('missiles', 'attack', 0.1, 18)).toBe(0);
+    expect(missileRetreat('missiles', 'telegraph', Infinity, 18)).toBe(0);
+    // Through the tactics: the motor points straight away from the player, faster than cruise.
+    const tactics = new BossTactics(),
+      boss = new Vector3(0, 6, 18),
+      player = new Vector3();
+    const motor = tactics.step(
+      1 / 60,
+      boss,
+      player,
+      'missiles',
+      'telegraph',
+      1,
+      undefined,
+      true,
+      0.1,
+    );
+    expect(motor.dot(new Vector3(0, 0, 1))).toBeGreaterThan(BOSS_MOTOR.max);
+    expect(tactics.retreating).toBe(true);
+    const later = tactics.step(
+      1 / 60,
+      boss,
+      player,
+      'missiles',
+      'telegraph',
+      1,
+      undefined,
+      true,
+      1.1,
+    );
+    expect(tactics.retreating).toBe(false);
+    expect(later.length()).toBeLessThanOrEqual(BOSS_MOTOR.max + 1e-6);
   });
 });

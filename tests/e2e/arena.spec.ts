@@ -847,8 +847,16 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   // Plus the low cover (1.5–2.6 m walls) in the gaps between the rings.
   expect(d.walls.length).toBeLessThan(52);
   expect(d.walls.filter((w) => w.top < 3).length).toBeGreaterThanOrEqual(10);
-  // The hammer's telegraph follows the (longer) salvo and the seeker pair.
-  await step(page, 10.6);
+  // The hammer's telegraph follows the (longer) salvo and the (slower) seeker salvo.
+  const hammerTell =
+    1 +
+    ATTACKS.fire.tell +
+    ATTACKS.fire.duration +
+    ATTACKS.fire.recovery +
+    ATTACKS.missiles.tell +
+    ATTACKS.missiles.duration +
+    ATTACKS.missiles.recovery;
+  await step(page, hammerTell + 0.4 - 2.3);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.heavyCircleRadius).toBeGreaterThan(3.4);
 });

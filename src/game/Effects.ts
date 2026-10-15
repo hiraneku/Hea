@@ -1275,7 +1275,7 @@ export class Effects {
    * erodes away, so it turns into a torn ring with pale blue-grey radial creases and jagged
    * spikes around the rim, and is gone before the dash ends.
    */
-  dashRing(at: THREE.Vector3, direction: THREE.Vector3) {
+  dashRing(at: THREE.Vector3, direction: THREE.Vector3, scale = 1) {
     const material = new THREE.ShaderMaterial({
       uniforms: { uPhase: { value: 0 }, uSeed: { value: Math.random() * 100 } },
       vertexShader: `varying vec2 vUv;
@@ -1324,7 +1324,7 @@ export class Effects {
     const ring = new THREE.Mesh(this.dashRingGeometry, material);
     ring.position.copy(at);
     ring.lookAt(at.clone().add(direction));
-    ring.scale.setScalar(2.2);
+    ring.scale.setScalar(2.2 * scale);
     ring.userData.kind = 'dash-ring';
     ring.userData.keepGeometry = true;
     this.add(ring, 0.2, 0, 0);
@@ -1332,7 +1332,7 @@ export class Effects {
     effect.animate = (e, progress) => {
       material.uniforms.uPhase.value = progress;
       const grow = 1 - Math.pow(1 - progress, 2.2);
-      e.object.scale.setScalar(2.2 + 2.3 * grow);
+      e.object.scale.setScalar((2.2 + 2.3 * grow) * scale);
     };
   }
   glyph(

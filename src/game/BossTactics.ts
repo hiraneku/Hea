@@ -6,7 +6,9 @@ import type { AttackId, AttackStage } from './combat';
 export type Maneuver = 'strafe' | 'flank' | 'press' | 'low-pass' | 'rise' | 'recover';
 /** Finite-lived waypoints, not a permanent player-height-plus-offset tether. */
 /** Flight speed caps (m/s) of the boss's own motor: a quarter faster than v0.9 across the board. */
-export const BOSS_MOTOR = { cruise: 15, routing: 20, recover: 19, max: 24 } as const;
+export const BOSS_MOTOR = { cruise: 15, routing: 20, recover: 19, max: 24, retreat: 33 } as const;
+/** How long (s) into the hunting spell's tell the boss keeps breaking away before it casts. */
+export const MISSILE_RETREAT = { burst: 0.55, settle: 0.95, range: 46 } as const;
 
 export class BossTactics {
   readonly goal = new Vector3();
@@ -18,6 +20,8 @@ export class BossTactics {
   private direction = 1;
   /** True while the goal is a routed waypoint; range control must not drag the boss off it. */
   routing = false;
+  /** True while the pre-cast retreat burst is driving the motor (allows a higher speed cap). */
+  retreating = false;
   reset(seed = 7391) {
     this.random = seededRandom(seed);
     this.remaining = 0;
@@ -27,6 +31,7 @@ export class BossTactics {
     this.direction = 1;
     this.maneuver = 'strafe';
     this.routing = false;
+    this.retreating = false;
   }
   seekSight(goal: Vector3, pattern: number) {
     this.goal.copy(goal);
@@ -47,6 +52,8 @@ export class BossTactics {
    * manoeuvre never deliberately flies back behind the cover it has just worked around.
    * `clear` says the boss can see the player right now: far out with a clear lane it stands
    * and casts from range instead of closing first, and only moves in while it recovers.
+   * `tellTime` is how far (s) the current telegraph has run: the hunting spell opens with a
+   * short, fast break away from the player that settles just before the first orb leaves.
    */
   step(
     dt: number,
@@ -57,6 +64,7 @@ export class BossTactics {
     pattern: number,
     sighted?: (goal: Vector3) => boolean,
     clear = false,
+    tellTime = Infinity,
   ) {
     this.remaining -= dt;
     const changed = pattern !== this.lastPattern;
@@ -105,7 +113,14 @@ export class BossTactics {
       motor.addScaledVector(away.normalize(), -(distance - 33) * 1.1);
     if (attack === 'hammer' && stage === 'telegraph' && position.y < 6)
       motor.y = Math.max(motor.y, (6 - position.y) * 2);
-    return motor.clampLength(0, BOSS_MOTOR.max);
+    const retreat = missileRetreat(attack, stage, tellTime, distance);
+    this.retreating = retreat > 1;
+    if (retreat > 0 && distance > 0.001) {
+      motor.addScaledVector(away.normalize(), retreat);
+      // Keep roughly level while backing off, so the break reads as a slide, not a climb.
+      motor.y *= 0.4;
+    }
+    return motor.clampLength(0, this.retreating ? BOSS_MOTOR.retreat : BOSS_MOTOR.max);
   }
   private choose(
     position: Vector3,
@@ -191,4 +206,25 @@ export function fireGateOffset(
 /** Local gate position on the frontal ring of the glyph for a given polar angle. */
 export function fireGateLocal(angle: number, radius: number): Vector3 {
   return new Vector3(Math.cos(angle) * radius, 0.1 + Math.sin(angle) * radius, 1.45);
+}
+
+/**
+ * Backward speed (m/s) the boss adds while the hunting spell charges: a full burst for the
+ * first half second of the tell, eased out before the cast, and none once it is already far.
+ */
+export function missileRetreat(
+  attack: AttackId,
+  stage: AttackStage,
+  tellTime: number,
+  distance: number,
+): number {
+  if (attack !== 'missiles' || stage !== 'telegraph' || !Number.isFinite(tellTime)) return 0;
+  const t = clamp(
+      (tellTime - MISSILE_RETREAT.burst) / (MISSILE_RETREAT.settle - MISSILE_RETREAT.burst),
+      0,
+      1,
+    ),
+    ease = 1 - t * t * (3 - 2 * t),
+    room = clamp((MISSILE_RETREAT.range - distance) / 12, 0, 1);
+  return BOSS_MOTOR.retreat * ease * room;
 }

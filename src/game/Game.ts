@@ -1418,6 +1418,17 @@ export class Game {
     });
     this.shadows.instanceMatrix.needsUpdate = true;
   }
+  /** The hunting spell opens with a fast break away from the player: a torn disc and dust. */
+  private bossBreakAway() {
+    const b = this.boss;
+    if (!b.alive || b.tumble.physical) return;
+    const away = b.position.clone().sub(this.player);
+    away.y = 0;
+    if (away.lengthSq() < 1e-4 || away.length() > 44) return;
+    away.normalize();
+    this.fx.dashRing(b.position.clone().addScaledVector(away, -1.2), away, BOSS.scale * 0.95);
+    this.fx.burst(b.position, '#ffd2a8', 10, 4, 0.3, 0.9);
+  }
   private updateBoss(dt: number) {
     const b = this.boss;
     if ((!b.alive && b.deathDelay < 0) || (this.outcome && this.outcome !== 'victory')) return;
@@ -1457,6 +1468,7 @@ export class Game {
         this.world.firingLane(goal, eye, b.director.attack).mode !== 'blocked' &&
         !this.trace(b.position, goal, false, 1.2),
       this.bossLane.mode === 'clear',
+      b.director.stage === 'telegraph' && !b.tumble.physical ? b.director.elapsed : Infinity,
     );
     if (b.knockTime === 0)
       this.nav.steer(b.position, motor, b.tactics.goal, this.player, this.time);
@@ -1470,7 +1482,7 @@ export class Game {
         retreat = Math.min(12, (DUEL.nearRange - distance) * 2.5);
       if (outward < retreat) motor.addScaledVector(away, retreat - outward);
     }
-    motor.clampLength(0, BOSS_MOTOR.max);
+    motor.clampLength(0, b.tactics.retreating ? BOSS_MOTOR.retreat : BOSS_MOTOR.max);
     motor.multiplyScalar(0.035 + recovery * 0.965);
     b.impulse.y -= (b.tumble.physical ? HEAVY.gravity : 14 * (1 - recovery)) * dt;
     b.velocity.lerp(motor, 1 - Math.exp(-dt * 5.2));
@@ -1537,6 +1549,7 @@ export class Game {
     for (const command of b.director.step(dt, b.enraged)) {
       if (command.type === 'tell') {
         if (this.mode !== 'menu') this.audio.charge();
+        if (command.attack === 'missiles') this.bossBreakAway();
         if (command.attack === 'hammer') {
           const mark = this.player.clone();
           mark.y = this.world.surfaceHeight(mark.x, mark.z) + 0.04;

@@ -104,11 +104,11 @@ export const ATTACKS = {
   missiles: {
     label: 'MANTRA PEMBURU',
     warning: 'MANTRA MENYEBAR',
-    tell: 1.05,
-    duration: 1.75,
+    tell: 1.2,
+    duration: 2.4,
     recovery: 1.25,
     shots: 6,
-    interval: 0.28,
+    interval: 0.36,
   },
   hammer: {
     label: 'HEMPASAN SURYA',
@@ -266,7 +266,7 @@ export function projectileOf(attack: AttackId): Exclude<ProjectileKind, 'player'
 export const PROJECTILES = {
   player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, slow: 0, stagger: 0 },
   fire: { radius: 0.32, speed: 36, life: 4, launch: 44, pause: 0.09, slow: 0, stagger: 0.85 },
-  missile: { radius: 0.34, speed: 30, life: 4.5, launch: 72, pause: 0.12, slow: 0, stagger: 1.2 },
+  missile: { radius: 0.34, speed: 28, life: 5.5, launch: 72, pause: 0.12, slow: 0, stagger: 1.2 },
   hammer: {
     radius: 1.25,
     speed: 37,
@@ -440,12 +440,15 @@ export function guideMissile(
   const offset = target.clone().sub(position),
     distance = offset.length();
   const alignment = velocity.clone().normalize().dot(offset.clone().normalize());
-  if (distance <= 5.2 || age >= 1.35 || alignment < 0.05) state.committed = true;
-  const speed = Math.min(PROJECTILES.missile.speed, 18 + age * 10);
+  // A moderate lock: the orb hunts for a good two seconds and aims ahead of a moving body,
+  // but can only bend its course gently (a radian per second), so a slow drift gets caught
+  // while a committed full-speed strafe still slips past it.
+  if (distance <= 4.5 || age >= 2.2 || alignment < 0.05) state.committed = true;
+  const speed = Math.min(PROJECTILES.missile.speed, 15 + age * 8);
   if (state.committed) return velocity.clone().normalize().multiplyScalar(speed);
-  const lead = Math.min(0.18, distance / 60);
-  const desired = offset.addScaledVector(targetVelocity, lead * 0.25);
-  return steerMissile(velocity, desired, 1.25, dt, speed);
+  const lead = Math.min(0.6, distance / 60);
+  const desired = offset.addScaledVector(targetVelocity, lead * 0.9);
+  return steerMissile(velocity, desired, 1.0, dt, speed);
 }
 
 /** Project a patch onto the ACTUAL nearby trajectory, retaining off-centre X/Y offsets. */
