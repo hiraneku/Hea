@@ -831,7 +831,9 @@ test('first person: V moves the camera into the eyes, hides the body, and hands 
   await scenario(page, 'ragdoll');
   await step(page, 0.6);
   expect((await state(page)).camera).toBe('third');
-  expect((await distance()).avatar).toBe(true);
+  // The jointed figure stands in for the box while thrown, and the view is well behind it.
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).ragdoll.player).toBe(true);
+  expect((await distance()).gap).toBeGreaterThan(3);
   await step(page, 9);
   expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).ragdoll.player).toBe(
     false,
