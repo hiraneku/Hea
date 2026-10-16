@@ -1693,8 +1693,10 @@ test('the charging lance shows where it is pointed, and a refused cast dips its 
   expect(after.energy).toBeGreaterThanOrEqual(refused.energy);
   expect((await diagnostics()).prisma.circles.length).toBe(0);
   await expect.poll(() => page.evaluate(() => window.__drySeen)).toBeGreaterThan(0);
+  // The dip is swept up by the frame loop (a timer can be delayed for seconds on a busy
+  // machine), so give the frames room to run.
   await expect(page.locator('.spell-slot[data-spell="1"]')).not.toHaveClass(/dry/, {
-    timeout: 2000,
+    timeout: 5000,
   });
   // And once the cooldown has run out the same tap works, so the dip was the only thing missing.
   await step(page, 0.8);

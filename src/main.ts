@@ -202,8 +202,13 @@ function floatDamage(
   } else setTimeout(() => el.remove(), life);
 }
 
-/** One pending "dry cast" dip per spell slot. */
-const dryTimers: ReturnType<typeof setTimeout>[] = [];
+/**
+ * One pending "dry cast" dip per spell slot, as a deadline the animation frame sweeps up rather
+ * than a timer. A `setTimeout` can be delayed for seconds when the machine is busy, and a slot
+ * that stays dimmed long after the click reads as a bug; the frame loop only stops when nothing
+ * is on screen to look at.
+ */
+const dryUntil = [0, 0, 0];
 
 function event(event: GameEvent) {
   if (event.type === 'mode') {
@@ -231,8 +236,7 @@ function event(event: GameEvent) {
     const slot = document.querySelector<HTMLElement>(`.spell-slot[data-spell="${event.spell}"]`);
     if (slot) {
       slot.classList.add('dry');
-      clearTimeout(dryTimers[event.spell]);
-      dryTimers[event.spell] = setTimeout(() => slot.classList.remove('dry'), 190);
+      dryUntil[event.spell] = performance.now() + 190;
     }
   } else if (event.type === 'toast') toast(event.text);
   else if (event.type === 'duel') {
@@ -599,6 +603,14 @@ function dressFrame() {
   const now = performance.now(),
     dt = Math.min(0.1, (now - dressing.last) / 1000 || 0);
   dressing.last = now;
+  // Sweep up any "dry cast" dip whose moment has passed: see dryUntil above.
+  for (let spell = 0; spell < dryUntil.length; spell++) {
+    if (!dryUntil[spell] || now < dryUntil[spell]) continue;
+    dryUntil[spell] = 0;
+    document
+      .querySelector<HTMLElement>(`.spell-slot[data-spell="${spell}"]`)
+      ?.classList.remove('dry');
+  }
   if (!game) return;
   let targetX = 0,
     targetY = 0;
