@@ -20,6 +20,13 @@ export const NOVA_CHARGE = {
  * shatters. The button held past `holdAfter` raises one large circle ahead of the body
  * instead, which charges for `chargeTime` and fires a heavy beam on release.
  */
+/**
+ * Nothing is thrown at a range limit. Every projectile and beam flies until it strikes the
+ * ground, a wall, a shield or a body; `FAR_REACH` is only the barrier met when something is
+ * aimed at empty sky, so nothing is ever seen to wink out in mid-air.
+ */
+export const FAR_REACH = 520;
+
 export const PRISMA = {
   /** Seconds from the tap to the circle starting to materialise. */
   circleDelay: 0.06,
@@ -32,20 +39,24 @@ export const PRISMA = {
   /** Seconds the circle hangs after its beam before shattering. */
   linger: 0.45,
   /** The ring around the body centre the small circles are raised on, in metres. */
-  ring: { min: 1.0, max: 2.2 },
+  ring: { min: 1.6, max: 2.9 },
   /** From the eyes the ring sits ahead of the view, tighter so it stays in frame. */
-  eyeRing: { min: 0.7, max: 1.3, depth: 2.0 },
+  eyeRing: { min: 0.8, max: 1.5, depth: 2.2 },
   /** Radians between consecutive circle angles, so a volley spreads around the body. */
   minTurn: 0.9,
   /** Seconds of holding before the large circle begins (a tap never shows it). */
   holdAfter: 0.22,
   /** Seconds for the large circle to charge once begun. */
   chargeTime: 0.6,
-  range: 70,
+  /** How far a beam is followed when it meets nothing at all — a barrier in the far blue. */
+  reach: FAR_REACH,
   circleRadius: 0.62,
   beamRadius: 0.075,
-  /** The heavy beam of the large circle. Damage is spent through the heavy-hit path. */
-  big: { damage: 90, cost: 20, radius: 0.5, circleRadius: 1.5, impulse: 12, linger: 0.45 },
+  /**
+   * The heavy beam of the large circle. Damage is spent through the heavy-hit path, and the
+   * impulse is a launch in Nova's class — a little short of it — so the lance throws the boss.
+   */
+  big: { damage: 90, cost: 20, radius: 0.5, circleRadius: 1.5, impulse: 115, linger: 0.45 },
 } as const;
 
 /** The shortest angular distance between two directions on the ring. */
@@ -356,13 +367,29 @@ export function projectileOf(attack: AttackId): Exclude<ProjectileKind, 'player'
 }
 /** The same radius drives the visible core, shield size and swept collision. */
 export const PROJECTILES = {
-  player: { radius: 0.17, speed: 44, life: 2.8, launch: 0, pause: 0, slow: 0, stagger: 0 },
-  fire: { radius: 0.32, speed: 36, life: 4, launch: 44, pause: 0.09, slow: 0, stagger: 0.85 },
-  missile: { radius: 0.34, speed: 28, life: 5.5, launch: 72, pause: 0.12, slow: 0, stagger: 1.2 },
+  player: { radius: 0.17, speed: 44, range: FAR_REACH, launch: 0, pause: 0, slow: 0, stagger: 0 },
+  fire: {
+    radius: 0.32,
+    speed: 36,
+    range: FAR_REACH,
+    launch: 44,
+    pause: 0.09,
+    slow: 0,
+    stagger: 0.85,
+  },
+  missile: {
+    radius: 0.34,
+    speed: 28,
+    range: FAR_REACH,
+    launch: 72,
+    pause: 0.12,
+    slow: 0,
+    stagger: 1.2,
+  },
   hammer: {
     radius: 1.25,
     speed: 37,
-    life: 5,
+    range: FAR_REACH,
     launch: 150,
     pause: DUEL.heavyFreeze,
     slow: DUEL.heavySlow,
@@ -372,7 +399,7 @@ export const PROJECTILES = {
   vortex: {
     radius: 0.55,
     speed: 31,
-    life: 3,
+    range: FAR_REACH,
     launch: 98,
     pause: DUEL.heavyFreeze,
     slow: DUEL.heavySlow,

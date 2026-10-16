@@ -1363,32 +1363,17 @@ test('Prisma raises a circle beside the body that fires a beat later and shatter
   expect(s.boss.health).toBe(DUEL.bossHealth - 4 * SPELLS[1].damage);
   for (let i = 1; i < angles.length; i++)
     expect(ringDistance(angles[i], angles[i - 1])).toBeGreaterThanOrEqual(PRISMA.minTurn - 1e-6);
-  // The circles ride with the body: they keep their place on the ring around it rather than
-  // being left hanging where they were raised. A volley of four is still standing here.
+  // A tapped circle is left where it was raised, like a shield patch: the body walks away and
+  // the circle — and the beam it already spent — stays behind.
   expect(d.circles.length).toBeGreaterThan(0);
-  for (const c of d.circles) {
-    const reach2 = Math.hypot(
-      c.position[0] - s.position.x,
-      c.position[1] - (s.position.y + 1.1),
-      c.position[2] - s.position.z,
-    );
-    expect(reach2).toBeGreaterThan(PRISMA.ring.min - 0.05);
-    expect(reach2).toBeLessThan(PRISMA.ring.max + 0.05);
-  }
-  const standing = d.circles[d.circles.length - 1].position,
-    home = s.position;
-  await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([0, 12, -30], [0, 5, -60]));
-  await step(page, 1 / 60);
-  d = await prisma();
+  const standing = d.circles.map((c) => c.position);
+  await page.keyboard.down('KeyW');
+  await step(page, 0.25);
+  await page.keyboard.up('KeyW');
   s = await state(page);
-  expect(d.circles.length).toBeGreaterThan(0);
-  // The body was carried right across the arena, and the circle went with it, keeping exactly
-  // the place it held on the ring.
-  const carried = d.circles[d.circles.length - 1].position;
-  expect(carried[0] - s.position.x).toBeCloseTo(standing[0] - home.x, 5);
-  expect(carried[1] - s.position.y).toBeCloseTo(standing[1] - home.y, 5);
-  expect(carried[2] - s.position.z).toBeCloseTo(standing[2] - home.z, 5);
-  expect(Math.hypot(carried[0] - standing[0], carried[2] - standing[2])).toBeGreaterThan(10);
+  d = await prisma();
+  expect(Math.hypot(s.position.x - 0, s.position.z - 24)).toBeGreaterThan(0.5);
+  for (const c of d.circles) expect(standing).toContainEqual(c.position);
   // Hold: the quick beam at the press, the large circle after the threshold, full charge later,
   // the heavy lance on release.
   await scenario(page, 'nova');
@@ -1403,6 +1388,16 @@ test('Prisma raises a circle beside the body that fires a beat later and shatter
   s = await state(page);
   expect(d.charging).toBe(true);
   expect(d.bigPosition).not.toBeNull();
+  // It stands in front of the body along the view, not out at the boss.
+  const [bx, by, bz] = d.bigPosition!,
+    [fx, fy, fz] = (await diagnostics()).facing,
+    aheadOfView =
+      ((bx - s.position.x) * fx + (by - (s.position.y + 1.1)) * fy + (bz - s.position.z) * fz) /
+      Math.hypot(bx - s.position.x, by - (s.position.y + 1.1), bz - s.position.z);
+  expect(aheadOfView).toBeGreaterThan(0.7);
+  expect(Math.hypot(bx - s.position.x, by - (s.position.y + 1.1), bz - s.position.z)).toBeLessThan(
+    2.4,
+  );
   expect(s.charge).toBeGreaterThan(0.3);
   expect(s.charge).toBeLessThan(0.7);
   expect(s.charged).toBe(false);
@@ -1413,6 +1408,18 @@ test('Prisma raises a circle beside the body that fires a beat later and shatter
   expect(s.charged).toBe(true);
   expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
   await expect(page.locator('[data-spell="1"]')).toHaveClass(/charged/);
+  // Turn the view before releasing: the charging ring comes with it and the lance goes where
+  // the crosshair points, not where the boss stands.
+  const beforeTurn = (await prisma()).bigPosition!,
+    yaw = (await diagnostics()).camera.yaw;
+  await page.evaluate((y) => window.__HEA_DEBUG__.harness!.face(y), yaw + 0.9);
+  await step(page, 0.05);
+  const afterTurn = (await prisma()).bigPosition!;
+  expect(Math.hypot(afterTurn[0] - beforeTurn[0], afterTurn[2] - beforeTurn[2])).toBeGreaterThan(
+    0.5,
+  );
+  await page.evaluate((y) => window.__HEA_DEBUG__.harness!.face(y), yaw);
+  await step(page, 0.05);
   const energyBefore = s.energy;
   await lift();
   await step(page, 0.05);
@@ -1474,28 +1481,38 @@ test('from the eyes Prisma raises its circles ahead of the view', async ({ page 
   expect(distance).toBeGreaterThan(PRISMA.eyeRing.depth - 0.2);
   expect(distance).toBeLessThan(PRISMA.eyeRing.depth + PRISMA.eyeRing.max + 0.2);
   expect(ahead).toBeGreaterThan(0.6);
-  // The circle of the eyes is carried along with the view, never left hanging in the world:
-  // the body is thrown right across the arena and the circle keeps its place on the view.
-  const standing = d.prisma.circles[0].position;
+  // A tapped circle of the eyes is left where it was raised — like a shield patch — while the
+  // body is thrown right across the arena.
   await step(page, 0.16);
   let after = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect((await state(page)).boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
   expect(after.prisma.beams).toBe(1);
+  const standing = after.prisma.circles[0].position;
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([0, 12, -30], [0, 5, -60]));
-  await step(page, 0.25);
+  await step(page, 0.05);
   after = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(after.prisma.circles).toHaveLength(1);
-  const carried = after.prisma.circles[0].position,
-    [mx, my, mz] = after.cameraPosition,
-    cdx = carried[0] - mx,
-    cdy = carried[1] - my,
-    cdz = carried[2] - mz,
-    cdist = Math.hypot(cdx, cdy, cdz),
-    cahead = (-Math.sin(yaw) * cdx - Math.cos(yaw) * cdz) / cdist;
-  expect(cdist).toBeGreaterThan(PRISMA.eyeRing.depth - 0.2);
-  expect(cdist).toBeLessThan(PRISMA.eyeRing.depth + PRISMA.eyeRing.max + 0.2);
-  expect(cahead).toBeGreaterThan(0.6);
-  expect(Math.hypot(carried[0] - standing[0], carried[2] - standing[2])).toBeGreaterThan(5);
+  expect(after.prisma.circles[0].position).toEqual(standing);
+  // The held circle, by contrast, is carried with the view: it stands a couple of metres ahead
+  // of the eyes, in front of wherever the crosshair is pointed.
+  await step(page, 0.06);
+  await page.mouse.down();
+  await step(page, PRISMA.holdAfter + 0.2);
+  const held = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics()),
+    here = await state(page),
+    [hx, hy, hz] = held.prisma.bigPosition!,
+    [mx, my, mz] = held.cameraPosition,
+    heldYaw = held.camera.yaw,
+    hdx = hx - mx,
+    hdy = hy - my,
+    hdz = hz - mz,
+    hdist = Math.hypot(hdx, hdy, hdz),
+    hahead = (-Math.sin(heldYaw) * hdx - Math.cos(heldYaw) * hdz) / hdist;
+  expect(here.charge).toBeGreaterThan(0);
+  expect(hdist).toBeGreaterThan(1.4);
+  expect(hdist).toBeLessThan(2.2);
+  expect(hahead).toBeGreaterThan(0.85);
+  await page.mouse.up();
 });
 
 test('the dash follows the stick in both views, and the surge after it dresses the frame until the speed settles', async ({

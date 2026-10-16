@@ -276,6 +276,17 @@ describe('Prisma circles and the held lance', () => {
     expect(PRISMA.big).toMatchObject({ damage: 90, cost: 20, radius: 0.5 });
     expect(PRISMA.big.impulse).toBeGreaterThan(10);
   });
+  it("throws the boss with the lance in Nova's class, a little short of it", () => {
+    expect(PRISMA.big.impulse).toBeGreaterThan(DUEL.novaLaunch * 0.5);
+    expect(PRISMA.big.impulse).toBeLessThan(DUEL.novaLaunch);
+  });
+  it('raises the tapped circles out beyond the body, and never caps a shot at a short range', () => {
+    expect(PRISMA.ring.min).toBeGreaterThan(1.5);
+    expect(PRISMA.ring.max).toBeGreaterThan(PRISMA.ring.min + 1);
+    expect(PRISMA.reach).toBeGreaterThan(400);
+    for (const shot of Object.values(PROJECTILES))
+      expect(shot.range / shot.speed).toBeGreaterThan(10);
+  });
 });
 
 describe('camera settings', () => {

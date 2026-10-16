@@ -108,18 +108,19 @@ interface TraceHit {
   ground?: boolean;
 }
 /**
- * A Prisma circle: raised by a tap (or the hold), fires once, then shatters. It rides with
- * whoever raised it — `offset` is where it sits relative to the body chest, or to the view in
- * first person, and is refreshed every frame so no circle is ever left behind.
+ * A Prisma circle: raised by a tap (or the hold), fires once, then shatters. A tapped circle
+ * stays where it was raised — left behind like a shield patch, its beam already gone. The
+ * large circle of the hold is the exception: `follow` carries it `reach` metres ahead of its
+ * caster along the view, so it stays in front of the crosshair as the caster turns and moves.
  */
+/** How the charging circle rides its caster: `reach` m ahead along the view, in the eyes. */
+type PrismaFollow = { eye: boolean; reach: number; side: number; drop: number };
 interface PrismaCircle {
   group: THREE.Group;
   position: THREE.Vector3;
   normal: THREE.Vector3;
-  /** Home relative to the body chest, or to the view when `eye` is set. */
-  offset: THREE.Vector3;
-  /** True when the circle rides the first-person view instead of the body. */
-  eye: boolean;
+  /** Set only on the charging circle: it rides the view rather than the world. */
+  follow: PrismaFollow | null;
   radius: number;
   /** Seconds since it began to materialise (negative while still waiting to). */
   age: number;
@@ -142,7 +143,9 @@ const RAGDOLL_ROOT = 0.3;
 /** Where Prisma circles ride on the body: the chest, not the feet. */
 const PRISMA_LIFT = new THREE.Vector3(0, 1.1, 0);
 const direction = new THREE.Vector3();
-const viewQuaternion = new THREE.Quaternion();
+const viewQuaternion = new THREE.Quaternion(),
+  viewPoint = new THREE.Vector3(),
+  viewSide = new THREE.Vector3();
 
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
@@ -2274,7 +2277,8 @@ export class Game {
     homing = false,
     aimOffset: THREE.Vector3 | null = null,
   ) {
-    if (this.projectiles.length >= 72) this.removeProjectile(0);
+    // Shots now fly until they strike the world, so the live cap is raised with them.
+    if (this.projectiles.length >= 120) this.removeProjectile(0);
     const mesh = new THREE.Mesh(
       kind === 'fire' ? this.fireGeometry : this.projectileGeometry,
       this.projectileMaterials[kind],
@@ -2312,7 +2316,7 @@ export class Game {
       kind,
       damage,
       homing,
-      life: PROJECTILES[kind].life,
+      life: PROJECTILES[kind].range / PROJECTILES[kind].speed,
       radius,
       origin: at.clone(),
       guidance: { committed: false },
@@ -2339,7 +2343,10 @@ export class Game {
           this.removeProjectile(i, true);
           continue;
         }
-        this.fx.burst(p.mesh.position, '#ffab72', 6, 1, 0.22);
+        // The far barrier: whatever it was aimed at, it lands on something far away rather
+        // than winking out in the sky.
+        this.fx.impact(p.mesh.position, '#ffab72', p.kind === 'hammer');
+        this.fx.dust(p.mesh.position, 6, 1.6);
         this.removeProjectile(i);
         continue;
       }
@@ -2642,25 +2649,28 @@ export class Game {
   }
   /** Where Prisma is aimed right now: the boss when it is in the sights, else far down the view. */
   /**
-   * Where a circle belongs right now: on the body's chest, or in first person on the view
-   * itself — turning the head carries the circle round with it.
+   * Where a following circle belongs right now: `reach` metres ahead of its caster along the
+   * view — the body from behind, the eyes in first person — with a small offset from the
+   * crosshair in the eyes, so it sits in front of the view wherever that is pointed. Circles
+   * without `follow` are left exactly where they were raised.
    */
-  private prismaSpot(c: PrismaCircle) {
-    if (!c.eye) return this.player.clone().add(PRISMA_LIFT).add(c.offset);
+  private prismaFollowSpot(f: PrismaFollow, out: THREE.Vector3) {
     this.camera.getWorldQuaternion(viewQuaternion);
-    return this.camera.position.clone().add(c.offset.clone().applyQuaternion(viewQuaternion));
-  }
-  /** The home of a circle raised at `position`, in its anchor's own frame. */
-  private prismaOffset(position: THREE.Vector3, eye: boolean) {
-    if (!eye) return position.clone().sub(this.player).sub(PRISMA_LIFT);
-    this.camera.getWorldQuaternion(viewQuaternion).invert();
-    return position.clone().sub(this.camera.position).applyQuaternion(viewQuaternion);
+    // The camera looks down its own -Z, so that is the axis the ring is held out along.
+    viewPoint.set(0, 0, -1).applyQuaternion(viewQuaternion).multiplyScalar(f.reach);
+    if (f.eye) viewPoint.add(this.camera.position);
+    else viewPoint.add(this.player).add(PRISMA_LIFT);
+    if (f.side)
+      viewPoint.addScaledVector(viewSide.set(1, 0, 0).applyQuaternion(viewQuaternion), f.side);
+    if (f.drop)
+      viewPoint.addScaledVector(viewSide.set(0, 1, 0).applyQuaternion(viewQuaternion), f.drop);
+    return out.copy(viewPoint);
   }
   private prismaAim(hasTarget: boolean) {
     this.camera.getWorldDirection(direction);
     return this.boss.alive && (hasTarget || this.aimsAtBoss(direction))
       ? this.boss.position.clone()
-      : this.camera.position.clone().addScaledVector(direction, PRISMA.range);
+      : this.camera.position.clone().addScaledVector(direction, PRISMA.reach);
   }
   /**
    * A tap of Prisma: raise a small circle at a random point on the ring around the body (or
@@ -2721,8 +2731,7 @@ export class Game {
       group,
       position,
       normal,
-      offset: this.prismaOffset(position, first),
-      eye: first,
+      follow: null,
       radius: PRISMA.circleRadius,
       age: -PRISMA.circleDelay,
       fireAt: PRISMA.beamDelay,
@@ -2738,7 +2747,7 @@ export class Game {
   private firePrismaBeam(c: PrismaCircle) {
     const aim = this.prismaAim(c.hasTarget),
       along = aim.sub(c.position).normalize(),
-      end = c.position.clone().addScaledVector(along, PRISMA.range),
+      end = c.position.clone().addScaledVector(along, PRISMA.reach),
       hit = this.trace(c.position, end, true);
     if (hit) end.lerpVectors(c.position, end, hit.t);
     // The circle squares up to the beam it fires.
@@ -2757,34 +2766,35 @@ export class Game {
       });
   }
   /**
-   * The hold: one large circle raised ahead of the body, square to the aim, which charges as
-   * it travels with the body and fires the heavy lance on release.
+   * The hold: one large circle raised ahead of the caster along the view — not at the boss —
+   * which charges as it rides that same view, and fires the heavy lance wherever the crosshair
+   * is pointed when the button comes up.
    */
   private raisePrismaBig() {
     this.camera.getWorldDirection(direction);
     const first = this.cameraMode === 'first';
-    const aim = this.prismaAim(false);
     const anchor = first ? this.camera.position.clone() : this.player.clone().add(PRISMA_LIFT);
-    const toAim = aim.clone().sub(anchor).normalize();
-    let reach = first ? 1.7 : 1.5;
-    const wall = this.trace(anchor, anchor.clone().addScaledVector(toAim, reach), false, 0.4);
+    let reach = first ? 1.8 : 1.6;
+    const wall = this.trace(anchor, anchor.clone().addScaledVector(direction, reach), false, 0.4);
     if (wall) reach = Math.max(0.5, wall.t * reach - 0.4);
-    const position = anchor.clone().addScaledVector(toAim, reach);
-    if (first) {
-      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
-      position.addScaledVector(right, 0.12).addScaledVector(UP, -0.1);
-    }
+    const follow: PrismaFollow = {
+      eye: first,
+      reach,
+      side: first ? 0.12 : 0,
+      drop: first ? -0.1 : 0,
+    };
+    const position = new THREE.Vector3();
+    this.prismaFollowSpot(follow, position);
     const group = this.fx.prismCircle(true);
     group.position.copy(position);
-    group.quaternion.setFromUnitVectors(FORWARD, toAim);
+    group.quaternion.setFromUnitVectors(FORWARD, direction);
     group.scale.setScalar(0.001);
     this.scene.add(group);
     this.prismaBig = {
       group,
       position,
-      normal: toAim,
-      offset: this.prismaOffset(position, first),
-      eye: first,
+      normal: direction.clone(),
+      follow,
       radius: PRISMA.big.circleRadius,
       age: 0,
       fireAt: null,
@@ -2815,9 +2825,8 @@ export class Game {
     this.prismaBig = null;
     this.energy -= PRISMA.big.cost;
     this.cooldowns[1] = 0.6;
-    const aim = this.prismaAim(false),
-      along = aim.sub(b.position).normalize(),
-      far = b.position.clone().addScaledVector(along, PRISMA.range),
+    const along = b.normal.clone().normalize(),
+      far = b.position.clone().addScaledVector(along, PRISMA.reach),
       sweep = PRISMA.big.radius * 0.6;
     let hit = this.trace(b.position, far, true, sweep);
     for (let n = 0; n < 4 && hit?.obstacle; n++) {
@@ -2874,9 +2883,14 @@ export class Game {
     for (let i = this.prismaCircles.length - 1; i >= 0; i--) {
       const c = this.prismaCircles[i];
       c.age += dt;
-      // Every circle rides with its caster: it is never left hanging where it was raised.
-      c.position.copy(this.prismaSpot(c));
-      c.group.position.copy(c.position);
+      // The spent circle of the hold keeps riding the view; a tapped circle is left behind.
+      if (c.follow) {
+        this.camera.getWorldDirection(direction);
+        this.prismaFollowSpot(c.follow, c.position);
+        c.normal.copy(direction);
+        c.group.position.copy(c.position);
+        c.group.quaternion.setFromUnitVectors(FORWARD, c.normal);
+      }
       if (c.age < 0) continue;
       c.group.visible = true;
       if (!c.big) {
@@ -2906,9 +2920,13 @@ export class Game {
     const b = this.prismaBig;
     if (b) {
       b.age += dt;
-      // The charging circle is held out in front of the caster and travels with them too.
-      b.position.copy(this.prismaSpot(b));
+      // The charging circle is held out in front of the caster and follows the view: turning
+      // the camera carries the ring round with it.
+      this.camera.getWorldDirection(direction);
+      this.prismaFollowSpot(b.follow!, b.position);
+      b.normal.copy(direction);
       b.group.position.copy(b.position);
+      b.group.quaternion.setFromUnitVectors(FORWARD, b.normal);
       const { progress, charged } = this.heldSpell();
       const pulse = charged ? 1 + 0.06 * Math.sin(this.time * 20) : 1;
       b.group.scale.setScalar(b.radius * (0.3 + 0.7 * progress) * pulse);
