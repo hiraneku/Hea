@@ -1504,6 +1504,10 @@ test('a Prisma beam sweeps the boss’s fire out of the air: bolts and seekers t
   await aimAt([0, 5, -20]);
   await fire();
   expect(await shots()).not.toContain('fire');
+  // Broken means gone: the bodies splash on the curtain and fade, never hanging in the air
+  // where the lance caught them.
+  await step(page, 0.5);
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().strayShots)).toBe(0);
   // A seeker, thrown from the same clear lane: the beam takes it out of the air too. (The
   // previous beam's curtain has to burn out first, or it would break this one on the way in.)
   await step(page, 0.5);

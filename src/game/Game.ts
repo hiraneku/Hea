@@ -718,6 +718,14 @@ export class Game {
         position: p.mesh.position.toArray(),
         velocity: p.velocity.toArray(),
       })),
+      /**
+       * Shot bodies still standing in the scene with no shot behind them. A break hands the
+       * mesh to an effect that finishes it off, so this must fall back to zero; anything that
+       * lingers is a body left hanging in mid-air where it was caught.
+       */
+      strayShots: this.scene.children.filter(
+        (o) => o.userData.projectile && !this.projectiles.some((p) => p.mesh === o),
+      ).length,
       colliders: this.world.obstacles.length,
       lastImpact: this.lastImpact,
     };
@@ -1997,6 +2005,7 @@ export class Game {
   /** A vortex seed arriving: its body becomes the core of a well that starts to pull. */
   private anchorWell(p: Projectile, at: THREE.Vector3) {
     const core = p.mesh;
+    core.userData.projectile = false;
     core.position.copy(at);
     core.rotation.set(0, 0, 0);
     core.scale.setScalar(PROJECTILES.vortex.radius / 0.17);
@@ -2296,6 +2305,9 @@ export class Game {
       this.projectileMaterials[kind],
     );
     mesh.position.copy(at);
+    // Marked as a shot's body while it is one, so a stray left in the scene can be counted
+    // rather than noticed by eye (see `diagnostics().strayShots`).
+    mesh.userData.projectile = true;
     const radius = PROJECTILES[kind].radius;
     mesh.scale.setScalar(radius / 0.17);
     if (kind === 'fire') {
@@ -2930,9 +2942,13 @@ export class Game {
   private breakShot(index: number, at: THREE.Vector3) {
     const p = this.projectiles[index];
     if (!p) return;
+    const travel = p.velocity.clone().normalize();
     this.fx.burst(at, '#dffbff', 22, 6, 0.32, 1.4);
-    this.fx.prismShards(at, p.velocity.clone().normalize(), 0.7, 8);
+    this.fx.prismShards(at, travel, 0.7, 8);
     this.fx.shock(at, '#bff0ff', 4.5);
+    // The shot goes off on the light plane itself: its own body splashes and fades there, its
+    // fire detonates, and the prism's glass scatters — it is destroyed, not parked in mid-air.
+    this.fx.lightBreak(p.mesh, travel, p.kind, shieldScale(p.radius));
     this.audio.block(p.kind);
     this.removeProjectile(index, true);
   }

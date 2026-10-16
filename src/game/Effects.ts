@@ -910,12 +910,29 @@ export class Effects {
     }
     return true;
   }
+  /**
+   * A shot met by a curtain of light rather than by a patch: the body itself piles up flat
+   * against that plane and fades, and the fire it was carrying goes off in its own colour at
+   * the point of contact. Without this the shot would simply be pulled out of the simulation
+   * and left hanging in mid-air, whole, where the lance caught it.
+   */
+  lightBreak(remnant: THREE.Object3D, travel: THREE.Vector3, kind: ProjectileKind, scale = 1) {
+    const size = Math.sqrt(scale) * (kind === 'hammer' ? 1.5 : 1),
+      // The surface the shot ran into faces back the way it came, so its nose is driven in.
+      normal = travel.clone().negate().normalize(),
+      at = remnant.position.clone();
+    // Slightly longer than a patch's crush: the break is watched at a distance, and on a phone
+    // a two-frame splash reads as a shot that simply stopped.
+    this.crush(remnant, normal, kind, size, kind === 'hammer' ? 0.34 : 0.24);
+    this.impact(at, IMPACT_TINT[kind], kind === 'hammer', size);
+  }
   /** The projectile's body flattening against the patch and fading — contact you can see. */
   private crush(
     remnant: THREE.Object3D,
     normal: THREE.Vector3,
     kind: ProjectileKind,
     size: number,
+    life = kind === 'hammer' ? 0.26 : 0.16,
   ) {
     remnant.traverse((o) => {
       if (o instanceof THREE.Mesh) {
@@ -935,7 +952,6 @@ export class Effects {
       origin = remnant.position.clone(),
       nose = projectileNose(kind);
     remnant.userData.kind = 'crush';
-    const life = kind === 'hammer' ? 0.26 : 0.16;
     this.add(remnant, life, 0, 0);
     const effect = this.timed[this.timed.length - 1];
     effect.animate = (e, progress) => {
