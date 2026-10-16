@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { CAMERA_RANGES, SPELLS, type Snapshot } from '../../src/game/types';
 import type { Game } from '../../src/game/Game';
-import { ATTACKS, DUEL, NOVA_CHARGE } from '../../src/game/combat';
+import { ATTACKS, DUEL, NOVA_CHARGE, PRISMA, ringDistance } from '../../src/game/combat';
 import { ARENA, FLIGHT } from '../../src/game/config';
 import { beside } from '../../src/game/layout';
 
@@ -358,8 +358,8 @@ test('Prisma damages the boss and Nova launches it into destructible cover', asy
   await scenario(page, 'nova');
   await page.locator('[data-spell="1"]').tap();
   await page.locator('#touch-fire').tap();
-  await step(page, 0.1);
-  expect((await state(page)).boss.health).toBe(DUEL.bossHealth - 58);
+  await step(page, 0.2);
+  expect((await state(page)).boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
   expect((await state(page)).impacts).toBe(0);
   await scenario(page, 'nova');
   await page.locator('#touch-fire').tap();
@@ -1268,7 +1268,8 @@ test('Nova charges while the fire button is held: a tap stays the ordinary blast
   expect(s.energy).toBeLessThan(100 - charged + 1.5);
   expect(d.ragdoll.boss).toBe(true);
   expect(s.charge).toBe(0);
-  // Prisma still fires the instant the button goes down, and floats its own number.
+  // Prisma's quick beam is paid the instant the button goes down and floats its own number
+  // once its circle fires.
   await scenario(page, 'nova');
   await page.locator('[data-spell="1"]').tap();
   await cdp.send('Input.dispatchTouchEvent', {
@@ -1276,9 +1277,183 @@ test('Nova charges while the fire button is held: a tap stays the ordinary blast
     touchPoints: [{ id: 2, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 }],
   });
   await step(page, 0.05);
+  expect((await state(page)).energy).toBeLessThan(100 - SPELLS[1].cost + 1);
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await step(page, 0.15);
   expect((await state(page)).boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
   expect(await numbers()).toContain(String(SPELLS[1].damage));
-  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+});
+
+test('Prisma raises a circle beside the body that fires a beat later and shatters; a volley spreads around the ring; a hold charges the heavy lance', async ({
+  page,
+  context,
+}, info) => {
+  test.skip(info.project.name !== 'mobile');
+  await load(page);
+  await scenario(page, 'nova');
+  await page.locator('[data-spell="1"]').tap();
+  const diagnostics = () => page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  const prisma = async () => (await diagnostics()).prisma;
+  const numbers = () =>
+    page.locator('.damage-number').evaluateAll((els) => els.map((el) => el.textContent));
+  // Tap: the circle stands on the ring before anything is hit...
+  await page.locator('#touch-fire').tap();
+  await step(page, 0.08);
+  let d = await prisma(),
+    s = await state(page);
+  expect(d.circles).toHaveLength(1);
+  expect(d.circles[0].fired).toBe(false);
+  expect(d.circles[0].big).toBe(false);
+  expect(d.beams).toBe(0);
+  expect(s.boss.health).toBe(DUEL.bossHealth);
+  expect(s.energy).toBeLessThan(100 - SPELLS[1].cost + 1);
+  const [cx, cy, cz] = d.circles[0].position,
+    reach = Math.hypot(cx - s.position.x, cy - (s.position.y + 1.1), cz - s.position.z);
+  expect(reach).toBeGreaterThan(PRISMA.ring.min - 0.05);
+  expect(reach).toBeLessThan(PRISMA.ring.max + 0.05);
+  expect(cy).toBeGreaterThan(s.position.y + 0.4);
+  // ...then the beam leaves it and the hit floats its number.
+  await step(page, 0.12);
+  d = await prisma();
+  s = await state(page);
+  expect(d.beams).toBe(1);
+  expect(d.circles[0].fired).toBe(true);
+  expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
+  expect(s.impacts).toBe(0);
+  expect(await numbers()).toContain(String(SPELLS[1].damage));
+  // The circle lingers where it was raised and shatters into splinters instead of fading.
+  await step(page, 0.3);
+  d = await prisma();
+  expect(d.circles).toHaveLength(1);
+  expect(d.circles[0].position).toEqual([cx, cy, cz]);
+  await step(page, 0.3);
+  d = await prisma();
+  expect(d.circles).toHaveLength(0);
+  let parts = (await diagnostics()).particles;
+  expect(parts.prismShatters).toBe(1);
+  expect(parts.prismShards).toBeGreaterThan(0);
+  // Holding the button does not repeat the beam; every beam takes its own tap.
+  const cdp = await context.newCDPSession(page),
+    fire = (await page.locator('#touch-fire').boundingBox())!,
+    press = () =>
+      cdp.send('Input.dispatchTouchEvent', {
+        type: 'touchStart',
+        touchPoints: [{ id: 1, x: fire.x + fire.width / 2, y: fire.y + fire.height / 2 }],
+      }),
+    lift = () => cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await scenario(page, 'nova');
+  await page.locator('[data-spell="1"]').tap();
+  const angles: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    await press();
+    await step(page, 0.1);
+    await lift();
+    await step(page, 0.25);
+    angles.push((await prisma()).lastAngle!);
+  }
+  d = await prisma();
+  s = await state(page);
+  expect(d.beams).toBe(4);
+  expect(d.bigCasts).toBe(0);
+  expect(s.boss.health).toBe(DUEL.bossHealth - 4 * SPELLS[1].damage);
+  for (let i = 1; i < angles.length; i++)
+    expect(ringDistance(angles[i], angles[i - 1])).toBeGreaterThanOrEqual(PRISMA.minTurn - 1e-6);
+  // The circles are anchored in the world: the body walks away and leaves them behind.
+  const anchored = d.circles.map((c) => c.position);
+  expect(anchored.length).toBeGreaterThan(0);
+  await page.keyboard.down('KeyW');
+  await step(page, 0.3);
+  await page.keyboard.up('KeyW');
+  d = await prisma();
+  expect(d.circles.length).toBeGreaterThan(0);
+  for (const c of d.circles) expect(anchored).toContainEqual(c.position);
+  // Hold: the quick beam at the press, the large circle after the threshold, full charge later,
+  // the heavy lance on release.
+  await scenario(page, 'nova');
+  await page.locator('[data-spell="1"]').tap();
+  await press();
+  await step(page, 0.1);
+  d = await prisma();
+  expect(d.charging).toBe(false);
+  expect(d.circles.filter((c) => c.big)).toHaveLength(0);
+  await step(page, PRISMA.holdAfter + PRISMA.chargeTime / 2 - 0.1);
+  d = await prisma();
+  s = await state(page);
+  expect(d.charging).toBe(true);
+  expect(d.bigPosition).not.toBeNull();
+  expect(s.charge).toBeGreaterThan(0.3);
+  expect(s.charge).toBeLessThan(0.7);
+  expect(s.charged).toBe(false);
+  expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
+  await expect(page.locator('[data-spell="1"]')).toHaveClass(/charging/);
+  await step(page, PRISMA.chargeTime / 2 + 0.05);
+  s = await state(page);
+  expect(s.charged).toBe(true);
+  expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
+  await expect(page.locator('[data-spell="1"]')).toHaveClass(/charged/);
+  const energyBefore = s.energy;
+  await lift();
+  await step(page, 0.05);
+  d = await prisma();
+  s = await state(page);
+  const all = await diagnostics();
+  expect(d.bigCasts).toBe(1);
+  expect(d.charging).toBe(false);
+  expect(s.charge).toBe(0);
+  expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage - PRISMA.big.damage);
+  expect(s.energy).toBeLessThan(energyBefore - PRISMA.big.cost + 1);
+  expect(all.ragdoll.boss).toBe(true);
+  expect(await numbers()).toContain(String(PRISMA.big.damage));
+  // The large circle hangs on for a moment after the lance, then shatters too.
+  expect(d.circles.filter((c) => c.big)).toHaveLength(1);
+  parts = all.particles;
+  // (The contact freeze and slow motion of the heavy hit eat into these steps.)
+  await step(page, 1.4);
+  d = await prisma();
+  expect(d.circles.filter((c) => c.big)).toHaveLength(0);
+  expect((await diagnostics()).particles.prismShatters).toBeGreaterThan(parts.prismShatters);
+  // Let go before the charge is full: the circle is lost and nothing is paid for it.
+  await scenario(page, 'nova');
+  await page.locator('[data-spell="1"]').tap();
+  await press();
+  await step(page, PRISMA.holdAfter + PRISMA.chargeTime / 2);
+  expect((await prisma()).charging).toBe(true);
+  await lift();
+  await step(page, 0.05);
+  d = await prisma();
+  s = await state(page);
+  expect(d.bigCasts).toBe(0);
+  expect(d.charging).toBe(false);
+  expect(d.circles.filter((c) => c.big)).toHaveLength(0);
+  expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
+  expect(s.energy).toBeGreaterThan(100 - SPELLS[1].cost - 1);
+});
+
+test('from the eyes Prisma raises its circles ahead of the view', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page);
+  await scenario(page, 'nova');
+  await page.keyboard.press('KeyV');
+  await page.keyboard.press('Digit2');
+  await page.mouse.click(550, 350);
+  await step(page, 0.08);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics()),
+    s = await state(page);
+  expect(s.camera).toBe('first');
+  expect(d.prisma.circles).toHaveLength(1);
+  const [cx, cy, cz] = d.prisma.circles[0].position,
+    [ex, ey, ez] = d.cameraPosition,
+    dx = cx - ex,
+    dy = cy - ey,
+    dz = cz - ez,
+    distance = Math.hypot(dx, dy, dz),
+    yaw = d.camera.yaw,
+    ahead = (-Math.sin(yaw) * dx - Math.cos(yaw) * dz) / distance;
+  expect(distance).toBeGreaterThan(PRISMA.eyeRing.depth - 0.2);
+  expect(distance).toBeLessThan(PRISMA.eyeRing.depth + PRISMA.eyeRing.max + 0.2);
+  expect(ahead).toBeGreaterThan(0.6);
+  await step(page, 0.12);
+  expect((await state(page)).boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
 });
 
 test('the dash follows the stick in both views, and the surge after it dresses the frame until the speed settles', async ({

@@ -8,12 +8,16 @@ import {
   guideMissile,
   novaCharge,
   NOVA_CHARGE,
+  PRISMA,
+  prismaAngle,
+  prismaHold,
+  ringDistance,
   salvoSpread,
   shieldCovers,
   shieldScale,
 } from '../../src/game/combat';
 import { flightWish, smoothFlight } from '../../src/game/flight';
-import { segmentSphere } from '../../src/game/math';
+import { seededRandom, segmentSphere } from '../../src/game/math';
 import { FLIGHT } from '../../src/game/config';
 import { CAMERA_RANGES, DEFAULT_SETTINGS, SPELLS, readSettings } from '../../src/game/types';
 
@@ -218,6 +222,48 @@ describe('held Nova', () => {
     expect(c.progress).toBe(1);
     expect(c.charged).toBe(false);
     expect(c.cost).toBe(cost);
+  });
+});
+
+describe('Prisma circles and the held lance', () => {
+  it('spreads consecutive circles around the ring instead of stacking them', () => {
+    const random = seededRandom(99);
+    let previous: number | null = null;
+    for (let i = 0; i < 40; i++) {
+      const angle = prismaAngle(random, previous);
+      expect(angle).toBeGreaterThanOrEqual(0);
+      expect(angle).toBeLessThan(Math.PI * 2);
+      if (previous !== null)
+        expect(ringDistance(angle, previous)).toBeGreaterThanOrEqual(PRISMA.minTurn);
+      previous = angle;
+    }
+  });
+  it('falls back to the opposite side when the dice keep landing on the last angle', () => {
+    const stuck = () => 0.25;
+    const first = prismaAngle(stuck, null);
+    expect(ringDistance(prismaAngle(stuck, first), first)).toBeCloseTo(Math.PI, 5);
+    expect(ringDistance(0.1, Math.PI * 2 - 0.1)).toBeCloseTo(0.2, 10);
+  });
+  it('a tap never charges; a hold starts the large circle after the threshold and fills it in 0.6 s', () => {
+    expect(prismaHold(0.1, 100).charging).toBe(false);
+    expect(prismaHold(PRISMA.holdAfter - 0.01, 100).progress).toBe(0);
+    const mid = prismaHold(PRISMA.holdAfter + PRISMA.chargeTime / 2, 100);
+    expect(mid.charging).toBe(true);
+    expect(mid.progress).toBeCloseTo(0.5, 5);
+    expect(mid.charged).toBe(false);
+    const full = prismaHold(PRISMA.holdAfter + PRISMA.chargeTime, PRISMA.big.cost);
+    expect(full.progress).toBe(1);
+    expect(full.charged).toBe(true);
+    expect(prismaHold(5, PRISMA.big.cost - 1).charged).toBe(false);
+    // A circle raised late (energy arrived mid-hold) counts its charge from when it rose.
+    expect(prismaHold(1.0, 100, 0.8).progress).toBeCloseTo(1 / 3, 5);
+  });
+  it('keeps the agreed prices: cheap quick beams, a heavy lance at 90 for 20', () => {
+    expect(SPELLS[1].cost).toBe(2);
+    expect(SPELLS[1].damage).toBe(15);
+    expect(SPELLS[1].cooldown).toBe(0.3);
+    expect(PRISMA.big).toMatchObject({ damage: 90, cost: 20, radius: 0.5 });
+    expect(PRISMA.big.impulse).toBeGreaterThan(10);
   });
 });
 

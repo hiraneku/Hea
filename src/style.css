@@ -1319,6 +1319,18 @@ kbd {
   white-space: nowrap;
   will-change: transform, opacity;
 }
+.damage-number.heavy {
+  font-size: 26px;
+  font-weight: 700;
+}
+.damage-number.spell-1.heavy {
+  color: #dffaff;
+  text-shadow:
+    0 0 16px #5fd8ff,
+    0 0 6px #8cedf799,
+    0 0 10px #0a141a,
+    0 1px 2px #0a141acc;
+}
 .damage-number.spell-2 {
   font-size: 26px;
   font-weight: 700;

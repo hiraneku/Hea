@@ -113,6 +113,91 @@ export function sigilTexture(): THREE.CanvasTexture {
   return texture;
 }
 
+/**
+ * The Prisma circle: a glass-like ring built from triangles — a hexagram of two thin
+ * triangles, a bolder inner triangle turned against them, a scale of prism ticks on the rim
+ * and a small lens at the centre the beam leaves from. Drawn white; the material tints it.
+ */
+export function prismTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 512;
+  const c = canvas.getContext('2d')!;
+  c.translate(256, 256);
+  c.strokeStyle = '#fff';
+  c.fillStyle = '#fff';
+  c.lineJoin = 'miter';
+  const ring = (r: number, width: number) => {
+    c.lineWidth = width;
+    c.beginPath();
+    c.arc(0, 0, r, 0, Math.PI * 2);
+    c.stroke();
+  };
+  const triangle = (r: number, turn: number, width: number) => {
+    c.lineWidth = width;
+    c.beginPath();
+    for (let i = 0; i <= 3; i++) {
+      const a = (i * Math.PI * 2) / 3 - Math.PI / 2 + turn;
+      c.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+    }
+    c.stroke();
+  };
+  ring(240, 3.5);
+  ring(228, 1.2);
+  ring(92, 1.6);
+  triangle(214, 0, 2.2);
+  triangle(214, Math.PI / 3, 2.2);
+  triangle(120, Math.PI, 3.4);
+  triangle(60, 0, 1.8);
+  // Prism ticks around the rim, every fifth one a small filled wedge.
+  for (let i = 0; i < 48; i++) {
+    c.save();
+    c.rotate((i * Math.PI) / 24);
+    if (i % 4 === 0) {
+      c.beginPath();
+      c.moveTo(-5, -244);
+      c.lineTo(5, -244);
+      c.lineTo(0, -254);
+      c.closePath();
+      c.fill();
+    } else {
+      c.lineWidth = 1.4;
+      c.beginPath();
+      c.moveTo(0, -229);
+      c.lineTo(0, -238);
+      c.stroke();
+    }
+    c.restore();
+  }
+  // Spokes from the lens to the hexagram's points.
+  c.lineWidth = 1.1;
+  for (let i = 0; i < 6; i++) {
+    const a = (i * Math.PI) / 3 - Math.PI / 2;
+    c.beginPath();
+    c.moveTo(Math.cos(a) * 96, Math.sin(a) * 96);
+    c.lineTo(Math.cos(a) * 206, Math.sin(a) * 206);
+    c.stroke();
+  }
+  c.beginPath();
+  c.arc(0, 0, 9, 0, Math.PI * 2);
+  c.fill();
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/** A small glass splinter for the Prisma shards. */
+function splinterGeometry(): THREE.BufferGeometry {
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute(
+    'position',
+    new THREE.Float32BufferAttribute([0, 0.62, 0, -0.42, -0.38, 0, 0.5, -0.3, 0], 3),
+  );
+  geometry.computeVertexNormals();
+  return geometry;
+}
+/** The spectrum a prism throws: mostly cyan-white, with magenta and amber splinters among it. */
+const PRISM_TINTS = ['#aef7ff', '#ffffff', '#8cedf7', '#f2b8ff', '#fff2b0', '#d9fbff'];
+
 export function makeSigil(
   texture: THREE.Texture,
   radius: number,
@@ -322,6 +407,10 @@ const IMPACT_TINT: Record<ProjectileKind, string> = {
 
 export class Effects {
   readonly sigilMap = sigilTexture();
+  readonly prismMap = prismTexture();
+  private readonly splinter = splinterGeometry();
+  private readonly tube = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true);
+  private prismShatters = 0;
   private sparks: Particle[] = [];
   private rocks: Debris[] = [];
   private timed: TimedEffect[] = [];
@@ -355,6 +444,8 @@ export class Effects {
       afterimages: this.afterimages,
       shieldImpacts: this.shieldImpacts,
       shards: this.timed.filter((e) => e.object.userData.kind === 'shield-shards').length,
+      prismShards: this.timed.filter((e) => e.object.userData.kind === 'prism-shards').length,
+      prismShatters: this.prismShatters,
       scorches: this.scorches.count,
       density: this.density,
       budget: this.particleBudget,
@@ -1369,6 +1460,256 @@ export class Effects {
     hex.lookAt(camera);
     this.add(hex, life, 0.2, 0);
   }
+  /**
+   * A Prisma circle at unit radius, facing +z: the triangle plate, a counter-turning inner
+   * plate, a faint glass fill, a bright rim and the lens the beam leaves from. The caller
+   * scales, orients and spins it (`spinPrism`) and tears it down with `shatterPrism`.
+   */
+  prismCircle(big = false): THREE.Group {
+    const group = new THREE.Group();
+    const tint = new THREE.Color(big ? '#b4f0ff' : '#7fdcff');
+    const plate = (size: number, opacity: number) =>
+      new THREE.Mesh(
+        new THREE.PlaneGeometry(size, size),
+        new THREE.MeshBasicMaterial({
+          map: this.prismMap,
+          color: tint.clone().multiplyScalar(big ? 3.2 : 3),
+          transparent: true,
+          opacity,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        }),
+      );
+    const outer = plate(2, 1),
+      inner = plate(1.26, 0.75);
+    inner.userData.counter = true;
+    inner.position.z = 0.004;
+    const glass = new THREE.Mesh(
+      new THREE.CircleGeometry(0.97, 48),
+      new THREE.MeshBasicMaterial({
+        color: tint.clone().multiplyScalar(0.55),
+        transparent: true,
+        opacity: big ? 0.16 : 0.1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    glass.position.z = -0.004;
+    glass.userData.glass = true;
+    const rim = new THREE.Mesh(
+      new THREE.RingGeometry(0.975, 1.03, 72),
+      new THREE.MeshBasicMaterial({
+        color: new THREE.Color('#ffffff').multiplyScalar(1.6),
+        transparent: true,
+        opacity: 0.9,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+    );
+    rim.position.z = 0.006;
+    const lens = new THREE.Mesh(
+      new THREE.CircleGeometry(0.1, 24),
+      new THREE.MeshBasicMaterial({
+        color: '#ffffff',
+        transparent: true,
+        opacity: 0.95,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+    );
+    lens.position.z = 0.008;
+    lens.userData.lens = true;
+    group.add(glass, outer, inner, rim, lens);
+    group.traverse((o) => {
+      if (o instanceof THREE.Mesh) o.userData.baseOpacity = (o.material as THREE.Material).opacity;
+    });
+    return group;
+  }
+  /** Turn a Prisma circle about its own axis: the inner plate runs the other way. */
+  spinPrism(group: THREE.Group, angle: number, brightness = 1, lens = 1) {
+    for (const child of group.children) {
+      const mesh = child as THREE.Mesh;
+      mesh.rotation.z = mesh.userData.counter ? -angle * 1.6 : angle;
+      const material = mesh.material as THREE.Material & { opacity: number };
+      const base = mesh.userData.baseOpacity ?? 1;
+      material.opacity = Math.min(1, base * (mesh.userData.lens ? lens : brightness));
+    }
+  }
+  /**
+   * The Prisma beam: a white core in a cyan body, with the thin spectral fringes a prism
+   * throws — magenta to one side, amber to the other — and a wide faint halo. It extends from
+   * its circle to the target over 40 ms, holds, then thins and fades out; the heavy lance is
+   * the same beam at ten times the radius, pinching as it dies.
+   */
+  prismBeam(start: THREE.Vector3, end: THREE.Vector3, radius: number, life: number, big = false) {
+    const direction = v1.subVectors(end, start),
+      length = direction.length();
+    if (length < 0.01) return;
+    direction.normalize();
+    const side = new THREE.Vector3().crossVectors(direction, UP);
+    if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+    side.normalize();
+    const group = new THREE.Group();
+    const tube = (
+      width: number,
+      color: string,
+      opacity: number,
+      multiply: number,
+      offset: THREE.Vector3 | null,
+    ) => {
+      const mesh = new THREE.Mesh(
+        this.tube,
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(color).multiplyScalar(multiply),
+          transparent: true,
+          opacity,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          toneMapped: false,
+        }),
+      );
+      mesh.userData.keepGeometry = true;
+      mesh.userData.width = width;
+      // The unit cylinder sits on [0, 1] along y so the group can grow from the start.
+      mesh.position.y = 0.5;
+      if (offset) mesh.userData.offset = offset.clone();
+      mesh.scale.set(width, 1, width);
+      return mesh;
+    };
+    group.add(
+      tube(radius * 2.6, '#8cedf7', big ? 0.14 : 0.1, 1.2, null),
+      tube(radius, '#8cedf7', big ? 0.8 : 0.9, big ? 1.9 : 2.6, null),
+      tube(radius * 0.34, '#ffffff', 1, 1, null),
+      tube(radius * 0.5, '#f0a6ff', big ? 0.75 : 0.5, 1.6, new THREE.Vector3(radius, 0, 0)),
+      tube(radius * 0.5, '#fff0a8', big ? 0.7 : 0.45, 1.6, new THREE.Vector3(-radius, 0, 0)),
+    );
+    group.position.copy(start);
+    group.quaternion.setFromUnitVectors(UP, direction);
+    group.scale.set(1, 0.001, 1);
+    group.userData.kind = 'prism-beam';
+    this.add(group, life);
+    const effect = this.timed[this.timed.length - 1];
+    // The heavy lance lands inside a contact freeze, so it is drawn whole at once; the small
+    // beams extend over their first 40 ms.
+    const drive = (age: number, left: number) => {
+      const reach = big ? 1 : Math.min(1, age / 0.04),
+        fade = Math.min(1, left / (big ? 0.22 : 0.12)),
+        pinch = big ? 1 - 0.55 * Math.pow(1 - left / life, 2) : 1 - 0.3 * (1 - left / life);
+      group.scale.y = Math.max(0.001, length * reach * reach * (3 - 2 * reach));
+      for (const child of group.children) {
+        const mesh = child as THREE.Mesh,
+          width = (mesh.userData.width as number) * pinch;
+        mesh.scale.set(width, 1, width);
+        const offset = mesh.userData.offset as THREE.Vector3 | undefined;
+        if (offset) {
+          mesh.position.x = offset.x * pinch;
+          mesh.position.z = offset.z * pinch;
+        }
+        (mesh.material as THREE.Material & { opacity: number }).opacity =
+          (mesh.userData.baseOpacity ?? 1) * fade;
+      }
+    };
+    drive(0, life);
+    effect.animate = (e) => drive(e.max - e.life, e.life);
+  }
+  /**
+   * Prism splinters: small glass triangles in the spectrum's tints, thrown out across the
+   * plane of `normal` (and a little along it), spinning and falling, gone within a second.
+   * With `ring` they start spread over a disc of that radius instead of at a point, which is
+   * how a circle shatters.
+   */
+  prismShards(at: THREE.Vector3, normal: THREE.Vector3, size: number, count: number, ring = 0) {
+    count = Math.max(3, Math.round(count * Math.max(0.5, this.density)));
+    const mesh = new THREE.InstancedMesh(
+      this.splinter,
+      new THREE.MeshBasicMaterial({
+        color: '#ffffff',
+        transparent: true,
+        opacity: 0.95,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        toneMapped: false,
+      }),
+      count,
+    );
+    mesh.userData.keepGeometry = true;
+    mesh.frustumCulled = false;
+    const n = normal.clone().normalize(),
+      u = new THREE.Vector3().crossVectors(n, UP);
+    if (u.lengthSq() < 1e-6) u.set(1, 0, 0);
+    u.normalize();
+    const w = new THREE.Vector3().crossVectors(n, u).normalize();
+    const random = seededRandom(Math.floor(at.x * 31 + at.y * 17 + at.z * 7) + count);
+    const tint = new THREE.Color();
+    const pieces = Array.from({ length: count }, (_, i) => {
+      const angle = random() * Math.PI * 2,
+        spread = ring ? ring * (0.35 + 0.65 * Math.sqrt(random())) : 0,
+        radial = u.clone().multiplyScalar(Math.cos(angle)).addScaledVector(w, Math.sin(angle));
+      tint.set(PRISM_TINTS[i % PRISM_TINTS.length]);
+      mesh.setColorAt(i, tint);
+      return {
+        start: at.clone().addScaledVector(radial, spread),
+        velocity: radial
+          .clone()
+          .multiplyScalar((ring ? 2.2 : 1.6) + random() * (ring ? 2.8 : 3.4))
+          .addScaledVector(n, (0.4 + random() * 1.3) * (ring ? 1 : 2.2))
+          .add(new THREE.Vector3(0, 0.6 + random() * 1.4, 0)),
+        axis: new THREE.Vector3(random() - 0.5, random() - 0.5, random() - 0.5).normalize(),
+        spin: 10 + random() * 14,
+        scale: size * (0.06 + random() * 0.11),
+        delay: ring ? random() * 0.05 : 0,
+      };
+    });
+    const life = 0.7,
+      quaternion = new THREE.Quaternion(),
+      base = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), n);
+    const place = (time: number) => {
+      pieces.forEach((piece, i) => {
+        const t = Math.max(0, time - piece.delay);
+        dummy.position
+          .copy(piece.start)
+          .addScaledVector(piece.velocity, t)
+          .add(new THREE.Vector3(0, -5.5 * t * t, 0));
+        quaternion
+          .copy(base)
+          .multiply(new THREE.Quaternion().setFromAxisAngle(piece.axis, piece.spin * t));
+        dummy.quaternion.copy(quaternion);
+        dummy.scale.setScalar(piece.scale * (t > 0.4 ? Math.max(0, 1 - (t - 0.4) / 0.3) : 1));
+        dummy.updateMatrix();
+        mesh.setMatrixAt(i, dummy.matrix);
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+    };
+    place(0);
+    const group = new THREE.Group();
+    group.add(mesh);
+    group.userData.kind = 'prism-shards';
+    this.add(group, life);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e) => {
+      place(e.max - e.life);
+      (mesh.material as THREE.MeshBasicMaterial).opacity = 0.95 * Math.min(1, e.life / 0.2);
+    };
+  }
+  /** A Prisma circle breaking: its plates vanish into splinters thrown out across its plane. */
+  shatterPrism(group: THREE.Group, normal: THREE.Vector3, radius: number, count: number) {
+    this.prismShatters++;
+    this.prismShards(group.position, normal, radius * 1.4, count, radius);
+    this.burst(group.position, '#dffbff', Math.round(count * 0.6), 2.2 * radius, 0.22, 1);
+    this.discard(group);
+  }
+  /** Remove and dispose an object the caller has been managing itself. */
+  discard(object: THREE.Object3D) {
+    this.removeEffect({ object, life: 0, max: 0, grow: 0, baseScale: 1, spin: 0 });
+  }
   beam(
     start: THREE.Vector3,
     end: THREE.Vector3,
@@ -1623,6 +1964,7 @@ export class Effects {
   }
   clear() {
     this.shieldSerial = 0;
+    this.prismShatters = 0;
     this.skidCalls = 0;
     this.clods = 0;
     this.airRecoveries = 0;

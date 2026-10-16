@@ -27,6 +27,9 @@ import {
   HitPause,
   PROJECTILES,
   novaCharge,
+  PRISMA,
+  prismaAngle,
+  prismaHold,
   type ProjectileKind,
   type MissileGuidance,
   type AttackId,
@@ -37,6 +40,7 @@ import {
   damp,
   groundHeight,
   resolveCircle,
+  seededRandom,
   segmentBox,
   segmentSphere,
   type Obstacle,
@@ -103,6 +107,24 @@ interface TraceHit {
   obstacle?: Obstacle;
   ground?: boolean;
 }
+/** A Prisma circle hanging in the world: raised by a tap (or the hold), fires once, shatters. */
+interface PrismaCircle {
+  group: THREE.Group;
+  position: THREE.Vector3;
+  normal: THREE.Vector3;
+  radius: number;
+  /** Seconds since it began to materialise (negative while still waiting to). */
+  age: number;
+  /** Age at which its beam leaves; null once fired (or for the large circle after its lance). */
+  fireAt: number | null;
+  shatterAt: number;
+  /** Age at which the beam left, for the flash of the lens; null until then. */
+  firedAt: number | null;
+  hasTarget: boolean;
+  spin: number;
+  big: boolean;
+}
+const FORWARD = new THREE.Vector3(0, 0, 1);
 const START = new THREE.Vector3(0, 1.8, 24);
 const UP = new THREE.Vector3(0, 1, 0);
 /** Reach (m) of the solar sphere's blast when it bursts against the world. */
@@ -204,6 +226,16 @@ export class Game {
   private novaChargedCasts = 0;
   private novaChimed = false;
   private chargeSigil?: THREE.Group;
+  /** Prisma: the circles hanging in the world, the large one while it charges, the hold. */
+  private prismaCircles: PrismaCircle[] = [];
+  private prismaBig: PrismaCircle | null = null;
+  private prismaHoldTime = 0;
+  private prismaChargeStart = 0;
+  private prismaChimed = false;
+  private prismaLastAngle: number | null = null;
+  private prismaRandom: () => number = Math.random;
+  private prismaBeams = 0;
+  private prismaBigCasts = 0;
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
   private dashBuffer = 0;
@@ -464,10 +496,8 @@ export class Game {
       },
       dash: clamp(1 - this.dashCooldown / 1.65, 0, 1),
       spell: this.spell,
-      charge: this.novaHolding
-        ? novaCharge(this.novaHold, this.energy, SPELLS[2].cost).progress
-        : 0,
-      charged: this.novaHolding && novaCharge(this.novaHold, this.energy, SPELLS[2].cost).charged,
+      charge: this.heldSpell().progress,
+      charged: this.heldSpell().charged,
       cooldowns: this.cooldowns.map((c, i) => clamp(c / SPELLS[i].cooldown, 0, 1)),
       damageDealt: this.damageDealt,
       impacts: this.impacts,
@@ -524,6 +554,22 @@ export class Game {
         hold: this.novaHold,
         holding: this.novaHolding,
         chargedCasts: this.novaChargedCasts,
+      },
+      prisma: {
+        circles: this.prismaCircles.map((c) => ({
+          position: c.position.toArray(),
+          normal: c.normal.toArray(),
+          age: c.age,
+          fired: c.fireAt === null,
+          big: c.big,
+        })),
+        beams: this.prismaBeams,
+        bigCasts: this.prismaBigCasts,
+        hold: this.prismaHoldTime,
+        charging: !!this.prismaBig,
+        charged: this.spell === 1 && this.heldSpell().charged,
+        bigPosition: this.prismaBig?.position.toArray() ?? null,
+        lastAngle: this.prismaLastAngle,
       },
       facing: this.facing.toArray(),
       health: this.health,
@@ -684,6 +730,7 @@ export class Game {
     this.dashCooldown = this.dashTime = this.knockTime = this.flightBoost = 0;
     this.novaHold = 0;
     this.novaHolding = this.novaChimed = false;
+    this.clearPrisma();
     this.spell = 0;
     this.cooldowns = [0, 0, 0];
     this.pendingPlayerImpulse = null;
@@ -750,6 +797,8 @@ export class Game {
     if (slot >= 0 && slot <= 2) {
       if (slot !== this.spell) this.novaHold = 0;
       if (slot !== this.spell) this.novaHolding = false;
+      if (slot !== this.spell && this.prismaBig) this.cancelPrismaBig();
+      if (slot !== this.spell) this.prismaHoldTime = 0;
       this.spell = slot as SpellId;
       this.audio.click();
     }
@@ -888,6 +937,7 @@ export class Game {
       this.impactGate.boss = Math.max(0, this.impactGate.boss - dt);
       this.previousPlayer.copy(this.player);
       this.updatePlayer(dt, this.mode !== 'playing');
+      if (this.hitPause.remaining === 0) this.updatePrisma(dt);
       if (this.hitPause.remaining === 0) this.updateBoss(dt);
       if (this.hitPause.remaining === 0) {
         this.updateFireGates(dt);
@@ -1126,6 +1176,27 @@ export class Game {
             if (may) this.cast();
             this.novaHold = 0;
             this.novaHolding = false;
+          }
+        } else if (this.spell === 1) {
+          // Prisma: a tap raises a circle that fires on its own; the button held past a
+          // short threshold raises the large circle, which charges and fires on release.
+          if (this.controls.shotRequested && may) this.cast();
+          this.controls.shotRequested = false;
+          if (this.controls.shooting && may) {
+            this.prismaHoldTime += dt;
+            if (
+              prismaHold(this.prismaHoldTime, this.energy).charging &&
+              !this.prismaBig &&
+              this.prismaChargeStart === 0 &&
+              this.energy >= PRISMA.big.cost
+            )
+              this.raisePrismaBig();
+          } else {
+            if (this.prismaBig) {
+              if (this.heldSpell().charged && may) this.castPrismaBig();
+              else this.cancelPrismaBig();
+            }
+            this.prismaHoldTime = this.prismaChargeStart = 0;
           }
         } else {
           this.controls.shotRequested = false;
@@ -2103,7 +2174,8 @@ export class Game {
     const charge = novaCharge(this.spell === 2 ? this.novaHold : 0, this.energy, spell.cost);
     this.energy -= charge.cost;
     this.cooldowns[this.spell] = spell.cooldown;
-    this.audio.cast(this.spell);
+    // Prisma sounds when its beam leaves the circle, a moment after the tap.
+    if (this.spell !== 1) this.audio.cast(this.spell);
     if (charge.charged) {
       this.novaChargedCasts++;
       this.audio.novaCharged();
@@ -2125,18 +2197,7 @@ export class Game {
       this.spawn(origin, direction.clone().multiplyScalar(40), 'player', spell.damage, hasTarget);
       this.fx.glyph(origin, direction, '#ffa34f', 0.27, 0.25);
     } else if (this.spell === 1) {
-      const end = origin.clone().addScaledVector(direction, 70),
-        hit = this.trace(origin, end, true);
-      if (hit) end.lerpVectors(origin, end, hit.t);
-      this.fx.beam(origin, end, '#78e9ff', 0.045, 0.25);
-      this.fx.glyph(origin, direction, '#79efff', 0.5, 0.4);
-      this.fx.burst(end, '#95f5ff', 24, 4, 0.4, 1);
-      if (hit?.boss)
-        this.damageBoss(spell.damage, direction.clone().multiplyScalar(3.5), {
-          spell: 1,
-          at: end,
-          along: direction,
-        });
+      this.raisePrismaCircle(hasTarget);
     } else {
       const end = origin.clone().addScaledVector(direction, 27),
         hit = this.trace(origin, end, true);
@@ -2556,6 +2617,276 @@ export class Game {
     this.fx.debris(this.boss.position, Math.round(35 * BOSS.scale), 8 * BOSS.scale, 3 * BOSS.scale);
     this.fx.dust(this.boss.position, Math.round(15 * BOSS.scale), 2.5 * BOSS.scale);
   }
+  /** The charge of whatever the fire control is holding: a Prisma lance or a Nova. */
+  private heldSpell() {
+    if (this.spell === 1 && this.prismaBig) {
+      const hold = prismaHold(this.prismaHoldTime, this.energy, this.prismaChargeStart);
+      return { progress: hold.progress, charged: hold.charged };
+    }
+    if (this.spell === 2 && this.novaHolding) {
+      const charge = novaCharge(this.novaHold, this.energy, SPELLS[2].cost);
+      return { progress: charge.progress, charged: charge.charged };
+    }
+    return { progress: 0, charged: false };
+  }
+  /** Where Prisma is aimed right now: the boss when it is in the sights, else far down the view. */
+  private prismaAim(hasTarget: boolean) {
+    this.camera.getWorldDirection(direction);
+    return this.boss.alive && (hasTarget || this.aimsAtBoss(direction))
+      ? this.boss.position.clone()
+      : this.camera.position.clone().addScaledVector(direction, PRISMA.range);
+  }
+  /**
+   * A tap of Prisma: raise a small circle at a random point on the ring around the body (or
+   * ahead of the eyes), on the plane square to the aim, somewhere the floor and the walls
+   * leave clear, turned well away from the previous one. It fires on its own a moment later
+   * and stays where it was raised — the body is free to leave it behind.
+   */
+  private raisePrismaCircle(hasTarget: boolean) {
+    const first = this.cameraMode === 'first';
+    const aim = this.prismaAim(hasTarget);
+    this.camera.getWorldDirection(direction);
+    const centre = this.player.clone().add(new THREE.Vector3(0, 1.1, 0));
+    if (first) {
+      // Ahead of the eyes, pulled in short of anything the view is pressed against.
+      let depth: number = PRISMA.eyeRing.depth;
+      const wall = this.trace(
+        this.camera.position,
+        this.camera.position.clone().addScaledVector(direction, depth),
+        false,
+        0.3,
+      );
+      if (wall) depth = Math.max(0.6, wall.t * depth - 0.3);
+      centre.copy(this.camera.position).addScaledVector(direction, depth);
+    }
+    const toAim = aim.clone().sub(centre).normalize();
+    const right = new THREE.Vector3().crossVectors(toAim, UP);
+    if (right.lengthSq() < 1e-6) right.set(1, 0, 0);
+    right.normalize();
+    const up = new THREE.Vector3().crossVectors(right, toAim).normalize();
+    const ring = first ? PRISMA.eyeRing : PRISMA.ring;
+    let position: THREE.Vector3 | null = null,
+      angle = Math.PI / 2;
+    for (let attempt = 0; attempt < 7 && !position; attempt++) {
+      angle = prismaAngle(this.prismaRandom, this.prismaLastAngle);
+      const radius = ring.min + (ring.max - ring.min) * this.prismaRandom();
+      const candidate = centre
+        .clone()
+        .addScaledVector(right, Math.cos(angle) * radius)
+        .addScaledVector(up, Math.sin(angle) * radius);
+      if (candidate.y < this.world.surfaceHeight(candidate.x, candidate.z) + 0.45) continue;
+      if (this.trace(centre, candidate, false, 0.25)) continue;
+      position = candidate;
+    }
+    if (!position) {
+      // Nothing clear on the ring: straight above the body, lifted clear of the floor.
+      position = centre.clone().addScaledVector(up, ring.min);
+      position.y = Math.max(position.y, this.world.surfaceHeight(position.x, position.z) + 0.45);
+    }
+    this.prismaLastAngle = angle;
+    const normal = aim.clone().sub(position).normalize();
+    const group = this.fx.prismCircle(false);
+    group.position.copy(position);
+    group.quaternion.setFromUnitVectors(FORWARD, normal);
+    group.scale.setScalar(0.001);
+    group.visible = false;
+    this.scene.add(group);
+    this.prismaCircles.push({
+      group,
+      position,
+      normal,
+      radius: PRISMA.circleRadius,
+      age: -PRISMA.circleDelay,
+      fireAt: PRISMA.beamDelay,
+      shatterAt: PRISMA.beamDelay + PRISMA.linger,
+      firedAt: null,
+      hasTarget,
+      spin: this.prismaRandom() * Math.PI * 2,
+      big: false,
+    });
+    if (this.prismaCircles.length > 12) this.dropPrismaCircle(0, false);
+  }
+  /** The beam of a small circle: a thin lance from the circle to the aim, hitting at once. */
+  private firePrismaBeam(c: PrismaCircle) {
+    const aim = this.prismaAim(c.hasTarget),
+      along = aim.sub(c.position).normalize(),
+      end = c.position.clone().addScaledVector(along, PRISMA.range),
+      hit = this.trace(c.position, end, true);
+    if (hit) end.lerpVectors(c.position, end, hit.t);
+    // The circle squares up to the beam it fires.
+    c.normal.copy(along);
+    c.group.quaternion.setFromUnitVectors(FORWARD, along);
+    this.fx.prismBeam(c.position, end, PRISMA.beamRadius, 0.25);
+    this.fx.burst(end, '#95f5ff', 12, 3, 0.28, 1);
+    this.fx.prismShards(end, along.clone().negate(), 0.5, 5);
+    this.audio.cast(1);
+    this.prismaBeams++;
+    if (hit?.boss)
+      this.damageBoss(SPELLS[1].damage, along.clone().multiplyScalar(1.5), {
+        spell: 1,
+        at: end,
+        along,
+      });
+  }
+  /**
+   * The hold: one large circle raised ahead of the body, square to the aim, which charges in
+   * place (it does not follow the body either) and fires the heavy lance on release.
+   */
+  private raisePrismaBig() {
+    this.camera.getWorldDirection(direction);
+    const first = this.cameraMode === 'first';
+    const aim = this.prismaAim(false);
+    const anchor = first
+      ? this.camera.position.clone()
+      : this.player.clone().add(new THREE.Vector3(0, 1.15, 0));
+    const toAim = aim.clone().sub(anchor).normalize();
+    let reach = first ? 1.7 : 1.5;
+    const wall = this.trace(anchor, anchor.clone().addScaledVector(toAim, reach), false, 0.4);
+    if (wall) reach = Math.max(0.5, wall.t * reach - 0.4);
+    const position = anchor.clone().addScaledVector(toAim, reach);
+    if (first) {
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(this.camera.quaternion);
+      position.addScaledVector(right, 0.12).addScaledVector(UP, -0.1);
+    }
+    const group = this.fx.prismCircle(true);
+    group.position.copy(position);
+    group.quaternion.setFromUnitVectors(FORWARD, toAim);
+    group.scale.setScalar(0.001);
+    this.scene.add(group);
+    this.prismaBig = {
+      group,
+      position,
+      normal: toAim,
+      radius: PRISMA.big.circleRadius,
+      age: 0,
+      fireAt: null,
+      shatterAt: Infinity,
+      firedAt: null,
+      hasTarget: false,
+      spin: 0,
+      big: true,
+    };
+    this.prismaChargeStart = this.prismaHoldTime;
+    this.prismaChimed = false;
+  }
+  /** Released before the charge is full: the large circle breaks up, nothing is spent. */
+  private cancelPrismaBig() {
+    const b = this.prismaBig;
+    if (!b) return;
+    this.prismaBig = null;
+    this.fx.shatterPrism(b.group, b.normal, b.group.scale.x, 10);
+  }
+  /**
+   * The heavy lance: ten times the beam's radius, bores through thin walls on its way (and
+   * scars thick ones), and lands through the heavy-hit path — contact pause, impact frame and
+   * a launch — for 90 damage.
+   */
+  private castPrismaBig() {
+    const b = this.prismaBig;
+    if (!b) return;
+    this.prismaBig = null;
+    this.energy -= PRISMA.big.cost;
+    this.cooldowns[1] = 0.6;
+    const aim = this.prismaAim(false),
+      along = aim.sub(b.position).normalize(),
+      far = b.position.clone().addScaledVector(along, PRISMA.range),
+      sweep = PRISMA.big.radius * 0.6;
+    let hit = this.trace(b.position, far, true, sweep);
+    for (let n = 0; n < 4 && hit?.obstacle; n++) {
+      const contact = b.position.clone().lerp(far, hit.t);
+      const bored = this.world.pierceThin(hit.obstacle, b.position, along, contact);
+      if (!bored) {
+        this.world.damageWall(hit.obstacle, contact, along.clone().multiplyScalar(18), 1.3);
+        break;
+      }
+      this.fx.burst(bored.entry, '#dffbff', 16, 5, 0.35, 2);
+      hit = this.trace(b.position, far, true, sweep);
+    }
+    const end = hit ? b.position.clone().lerp(far, hit.t) : far;
+    b.normal.copy(along);
+    b.group.quaternion.setFromUnitVectors(FORWARD, along);
+    this.fx.prismBeam(b.position, end, PRISMA.big.radius, 0.45, true);
+    this.fx.impact(end, '#dff9ff', true, 0.75);
+    this.fx.prismShards(end, along.clone().negate(), 1.3, 14);
+    this.audio.cast(1);
+    this.audio.novaCharged();
+    this.shake = Math.max(this.shake, 0.028);
+    if (this.cameraMode === 'first') this.castKick = 1;
+    this.prismaBigCasts++;
+    if (hit?.boss)
+      this.damageBoss(
+        PRISMA.big.damage,
+        along.clone().multiplyScalar(PRISMA.big.impulse).addScaledVector(UP, 2),
+        { spell: 1, at: end, along },
+      );
+    // The spent circle hangs a moment longer, then breaks like the small ones.
+    b.age = 0;
+    b.fireAt = null;
+    b.firedAt = 0;
+    b.shatterAt = PRISMA.big.linger;
+    this.prismaCircles.push(b);
+  }
+  private dropPrismaCircle(index: number, shatter: boolean) {
+    const [c] = this.prismaCircles.splice(index, 1);
+    if (shatter) this.fx.shatterPrism(c.group, c.normal, c.group.scale.x, c.big ? 26 : 9);
+    else this.fx.discard(c.group);
+  }
+  private clearPrisma() {
+    while (this.prismaCircles.length) this.dropPrismaCircle(0, false);
+    if (this.prismaBig) {
+      this.fx.discard(this.prismaBig.group);
+      this.prismaBig = null;
+    }
+    this.prismaHoldTime = this.prismaChargeStart = 0;
+    this.prismaChimed = false;
+    this.prismaLastAngle = null;
+  }
+  /** Materialise, spin, fire and shatter the circles; grow and pulse the charging one. */
+  private updatePrisma(dt: number) {
+    for (let i = this.prismaCircles.length - 1; i >= 0; i--) {
+      const c = this.prismaCircles[i];
+      c.age += dt;
+      if (c.age < 0) continue;
+      c.group.visible = true;
+      if (!c.big) {
+        // Snaps up with a small overshoot, flicking round fast as it forms, then drifting.
+        const appear = Math.min(1, c.age / 0.09),
+          ease = appear * (2 - appear),
+          overshoot = 1 + 0.14 * Math.sin(Math.min(1, c.age / 0.16) * Math.PI);
+        c.group.scale.setScalar(c.radius * (0.35 + 0.65 * ease) * overshoot);
+        c.spin += dt * (c.fireAt === null ? 1.8 : 9 - 6 * ease);
+      } else c.spin += dt * 2.5;
+      if (c.fireAt !== null && c.age >= c.fireAt) {
+        c.fireAt = null;
+        c.firedAt = c.age;
+        this.firePrismaBeam(c);
+      }
+      // Dims as it hangs spent; the lens flares as the beam leaves.
+      const spent = c.firedAt === null ? 1 : Math.max(0, 1 - c.age / c.shatterAt),
+        flash = c.firedAt === null ? 0 : Math.max(0, 1 - (c.age - c.firedAt) / 0.14);
+      this.fx.spinPrism(
+        c.group,
+        c.spin,
+        0.45 + 0.55 * spent + flash * 0.7,
+        (c.firedAt === null ? 0.6 : 0.9) + flash * 1.2,
+      );
+      if (c.age >= c.shatterAt) this.dropPrismaCircle(i, true);
+    }
+    const b = this.prismaBig;
+    if (b) {
+      b.age += dt;
+      const { progress, charged } = this.heldSpell();
+      const pulse = charged ? 1 + 0.06 * Math.sin(this.time * 20) : 1;
+      b.group.scale.setScalar(b.radius * (0.3 + 0.7 * progress) * pulse);
+      b.spin += dt * (2 + 9 * progress);
+      this.fx.spinPrism(b.group, b.spin, 0.6 + 0.4 * progress, 0.5 + progress);
+      if (charged && !this.prismaChimed) {
+        this.prismaChimed = true;
+        this.audio.chargeReady();
+        this.fx.burst(b.position, '#fff6dc', 16, 2.2, 0.3, 1);
+      }
+    }
+  }
   /**
    * Where a hit lands on screen, for the floating damage number: position in 0..1 (y down)
    * and the direction the hit travels in, projected. Null when the point is behind the camera.
@@ -2816,6 +3147,9 @@ export class Game {
       scenario: (name: string) => {
         const scenario = SCENARIOS[name] ?? {};
         this.start(false);
+        this.prismaRandom = seededRandom(4242);
+        this.prismaLastAngle = null;
+        this.prismaBeams = this.prismaBigCasts = this.novaChargedCasts = 0;
         this.testIdleBoss = scenario.idleBoss ?? true;
         this.testInvulnerable = scenario.invulnerable ?? false;
         if (scenario.aegis === false) this.aegis.setEnabled(false);

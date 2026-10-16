@@ -13,6 +13,68 @@ export const NOVA_CHARGE = {
   launch: 1.35,
 } as const;
 
+/**
+ * Prisma. A tap raises a small prism circle at a random point on a ring around the body;
+ * a moment later the circle fires a thin beam at the aim and is left hanging where it was
+ * raised until it shatters. The button held past `holdAfter` raises one large circle ahead
+ * of the body instead, which charges for `chargeTime` and fires a heavy beam on release.
+ */
+export const PRISMA = {
+  /** Seconds from the tap to the circle starting to materialise. */
+  circleDelay: 0.05,
+  /** Seconds from the circle starting to its beam leaving (tap to hit ≈ 0.17 s). */
+  beamDelay: 0.12,
+  /** Seconds the circle hangs after its beam before shattering. */
+  linger: 0.55,
+  /** The ring around the body centre the small circles are raised on, in metres. */
+  ring: { min: 1.0, max: 2.2 },
+  /** From the eyes the ring sits ahead of the view, tighter so it stays in frame. */
+  eyeRing: { min: 0.7, max: 1.3, depth: 2.0 },
+  /** Radians between consecutive circle angles, so a volley spreads around the body. */
+  minTurn: 0.9,
+  /** Seconds of holding before the large circle begins (a tap never shows it). */
+  holdAfter: 0.22,
+  /** Seconds for the large circle to charge once begun. */
+  chargeTime: 0.6,
+  range: 70,
+  circleRadius: 0.5,
+  beamRadius: 0.06,
+  /** The heavy beam of the large circle. Damage is spent through the heavy-hit path. */
+  big: { damage: 90, cost: 20, radius: 0.5, circleRadius: 1.15, impulse: 12, linger: 0.4 },
+} as const;
+
+/** The shortest angular distance between two directions on the ring. */
+export function ringDistance(a: number, b: number) {
+  const d = Math.abs(a - b) % (Math.PI * 2);
+  return d > Math.PI ? Math.PI * 2 - d : d;
+}
+
+/**
+ * Where the next small circle goes on the ring: a random angle, re-drawn until it lies at
+ * least `minTurn` away from the previous one, so a quick volley wreathes the body instead of
+ * stacking circles.
+ */
+export function prismaAngle(random: () => number, previous: number | null): number {
+  let angle = random() * Math.PI * 2;
+  for (let i = 0; i < 8 && previous !== null && ringDistance(angle, previous) < PRISMA.minTurn; i++)
+    angle = random() * Math.PI * 2;
+  if (previous !== null && ringDistance(angle, previous) < PRISMA.minTurn)
+    angle = previous + Math.PI;
+  return angle % (Math.PI * 2);
+}
+
+/**
+ * The state of a held Prisma: nothing before `holdAfter` (that is a tap), then the charge of
+ * the large circle, which is ready once full and affordable.
+ */
+export function prismaHold(hold: number, energy: number, began: number = PRISMA.holdAfter) {
+  const charging = hold >= PRISMA.holdAfter;
+  const progress = charging
+    ? Math.max(0, Math.min(1, (hold - Math.max(began, PRISMA.holdAfter)) / PRISMA.chargeTime))
+    : 0;
+  return { charging, progress, charged: progress >= 1 && energy >= PRISMA.big.cost };
+}
+
 /** The state of a held Nova: how charged it is and what a release right now would do. */
 export function novaCharge(hold: number, energy: number, baseCost: number) {
   const progress = Math.max(0, Math.min(1, hold / NOVA_CHARGE.time));

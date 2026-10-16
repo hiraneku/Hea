@@ -42,11 +42,11 @@ export const SPELLS = [
   { name: 'BARA', subtitle: 'Proyektil api', color: '#ff8b54', cost: 7, cooldown: 0.3, damage: 36 },
   {
     name: 'PRISMA',
-    subtitle: 'Tombak cahaya',
+    subtitle: 'Lingkaran cahaya',
     color: '#8cedf7',
-    cost: 15,
-    cooldown: 0.65,
-    damage: 58,
+    cost: 2,
+    cooldown: 0.3,
+    damage: 15,
   },
   { name: 'NOVA', subtitle: 'Ledakan area', color: '#e5eacb', cost: 30, cooldown: 1.7, damage: 86 },
 ] as const;
