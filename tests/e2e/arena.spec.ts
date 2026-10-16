@@ -82,6 +82,45 @@ test('one-boss menu, settings, guide, reference and live demo', async ({ page })
   expect(errors).toEqual([]);
 });
 
+test('a slow machine loses resolution before it loses its shadows', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page);
+  await page.locator('#settings-button').click();
+  await page.locator('#quality').selectOption('high');
+  await page.locator('#panel-done').click();
+  // Freeze the duel: the live loop would keep feeding the ladder, and this test drives it by hand.
+  await scenario(page, 'nova');
+  const perf = () => page.evaluate(() => window.__HEA_DEBUG__.diagnostics().perf);
+  const windows = (ms: number, count: number, reset = false) =>
+    page.evaluate(
+      ({ ms, count, reset }) => window.__HEA_DEBUG__.harness!.frameBudget(ms, count, reset),
+      { ms, count, reset },
+    );
+  // The machine running this test is slow enough to have moved the ladder already, so start from
+  // the top rung on purpose and watch it from there.
+  await windows(0, 0, true);
+  const start = await perf();
+  expect(start.adaptiveStep).toBe(0);
+  // Frames wobbling around 60 fps must not move the ladder.
+  await windows(16, 6);
+  expect((await perf()).adaptiveStep).toBe(0);
+  // A machine that cannot hold 60 fps gives up pixels first: the ratio drops while the tier
+  // — shadows, bloom — stays exactly where the player put it.
+  await windows(35, 4);
+  const late = await perf();
+  expect(late.adaptiveStep).toBeGreaterThan(0);
+  expect(late.resolutionScale).toBeLessThan(1);
+  expect(late.pixelRatio).toBeLessThan(start.pixelRatio);
+  expect(late.shadows).toBe(true);
+  expect(late.bloom).toBe(true);
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().lowQuality)).toBe(false);
+  // Headroom is given straight back, one rung at a time.
+  await windows(8, 24);
+  const recovered = await perf();
+  expect(recovered.adaptiveStep).toBeLessThan(late.adaptiveStep);
+  expect(recovered.pixelRatio).toBeGreaterThan(late.pixelRatio);
+});
+
 test('desktop controls: flight, dash, focus, shooting, pause and reset', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop');
   const errors: string[] = [];

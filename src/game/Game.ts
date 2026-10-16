@@ -7,6 +7,15 @@ import { Controls } from './Controls';
 import { ImpactFrame } from './ImpactFrame';
 import { AudioEngine } from './Audio';
 import { Effects, Ribbon, makeSigil } from './Effects';
+import {
+  PIXEL_BUDGET,
+  RESOLUTION_LADDER,
+  adaptiveNext,
+  adaptiveStart,
+  resolutionScale,
+  startStep,
+  type AdaptiveState,
+} from './adaptive';
 import { World, contactShadowTexture } from './World';
 import { Boss } from './Boss';
 import { BossNavigator } from './BossNavigation';
@@ -301,7 +310,10 @@ export class Game {
   private renderTime = 0;
   private renderNeeded = true;
   private lowQuality = false;
-  private autoResolution = 1;
+  /** The frame-time budget that walks the resolution ladder (see adaptive.ts). */
+  private adaptive: AdaptiveState = adaptiveStart();
+  /** The current rung's pixel-ratio multiplier, applied on top of the tier's full ratio. */
+  private resolutionScale: number = resolutionScale(this.adaptive);
   /** The measured frame time of the last averaging window, milliseconds (the perf HUD reads it). */
   private frameMs = 0;
   private useBloom = true;
@@ -586,6 +598,8 @@ export class Game {
     return {
       fps: this.fps,
       frameMs: this.frameMs,
+      resolutionScale: this.resolutionScale,
+      adaptiveStep: this.adaptive.step,
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
       pixelRatio: this.renderer.getPixelRatio(),
@@ -599,6 +613,8 @@ export class Game {
       perf: {
         fps: this.fps,
         frameMs: this.frameMs,
+        resolutionScale: this.resolutionScale,
+        adaptiveStep: this.adaptive.step,
         pixelRatio: this.renderer.getPixelRatio(),
         shadows: this.renderer.shadowMap.enabled,
         bloom: this.useBloom,
@@ -881,7 +897,6 @@ export class Game {
     this.audio.apply(settings);
     if (!changed) return;
     this.settingsApplied = true;
-    this.autoResolution = 1;
     this.lowQuality =
       settings.quality === 'low' || (settings.quality === 'auto' && this.controls.touch);
     this.configureQuality();
@@ -894,7 +909,7 @@ export class Game {
     this.world.setQuality(this.lowQuality);
     this.boss.setQuality(this.lowQuality);
     this.fx.quality(this.lowQuality);
-    this.resize();
+    this.resize(true);
   }
   private changeMode(mode: Mode) {
     this.mode = mode;
@@ -903,13 +918,28 @@ export class Game {
     this.controls.setEnabled(mode === 'playing' && !this.outcome);
     this.emit({ type: 'mode', mode });
   }
-  private resize() {
+  /** The tier's full pixel ratio before the adaptive ladder takes its share. */
+  private get tierRatio() {
+    const cap = this.lowQuality ? 1 : this.settings.quality === 'high' ? 2 : 1.5;
+    return Math.min(devicePixelRatio || 1, cap);
+  }
+  /** The pixel budget this tier starts from (never a ceiling: the ladder may climb past it). */
+  private get pixelBudget() {
+    return this.lowQuality
+      ? PIXEL_BUDGET.low
+      : this.settings.quality === 'high'
+        ? PIXEL_BUDGET.high
+        : PIXEL_BUDGET.auto;
+  }
+  private resize(start = false) {
     const width = innerWidth,
-      height = innerHeight,
-      ratio = Math.min(
-        devicePixelRatio || 1,
-        this.lowQuality ? this.autoResolution : this.settings.quality === 'high' ? 2 : 1.5,
-      );
+      height = innerHeight;
+    if (start) {
+      // A huge window should not open on eight million pixels and take a second to react.
+      this.adaptive.step = startStep(width, height, this.pixelBudget);
+      this.resolutionScale = resolutionScale(this.adaptive);
+    }
+    const ratio = this.tierRatio * this.resolutionScale;
     this.renderer.setPixelRatio(ratio);
     this.renderer.setSize(width, height, false);
     this.composer.setPixelRatio(ratio);
@@ -918,6 +948,18 @@ export class Game {
     this.camera.updateProjectionMatrix();
     this.fx.resize(height, ratio);
     this.renderNeeded = true;
+  }
+  /**
+   * One averaging window of frame time through the resolution ladder. Called about once a second
+   * with the measured average, and directly by the test harness so the loop can be exercised
+   * without needing a slow machine.
+   */
+  private applyFrameBudget(frameMs: number) {
+    const move = adaptiveNext(this.adaptive, frameMs);
+    this.adaptive = move.state;
+    if (!move.direction) return;
+    this.resolutionScale = resolutionScale(this.adaptive);
+    this.resize();
   }
   private tick(timestamp: number) {
     if (this.disposed) return;
@@ -933,17 +975,15 @@ export class Game {
       this.frameMs = (this.frameTime / Math.max(1, this.frames)) * 1000;
       this.frames = this.frameTime = 0;
       // The particle budget follows the real frame rate (not under the stepped test harness).
-      if (!this.manualSimulation && this.renderTime > 2) this.fx.load(this.fps);
-      if (this.settings.quality === 'auto' && this.lowQuality && this.renderTime > 5) {
-        this.slowFrames = this.fps < 26 ? this.slowFrames + 1 : 0;
-        if (this.slowFrames >= 4 && this.autoResolution > 0.75) {
-          this.autoResolution = Math.max(0.75, this.autoResolution - 0.125);
-          this.slowFrames = 0;
-          this.resize();
-        }
+      if (!this.manualSimulation && this.renderTime > 2) {
+        this.fx.load(this.fps);
+        this.applyFrameBudget(this.frameMs);
       }
+      // Only when the ladder itself is out of room does the tier give up shadows and bloom, and
+      // only on Otomatis: Tinggi and Ringan are the player's explicit choice and stay put.
+      const floored = this.adaptive.step === RESOLUTION_LADDER.length - 1;
       if (this.settings.quality === 'auto' && !this.lowQuality && this.renderTime > 4) {
-        this.slowFrames = this.fps < 28 ? this.slowFrames + 1 : 0;
+        this.slowFrames = this.fps < 28 && floored ? this.slowFrames + 1 : 0;
         if (this.slowFrames >= 3) {
           this.lowQuality = true;
           this.configureQuality();
@@ -3379,6 +3419,18 @@ export class Game {
     return {
       freeze: (value: boolean) => {
         this.manualSimulation = value;
+      },
+      /**
+       * Feed the resolution ladder a frame time, as one averaging window would. `reset` puts it
+       * back on the top rung first, so a test can watch the ladder from a known place even when
+       * the machine running the test is slow enough to have moved it already.
+       */
+      frameBudget: (frameMs: number, windows = 1, reset = false) => {
+        if (reset) {
+          this.adaptive = adaptiveStart();
+          this.resize(true);
+        }
+        for (let i = 0; i < windows; i++) this.applyFrameBudget(frameMs);
       },
       step: (seconds: number) => {
         for (let left = Math.min(30, Math.max(0, seconds)); left > 1e-8; left -= 1 / 60)
