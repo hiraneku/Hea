@@ -52,7 +52,17 @@ test('one-boss menu, settings, guide, reference and live demo', async ({ page })
   await page.locator('#settings-button').click();
   await page.locator('#quality').selectOption('high');
   await page.locator('#quality').selectOption('low');
+  // The performance readout is opt-in: off, the clock line is just the frame rate; on, it
+  // carries the measured frame time, the draw calls and the render scale.
+  await expect(page.locator('#hud-fps')).toHaveText(/^\d+ FPS$/);
+  await page.locator('#perf-hud').check();
+  await expect(page.locator('#hud-fps')).toHaveText(/\d+ MS · \d+ DC · \d+K TRI · ×[\d.]+$/);
+  await page.locator('#perf-hud').uncheck();
+  await expect(page.locator('#hud-fps')).toHaveText(/^\d+ FPS$/);
   await page.locator('#panel-done').click();
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('hea-settings')!).perfHud)).toBe(
+    false,
+  );
   await page.locator('#help-button').click();
   await expect(page.getByRole('dialog')).toContainText('Aegis');
   await expect(page.getByRole('dialog')).not.toContainText(/gelombang/i);

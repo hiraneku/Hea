@@ -17,6 +17,8 @@ export interface Settings {
   fovFirst: number;
   /** How far behind the body the chase camera rests, metres. */
   cameraDistance: number;
+  /** Show frame time, draw calls and render scale beside the clock, for judging performance. */
+  perfHud: boolean;
 }
 
 /** The ranges the camera sliders cover (also the clamps applied to stored values). */
@@ -36,6 +38,7 @@ export const DEFAULT_SETTINGS: Settings = {
   fovThird: 74,
   fovFirst: 82,
   cameraDistance: 6.2,
+  perfHud: false,
 };
 
 export const SPELLS = [
@@ -157,6 +160,7 @@ export function readSettings(): Settings {
         CAMERA_RANGES.cameraDistance,
         fallback.cameraDistance,
       ),
+      perfHud: typeof raw.perfHud === 'boolean' ? raw.perfHud : fallback.perfHud,
     };
   } catch {
     return fallback;

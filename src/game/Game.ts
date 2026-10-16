@@ -302,6 +302,8 @@ export class Game {
   private renderNeeded = true;
   private lowQuality = false;
   private autoResolution = 1;
+  /** The measured frame time of the last averaging window, milliseconds (the perf HUD reads it). */
+  private frameMs = 0;
   private useBloom = true;
   private shake = 0;
   private damageTimer = 10;
@@ -576,10 +578,35 @@ export class Game {
       aimTarget: this.aiming,
     };
   }
+  /**
+   * The few numbers the performance readout needs, gathered without building the whole
+   * diagnostics object every frame (that object allocates arrays, and the HUD is per-frame).
+   */
+  get perfStats() {
+    return {
+      fps: this.fps,
+      frameMs: this.frameMs,
+      drawCalls: this.renderer.info.render.calls,
+      triangles: this.renderer.info.render.triangles,
+      pixelRatio: this.renderer.getPixelRatio(),
+      density: this.fx.particleDensity,
+    };
+  }
   get diagnostics() {
     return {
       drawCalls: this.renderer.info.render.calls,
       triangles: this.renderer.info.render.triangles,
+      perf: {
+        fps: this.fps,
+        frameMs: this.frameMs,
+        pixelRatio: this.renderer.getPixelRatio(),
+        shadows: this.renderer.shadowMap.enabled,
+        bloom: this.useBloom,
+        density: this.fx.particleDensity,
+        programs: this.renderer.info.programs?.length ?? 0,
+        points: this.renderer.info.render.points,
+        lines: this.renderer.info.render.lines,
+      },
       projectiles: this.projectiles.length,
       lowQuality: this.lowQuality,
       geometries: this.renderer.info.memory.geometries,
@@ -903,6 +930,7 @@ export class Game {
     this.renderTime += rawDt;
     if (this.frameTime >= 0.75) {
       this.fps = Math.round(this.frames / this.frameTime);
+      this.frameMs = (this.frameTime / Math.max(1, this.frames)) * 1000;
       this.frames = this.frameTime = 0;
       // The particle budget follows the real frame rate (not under the stepped test harness).
       if (!this.manualSimulation && this.renderTime > 2) this.fx.load(this.fps);

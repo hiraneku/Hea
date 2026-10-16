@@ -343,6 +343,12 @@ describe('camera settings', () => {
     );
     expect(DEFAULT_SETTINGS.cameraDistance).toBeLessThanOrEqual(CAMERA_RANGES.cameraDistance.max);
   });
+  it('reads the performance readout flag, defaulting to off', () => {
+    storage.set('hea-settings', JSON.stringify({ perfHud: true }));
+    expect(readSettings().perfHud).toBe(true);
+    storage.set('hea-settings', JSON.stringify({ perfHud: 'yes' }));
+    expect(readSettings().perfHud).toBe(false);
+  });
   it('reads stored values, clamps them to the sliders and ignores junk', () => {
     storage.set('hea-settings', JSON.stringify({ fovThird: 88, fovFirst: 999, cameraDistance: 1 }));
     let s = readSettings();

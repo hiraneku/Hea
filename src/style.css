@@ -1013,6 +1013,17 @@ kbd {
   width: 2px;
   background: #c6d4c5;
 }
+/* With the perf readout on the line grows: keep it off the arena's centre and let it breathe. */
+.session-info.verbose {
+  bottom: 8px;
+  right: 14px;
+  gap: 8px;
+  opacity: 0.82;
+}
+.session-info.verbose #hud-fps {
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.4px;
+}
 #touch-controls {
   position: absolute;
   inset: 0;

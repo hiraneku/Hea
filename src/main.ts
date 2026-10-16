@@ -341,7 +341,8 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       <div class="settings-row slider-row"><div><label for="fov-first">Bidang pandang · orang pertama</label><b id="fov-first-label">${Math.round(settings.fovFirst)}°</b></div><input id="fov-first" type="range" min="${CAMERA_RANGES.fovFirst.min}" max="${CAMERA_RANGES.fovFirst.max}" step="1" value="${settings.fovFirst}" /></div>
       <div class="settings-row slider-row"><div><label for="camera-distance">Jarak kamera pengejar</label><b id="camera-distance-label">${settings.cameraDistance.toFixed(1)} m</b></div><input id="camera-distance" type="range" min="${CAMERA_RANGES.cameraDistance.min}" max="${CAMERA_RANGES.cameraDistance.max}" step="0.1" value="${settings.cameraDistance}" /></div>
       <div class="settings-row"><div><label for="comfort">Efek nyaman</label><p>Kurangi kilatan, goyangan kamera,<br>dan perubahan bidang pandang.</p></div><label class="switch"><input id="comfort" type="checkbox" ${settings.reducedEffects ? 'checked' : ''} aria-label="Efek nyaman"/><span></span></label></div>
-      <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render.</p>
+      <div class="settings-row"><div><label for="perf-hud">Statistik performa</label><p>Waktu frame, draw call, dan skala render<br>di samping jam pertandingan.</p></div><label class="switch"><input id="perf-hud" type="checkbox" ${settings.perfHud ? 'checked' : ''} aria-label="Statistik performa"/><span></span></label></div>
+      <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render. Statistik performa membantu menakar apakah perangkatmu menjaga 60 FPS.</p>
       <button class="primary-button full-width" id="panel-done"><span>SIMPAN & KEMBALI</span>${icons.arrow}</button>`;
   } else if (type === 'reference') {
     content = `<div class="control-tabs"><button id="reference-one">REFERENSI 1</button><button id="reference-two" class="active">REFERENSI 2</button></div><video class="reference-video" src="${reference2Url}" controls playsinline autoplay muted loop preload="metadata" aria-label="Video referensi asli dari repositori"></video><p class="panel-note">Referensi 2 dari repo, 11,75 detik: kepingan shield heksagonal dan rentetan api. Referensi 1 tetap tersedia. Pilihan fisika dan timing yang tidak terlihat di video tetap berupa tuning prototipe.</p>`;
@@ -397,6 +398,10 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       settings.volume = Number((e.target as HTMLInputElement).value);
       $('#volume-label').textContent = `${Math.round(settings.volume * 100)}%`;
       game.audio.unlock();
+      applySettings();
+    };
+    $<HTMLInputElement>('#perf-hud').onchange = (e) => {
+      settings.perfHud = (e.target as HTMLInputElement).checked;
       applySettings();
     };
     $<HTMLInputElement>('#sound-toggle').onchange = (e) => {
@@ -525,7 +530,13 @@ function updateHud(s: Snapshot) {
   $('#reticle').classList.toggle('on-target', s.aimTarget);
   $('#reticle').classList.toggle('shielding', s.shield.phase === 'active');
   $('#session-time').textContent = timeLabel(s.elapsed);
-  $('#hud-fps').textContent = `${s.fps} FPS`;
+  // With the perf readout on, the clock line carries what the frame actually cost: the average
+  // frame time, the draw calls it took, and the render scale the adaptive resolution settled on.
+  const perf = game.perfStats;
+  $('#hud-fps').textContent = settings.perfHud
+    ? `${perf.fps} FPS · ${perf.frameMs.toFixed(1)} MS · ${perf.drawCalls} DC · ${(perf.triangles / 1000).toFixed(0)}K TRI · ×${perf.pixelRatio.toFixed(2)}`
+    : `${s.fps} FPS`;
+  $('.session-info').classList.toggle('verbose', settings.perfHud);
   $('#menu-fps').textContent = String(s.fps);
   const fast = (s.flight.speed > 25.5 || s.launched) && s.mode === 'playing';
   dressing.fast = fast && !settings.reducedEffects && s.mode === 'playing';
