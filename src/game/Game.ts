@@ -7,6 +7,7 @@ import { Controls } from './Controls';
 import { ImpactFrame } from './ImpactFrame';
 import { AudioEngine } from './Audio';
 import { Effects, Ribbon, makeSigil } from './Effects';
+import { AvatarModel, avatarReport } from './Avatar';
 import {
   PIXEL_BUDGET,
   RESOLUTION_LADDER,
@@ -271,6 +272,12 @@ export class Game {
   private prismaCircles: PrismaCircle[] = [];
   /** Distance walked since the last footfall, metres. */
   private stride = 0;
+  /** The articulated silhouette riding the collision box, and whether it has arrived. */
+  private avatarModel!: AvatarModel;
+  /** Whether the box's own faces have been retired in favour of the model. */
+  private skinRetired = false;
+  /** Whether the body is resting on the floor this frame: jumping and falling count as airborne. */
+  private onGround = true;
   private prismaBig: PrismaCircle | null = null;
   private prismaHoldTime = 0;
   private prismaChargeStart = 0;
@@ -447,6 +454,10 @@ export class Game {
     face.rotation.y = Math.PI;
     this.avatar.add(face);
     this.scene.add(this.avatar, this.playerTrail.mesh);
+    // An articulated body riding the same transform as the physics box: the box keeps the
+    // collisions, the model supplies the silhouette and the animation.
+    this.avatarModel = new AvatarModel(this.avatar);
+    void this.avatarModel.load();
     this.ragdoll = new Ragdoll(this.scene, this.avatar.material as THREE.Material);
     const world = this.world;
     this.ragdollSurface = {
@@ -634,6 +645,7 @@ export class Game {
       camera: { yaw: this.yaw, pitch: this.pitch },
       cameraPosition: this.camera.position.toArray(),
       avatarVisible: this.avatar.visible,
+      avatarModel: avatarReport(this.avatarModel),
       nova: {
         hold: this.novaHold,
         holding: this.novaHolding,
@@ -1160,6 +1172,7 @@ export class Game {
       this.world.surfaceHeight(this.player.x, this.player.z),
     );
     const grounded = this.player.y <= floor + 0.045;
+    this.onGround = grounded;
     this.footsteps(grounded);
     const physical = this.playerTumble.physical;
     if (this.playerWasPhysical && !physical && !grounded && !this.flightEnabled) {
@@ -1745,6 +1758,26 @@ export class Game {
     }
     const first = this.cameraMode === 'first';
     this.avatar.visible = !this.ragdoll.active && !first;
+    if (this.avatarModel.ready && !this.skinRetired) {
+      // The box stays as the transform root, but its own faces are retired once the model stands
+      // on it. The material is swapped rather than hidden in place: the ragdoll shares the
+      // original instance, and hiding that would take the jointed body with it.
+      this.skinRetired = true;
+      const retired = (this.avatar.material as THREE.MeshStandardMaterial).clone();
+      retired.visible = false;
+      this.avatar.material = retired;
+      this.avatar.castShadow = false;
+      this.avatar.children.forEach((child) => {
+        if (child !== this.avatarModel.group) child.visible = false;
+      });
+    }
+    if (this.avatarModel.ready) {
+      this.avatarModel.update(dt, {
+        speed: this.velocity.length() + this.airDash.velocity.length(),
+        airborne: this.flightEnabled || this.knockTime > 0 || !this.onGround,
+        dead: this.health <= 0 || this.outcome === 'gameover',
+      });
+    }
     // From the eyes the ribbon would only ever smear across the lower edge of the view.
     this.playerTrail.mesh.visible = !first;
     // A body dragged along the ground leaves a furrow, not a light trail.

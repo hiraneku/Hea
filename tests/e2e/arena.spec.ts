@@ -1707,6 +1707,42 @@ test('the charging lance shows where it is pointed, and a refused cast dips its 
   expect((await state(page)).energy).toBeLessThan(ready);
 });
 
+test('the avatar model stands on the collision box and follows what the body does', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page);
+  await scenario(page, 'walk');
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([0, 0.05, 20], [0, 4, -20]);
+    h.face(0, 0);
+    h.step(0.05);
+  });
+  const model = () => page.evaluate(() => window.__HEA_DEBUG__.diagnostics().avatarModel);
+  await expect.poll(async () => (await model()).ready, { timeout: 30_000 }).toBe(true);
+  const loaded = await model();
+  // The asset is scaled to the body it rides, and stood on the box's own floor.
+  expect(loaded.height).toBeGreaterThan(1.2);
+  expect(loaded.height).toBeLessThan(1.9);
+  expect(loaded.offset).toBeLessThan(-0.3);
+  expect(loaded.clips).toEqual(expect.arrayContaining(['idle', 'walk', 'run', 'air', 'dead']));
+  // Standing still it idles; walking it walks; in the air it is airborne.
+  expect(loaded.pose).toBe('idle');
+  for (let i = 0; i < 24; i++) {
+    await page.keyboard.down('KeyW');
+    await step(page, 1 / 20);
+  }
+  await page.keyboard.up('KeyW');
+  expect((await model()).pose).toBe('walk');
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([0, 9, 20], [0, 4, -20]);
+    h.step(0.2);
+  });
+  expect((await model()).pose).toBe('air');
+});
+
 test('from the eyes Prisma raises its circles ahead of the view', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop');
   await load(page);
