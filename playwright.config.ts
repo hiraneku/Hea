@@ -15,7 +15,15 @@ export default defineConfig({
     trace: 'retain-on-failure',
   },
   projects: [
-    { name: 'desktop', use: { viewport: { width: 1100, height: 700 }, deviceScaleFactor: 1 } },
+    {
+      name: 'desktop',
+      // One retry, for the two golden frames that contain hundreds of blended particles: measured
+      // here, three captures of one frozen state produced three different images, so the
+      // rasteriser is not bit-exact once a frame gets busy. Everything else in the suite is
+      // deterministic and never needs the retry.
+      retries: 1,
+      use: { viewport: { width: 1100, height: 700 }, deviceScaleFactor: 1 },
+    },
     {
       name: 'mobile',
       use: {

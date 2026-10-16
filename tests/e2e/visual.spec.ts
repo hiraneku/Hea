@@ -70,6 +70,10 @@ async function scene(page: Page, name: string) {
     const h = window.__HEA_DEBUG__.harness!;
     h.freeze(true);
     h.scenario(name);
+    // Golden frames are rendered at the tier's full resolution: the adaptive ladder is fed by the
+    // live loop, so on a slow machine it would have dropped a rung or two by now and every
+    // golden would depend on how long the machine took to get here.
+    h.frameBudget(0, 0, true);
   }, name);
 }
 const canvas = (page: Page) => page.locator('#arena');
