@@ -17,38 +17,7 @@ const GROUND_MISS = { fire: 0.8, missile: 1, hammer: 3.2, vortex: 3.2, player: 0
 import { DestructibleVolume, TerrainDeformation, type Cell } from './destruction';
 import { seededRandom, firstSolidSpan, type Obstacle } from './math';
 import { gridCell, warpAxis } from './terrainGrid';
-
-function gridTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 256;
-  const c = canvas.getContext('2d')!;
-  c.fillStyle = '#b1b3b1';
-  c.fillRect(0, 0, 256, 256);
-  const random = seededRandom(88);
-  for (let i = 0; i < 10000; i++) {
-    c.fillStyle = `rgba(${random() > 0.5 ? '255,255,255' : '20,25,30'},${random() * 0.032})`;
-    c.fillRect(random() * 256, random() * 256, 1, 1);
-  }
-  c.strokeStyle = '#a1a5a5';
-  c.lineWidth = 0.8;
-  for (let i = 0; i < 256; i += 32) {
-    c.beginPath();
-    c.moveTo(i + 0.5, 0);
-    c.lineTo(i + 0.5, 256);
-    c.moveTo(0, i + 0.5);
-    c.lineTo(256, i + 0.5);
-    c.stroke();
-  }
-  c.strokeStyle = '#8e979a';
-  c.lineWidth = 1;
-  c.strokeRect(0.5, 0.5, 256, 256);
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(162, 162);
-  texture.anisotropy = 4;
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
+import { concreteSurface, stoneSurface, triplanarMaterial } from './materials';
 
 function skyTexture(): THREE.CanvasTexture {
   const canvas = document.createElement('canvas');
@@ -127,6 +96,14 @@ export class World {
     fragments?: THREE.InstancedMesh;
   }[] = [];
   private fixedObstacles: Obstacle[] = [];
+  /** Parapets and floor bands, with the buildings they belong to and the pose of each piece: a
+   *  broken host scales its pieces away, and an arena reset stamps them back. */
+  private trimBatches: {
+    mesh: THREE.InstancedMesh;
+    ids: number[];
+    poses: THREE.Matrix4[];
+    hidden: boolean;
+  }[] = [];
   private sky: THREE.Mesh;
   private ground: THREE.Mesh<THREE.PlaneGeometry, THREE.MeshStandardMaterial>;
   private fragmentStamp = new THREE.Object3D();
@@ -167,11 +144,19 @@ export class World {
     this.sun.shadow.radius = 2.5;
     scene.add(this.sun, this.sun.target);
     this.focusShadow(new THREE.Vector3());
+    // The floor is one shared surface: a slab albedo with its joints carved into a normal map, so
+    // the sun rakes across the plaza instead of washing it flat. The survey grid that has always
+    // given this ground its scale is drawn inside the slab pattern.
+    const plaza = stoneSurface();
     const floor = new THREE.MeshStandardMaterial({
-      map: gridTexture(),
+      map: plaza.map.clone(),
+      normalMap: plaza.normalMap,
+      roughnessMap: plaza.roughnessMap,
       roughness: 1,
       metalness: 0,
+      normalScale: new THREE.Vector2(0.65, 0.65),
     });
+    floor.map!.repeat.set(162, 162);
     const outer = new THREE.Shape(),
       span = 650;
     outer.moveTo(-span, -span);
@@ -199,8 +184,9 @@ export class World {
     outerGround.rotation.x = -Math.PI / 2;
     outerGround.receiveShadow = true;
     scene.add(outerGround);
-    const innerMap = gridTexture();
+    const innerMap = plaza.map.clone();
     innerMap.repeat.set(ARENA.terrainHalf / 4, ARENA.terrainHalf / 4);
+    innerMap.needsUpdate = true;
     const terrainGeometry = new THREE.PlaneGeometry(
       ARENA.terrainHalf * 2,
       ARENA.terrainHalf * 2,
@@ -222,20 +208,47 @@ export class World {
     }
     this.ground = new THREE.Mesh(
       terrainGeometry,
-      new THREE.MeshStandardMaterial({ map: innerMap, roughness: 1, vertexColors: true }),
+      new THREE.MeshStandardMaterial({
+        map: innerMap,
+        normalMap: plaza.normalMap,
+        roughnessMap: plaza.roughnessMap,
+        normalScale: new THREE.Vector2(0.7, 0.7),
+        roughness: 1,
+        vertexColors: true,
+      }),
     );
     const colors = new Float32Array(this.ground.geometry.attributes.position.count * 3).fill(1);
     this.ground.geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
     this.ground.rotation.x = -Math.PI / 2;
     this.ground.receiveShadow = true;
     scene.add(this.ground);
-    const material = new THREE.MeshStandardMaterial({
+    // Three tones, one surface: board-formed concrete sampled in world space, so a 6 m cover wall
+    // and a 44 m tower carry the same grain and the same dirt at their feet.
+    const concrete = concreteSurface();
+    const material = triplanarMaterial({
+      surface: concrete,
       color: '#929695',
       roughness: 0.9,
       metalness: 0.035,
+      grime: 0.5,
+      grimeHeight: 3.4,
     });
-    const dark = new THREE.MeshStandardMaterial({ color: '#515d69', roughness: 0.92 });
-    const light = new THREE.MeshStandardMaterial({ color: '#a7aaa8', roughness: 0.9 });
+    const dark = triplanarMaterial({
+      surface: concrete,
+      color: '#515d69',
+      roughness: 0.93,
+      metalness: 0.02,
+      grime: 0.42,
+      grimeHeight: 2.8,
+    });
+    const light = triplanarMaterial({
+      surface: concrete,
+      color: '#a7aaa8',
+      roughness: 0.89,
+      metalness: 0.03,
+      grime: 0.55,
+      grimeHeight: 3.8,
+    });
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const block = (
       x: number,
@@ -354,6 +367,7 @@ export class World {
       skyline.setMatrixAt(i, tower.matrix);
     }
     scene.add(skyline);
+    this.addTrims(scene, material, light);
     const ring = new THREE.Mesh(
       new THREE.RingGeometry(ARENA.halfSize - 0.4, ARENA.halfSize - 0.25, 192),
       new THREE.MeshBasicMaterial({
@@ -423,6 +437,49 @@ export class World {
     scene.add(this.contactShadows);
     this.updateContactShadows();
   }
+  /**
+   * A parapet on every monolith and a floor band on every other one: two instanced draws of thin
+   * boxes that give the blocks a storey rhythm and, more usefully, something of known size to read
+   * the arena against from across the plaza.
+   */
+  private addTrims(
+    scene: THREE.Scene,
+    material: THREE.MeshStandardMaterial,
+    light: THREE.MeshStandardMaterial,
+  ) {
+    const geometry = new THREE.BoxGeometry(1, 1, 1),
+      stamp = new THREE.Object3D();
+    const bands = [
+      { tone: material, height: 0.5, depth: 0.34, every: 1 },
+      { tone: light, height: 0.22, depth: 0.2, every: 2 },
+    ];
+    for (const band of bands) {
+      const ids = this.buildings.flatMap((_, i) => (i % band.every === 0 ? [i] : [])),
+        mesh = new THREE.InstancedMesh(geometry, band.tone, ids.length),
+        poses: THREE.Matrix4[] = [];
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.castShadow = mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      ids.forEach((id, i) => {
+        const bounds = this.buildings[id].volume.bounds,
+          w = bounds.maxX - bounds.minX + band.depth * 2,
+          d = bounds.maxZ - bounds.minZ + band.depth * 2;
+        stamp.position.set(
+          (bounds.minX + bounds.maxX) / 2,
+          bounds.top - band.height * 0.5,
+          (bounds.minZ + bounds.maxZ) / 2,
+        );
+        stamp.rotation.set(0, 0, 0);
+        stamp.scale.set(w, band.height, d);
+        stamp.updateMatrix();
+        mesh.setMatrixAt(i, stamp.matrix);
+        poses.push(stamp.matrix.clone());
+      });
+      mesh.instanceMatrix.needsUpdate = true;
+      scene.add(mesh);
+      this.trimBatches.push({ mesh, ids, poses, hidden: false });
+    }
+  }
   private updateIntactBatches() {
     const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
     for (const batch of this.intactBatches) {
@@ -430,6 +487,13 @@ export class World {
         const b = this.buildings[id];
         batch.mesh.setMatrixAt(i, b.volume.damaged ? hidden : b.mesh.matrixWorld);
       });
+      batch.mesh.instanceMatrix.needsUpdate = true;
+    }
+    for (const batch of this.trimBatches) {
+      const damaged = batch.ids.some((id) => this.buildings[id].volume.damaged);
+      if (damaged === batch.hidden) continue;
+      batch.hidden = damaged;
+      batch.ids.forEach((_, i) => batch.mesh.setMatrixAt(i, damaged ? hidden : batch.poses[i]));
       batch.mesh.instanceMatrix.needsUpdate = true;
     }
   }

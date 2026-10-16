@@ -22,6 +22,8 @@ import { BossNavigator } from './BossNavigation';
 import { BOSS_MOTOR } from './BossTactics';
 import { ShieldPatchRegistry } from './ShieldPatches';
 import { SCENARIOS } from './TestScenarios';
+// Inside the plaza's ring the floor is laid slabs; beyond it, the grit of the outer ground.
+import { PLAZA_RADIUS } from './layout';
 import {
   AutoShield,
   ATTACKS,
@@ -267,6 +269,8 @@ export class Game {
   private chargeSigil?: THREE.Group;
   /** Prisma: the circles hanging in the world, the large one while it charges, the hold. */
   private prismaCircles: PrismaCircle[] = [];
+  /** Distance walked since the last footfall, metres. */
+  private stride = 0;
   private prismaBig: PrismaCircle | null = null;
   private prismaHoldTime = 0;
   private prismaChargeStart = 0;
@@ -911,6 +915,28 @@ export class Game {
     this.fx.quality(this.lowQuality);
     this.resize(true);
   }
+  /**
+   * Footfalls: while the body is on the ground and moving, each stride's worth of distance fires
+   * one step, so the rhythm follows the speed rather than a timer. The surface is read from where
+   * the player is — the plaza's slabs inside its ring, the grit out past it.
+   */
+  private footsteps(grounded: boolean) {
+    if (!grounded || this.manualSimulation) {
+      this.stride = 0;
+      return;
+    }
+    const speed = this.velocity.length();
+    if (speed < 1.2) {
+      this.stride = 0;
+      return;
+    }
+    this.stride += speed / 60;
+    if (this.stride < 0.78) return;
+    this.stride = 0;
+    const distance = Math.hypot(this.player.x, this.player.z);
+    this.audio.step(distance > PLAZA_RADIUS ? 'grit' : 'stone', Math.min(1.2, speed / 9));
+  }
+
   private changeMode(mode: Mode) {
     this.mode = mode;
     this.modeTime = 0;
@@ -991,6 +1017,10 @@ export class Game {
       }
     }
     if (!this.manualSimulation) this.simulate(Math.max(0, rawDt));
+    // The ears sit on the camera: placed cues then pan around the player as they turn, which is
+    // how a boss at their back becomes audible without a marker on screen.
+    this.camera.getWorldDirection(direction);
+    this.audio.listener(this.camera.position, direction);
     this.audio.update();
     this.renderer.info.reset();
     if (this.testCamera) {
@@ -1130,6 +1160,7 @@ export class Game {
       this.world.surfaceHeight(this.player.x, this.player.z),
     );
     const grounded = this.player.y <= floor + 0.045;
+    this.footsteps(grounded);
     const physical = this.playerTumble.physical;
     if (this.playerWasPhysical && !physical && !grounded && !this.flightEnabled) {
       // Mid-air recovery in walk mode hands the remaining fall to the ordinary gravity model.
@@ -1894,7 +1925,7 @@ export class Game {
         );
     for (const command of b.director.step(dt, b.enraged)) {
       if (command.type === 'tell') {
-        if (this.mode !== 'menu') this.audio.charge();
+        if (this.mode !== 'menu') this.audio.charge(this.boss.position);
         if (command.attack === 'missiles') this.bossBreakAway();
         if (command.attack === 'hammer') {
           const mark = this.player.clone();
@@ -1950,7 +1981,7 @@ export class Game {
         this.bossLane = pick.lane;
         this.breachClock = 4;
         b.lockedTarget.copy(target);
-        if (this.mode !== 'menu') this.audio.charge();
+        if (this.mode !== 'menu') this.audio.charge(this.boss.position);
         return;
       }
     }
@@ -2105,7 +2136,7 @@ export class Game {
     core.add(ring, halo, pin);
     this.wells.push({ position: at.clone(), core, age: 0, spin: 0, detonated: false });
     this.fx.burst(at, '#ff7a4a', 26, 4, 0.4, 0.5);
-    if (this.mode !== 'menu') this.audio.vortex();
+    if (this.mode !== 'menu') this.audio.vortex(this.boss.position);
   }
   private updateWells(dt: number) {
     const center = this.player.clone().addScaledVector(UP, 0.9);
@@ -2158,7 +2189,7 @@ export class Game {
     });
     this.fx.detonate(w.position, 9);
     this.shake = Math.max(this.shake, 0.03);
-    if (this.mode !== 'menu') this.audio.detonate();
+    if (this.mode !== 'menu') this.audio.detonate(this.pull);
     // A flat ring of embers: thin enough to climb or dive out of, wide enough to punish fleeing.
     const base = Math.random() * Math.PI * 2;
     for (let i = 0; i < DUEL.vortexEmbers; i++) {
@@ -2713,7 +2744,7 @@ export class Game {
       this.fx.shatterEcho(patch.serial, at, scale);
       this.shake = Math.max(this.shake, 0.014);
       if (this.mode !== 'menu') this.audio.shatter();
-    } else if (this.mode !== 'menu') this.audio.block(p.kind);
+    } else if (this.mode !== 'menu') this.audio.block(p.kind, p.last);
     this.emit({ type: 'block', direction: { x: normal.x, y: normal.y, z: normal.z } });
   }
   private contactPause(
@@ -2880,6 +2911,7 @@ export class Game {
     this.fx.prismShards(end, along.clone().negate(), 0.55, 6);
     this.audio.cast(1);
     this.prismaBeams++;
+    this.audio.beam(false, this.player);
     // The curtain of light stands on the body's own line of fire — from the chest to the aim —
     // rather than on the slanted line from the circle, so what it sweeps is the lane being
     // defended, whichever side of the body the circle was raised on.
@@ -3015,7 +3047,8 @@ export class Game {
     if (gouged > 0 || hit?.obstacle) this.fx.burst(end, '#ffffff', 20, 8, 0.3, 2);
     this.audio.cast(1);
     this.audio.novaCharged();
-    if (hit && !hit.boss) this.audio.crash(1.6);
+    this.audio.beam(true, this.player);
+    if (hit && !hit.boss) this.audio.crash(1.6, end, 'wall');
     this.shake = Math.max(this.shake, hit?.boss ? 0.028 : 0.05);
     if (this.cameraMode === 'first') this.castKick = 1;
     this.prismaBigCasts++;
@@ -3059,7 +3092,7 @@ export class Game {
     // The shot goes off on the light plane itself: its own body splashes and fades there, its
     // fire detonates, and the prism's glass scatters — it is destroyed, not parked in mid-air.
     this.fx.lightBreak(p.mesh, travel, p.kind, shieldScale(p.radius));
-    this.audio.block(p.kind);
+    this.audio.block(p.kind, p.last);
     this.removeProjectile(index, true);
   }
   /** The shots a lance already stood across in the instant it was fired. */
@@ -3242,7 +3275,7 @@ export class Game {
       damage: actual,
       number: source && screen ? { spell: source.spell, ...screen } : undefined,
     });
-    this.audio.hit(!this.boss.alive);
+    this.audio.hit(!this.boss.alive, this.boss.position);
     if (!this.boss.alive) {
       if (heavy) this.boss.deathDelay = 0.95;
       else this.destroyBoss();
@@ -3342,7 +3375,7 @@ export class Game {
     this.knockTime = tuning.stagger;
     this.contactPause('player', incoming, tuning.pause * power, tuning.launch * power, tuning.slow);
     this.shake = 0.018;
-    if (this.mode !== 'menu') this.audio.damage();
+    if (this.mode !== 'menu') this.audio.damage(this.player);
     this.emit({ type: 'damage', amount });
     if (this.health === 0 && this.mode === 'playing') {
       this.outcome = 'gameover';
@@ -3366,7 +3399,7 @@ export class Game {
     this.lastImpact = { surface, actor };
     this.fx.burst(at, '#f2f7ed', 30, 7, 0.3, 3);
     if (surface === 'ground') this.fx.shock(at.clone().addScaledVector(UP, 0.09), '#edf4e9', 6);
-    if (this.mode !== 'menu') this.audio.crash(strength);
+    if (this.mode !== 'menu') this.audio.crash(strength, at, surface);
     this.shake = this.settings.reducedEffects ? 0 : Math.min(0.1, strength / 500);
     this.hitPause.request(0.035);
     // Impact frames are caused by heavy contact and by world collisions, never by ordinary

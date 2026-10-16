@@ -1,4 +1,12 @@
 import type { Settings } from './types';
+import { ARENA_ROOM, SEND, impulseResponse } from './reverb';
+
+/** Anything the engine can place in the world: a three.js Vector3 or a plain tuple/object. */
+export interface SoundPoint {
+  x: number;
+  y: number;
+  z: number;
+}
 
 type Actor = 'player' | 'boss';
 interface ScrapeLoop {
@@ -22,7 +30,10 @@ interface ScrapeLoop {
 export class AudioEngine {
   private context?: AudioContext;
   private master?: GainNode;
+  /** The dry bus: everything lands here, and here ends in the limiter. */
   private bus?: GainNode;
+  /** Where cues are sent to be reverberated; one convolution covers the whole arena. */
+  private send?: GainNode;
   private settings: Settings;
   private noise?: AudioBuffer;
   private scrapes = new Map<Actor, ScrapeLoop>();
@@ -53,6 +64,27 @@ export class AudioEngine {
         this.bus = ctx.createGain();
         this.bus.gain.value = 1;
         this.bus.connect(limiter);
+        // The room: cues are sent here, a generated impulse response is convolved, and the tail
+        // comes back under the dry signal. This is what makes a slam happen *in* the arena.
+        this.send = ctx.createGain();
+        this.send.gain.value = 1;
+        const convolver = ctx.createConvolver();
+        const room = impulseResponse({
+          sampleRate: ctx.sampleRate,
+          seconds: ARENA_ROOM.seconds,
+          decay: ARENA_ROOM.decay,
+          seed: 60415,
+          reflections: ARENA_ROOM.reflections.map(([t, g]) => [t, g] as [number, number]),
+        });
+        convolver.buffer = ctx.createBuffer(2, room[0].length, ctx.sampleRate);
+        room.forEach((channel, i) =>
+          convolver.buffer!.copyToChannel(channel as Float32Array<ArrayBuffer>, i),
+        );
+        const tail = ctx.createGain();
+        tail.gain.value = 0.62;
+        this.send.connect(convolver);
+        convolver.connect(tail);
+        tail.connect(limiter);
         limiter.connect(this.master);
         this.master.connect(ctx.destination);
         const length = ctx.sampleRate;
@@ -88,6 +120,67 @@ export class AudioEngine {
   }
 
   /**
+   * The listener: where the ears are and which way they face. Fed from the camera every frame, so
+   * a boss casting behind the player is heard behind them — with an HRTF panner that is a real
+   * cue to turn around rather than a volume difference.
+   */
+  listener(at: SoundPoint, forward: SoundPoint) {
+    const listener = this.context?.listener;
+    if (!listener) return;
+    const ctx = this.context!,
+      now = ctx.currentTime;
+    try {
+      listener.positionX?.setTargetAtTime(at.x, now, 0.02);
+      listener.positionY?.setTargetAtTime(at.y, now, 0.02);
+      listener.positionZ?.setTargetAtTime(at.z, now, 0.02);
+      listener.forwardX?.setTargetAtTime(forward.x, now, 0.04);
+      listener.forwardY?.setTargetAtTime(forward.y, now, 0.04);
+      listener.forwardZ?.setTargetAtTime(forward.z, now, 0.04);
+      listener.upX?.setValueAtTime(0, now);
+      listener.upY?.setValueAtTime(1, now);
+      listener.upZ?.setValueAtTime(0, now);
+    } catch {
+      /* Older engines expose only the setters below; they are optional too. */
+    }
+  }
+
+  /**
+   * Where a cue should be wired: dry into the bus, and a share of it into the room. A cue with no
+   * position is simply the bus (head-locked), which is what the HUD wants. Every positioned cue
+   * gets its own HRTF panner, so it is placed once and forgotten.
+   */
+  private place(at: SoundPoint | undefined, sendLevel: number) {
+    const ctx = this.context!,
+      input = ctx.createGain();
+    let node: AudioNode = input;
+    if (at) {
+      const panner = ctx.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 7;
+      panner.maxDistance = 400;
+      panner.rolloffFactor = 1.1;
+      try {
+        panner.positionX.value = at.x;
+        panner.positionY.value = at.y;
+        panner.positionZ.value = at.z;
+      } catch {
+        panner.setPosition(at.x, at.y, at.z);
+      }
+      input.connect(panner);
+      node = panner;
+    }
+    node.connect(this.bus!);
+    if (sendLevel > 0) {
+      const gain = ctx.createGain();
+      gain.gain.value = sendLevel;
+      node.connect(gain);
+      gain.connect(this.send!);
+    }
+    return input;
+  }
+
+  /**
    * Repeat guard for cues that can fire many times a second: drops repeats closer than `gap`
    * and returns a duck factor that falls as more of them land inside the last half second.
    */
@@ -111,12 +204,14 @@ export class AudioEngine {
     volume: number,
     type: OscillatorType = 'sine',
     delay = 0,
+    place?: { at?: SoundPoint; send?: number },
   ) {
     if (!this.live || volume <= 0) return;
     const ctx = this.context!,
       at = ctx.currentTime + delay;
     const oscillator = ctx.createOscillator(),
-      gain = ctx.createGain();
+      gain = ctx.createGain(),
+      output = this.place(place?.at, place?.send ?? 0.25);
     oscillator.type = type;
     oscillator.frequency.setValueAtTime(frequency, at);
     oscillator.frequency.exponentialRampToValueAtTime(Math.max(20, end), at + duration);
@@ -124,7 +219,7 @@ export class AudioEngine {
     gain.gain.linearRampToValueAtTime(volume, at + 0.009);
     gain.gain.exponentialRampToValueAtTime(0.001, at + duration);
     oscillator.connect(gain);
-    gain.connect(this.bus!);
+    gain.connect(output);
     oscillator.start(at);
     oscillator.stop(at + duration + 0.03);
     oscillator.onended = () => {
@@ -133,13 +228,19 @@ export class AudioEngine {
     };
   }
 
-  private air(duration: number, frequency: number, volume: number) {
+  private air(
+    duration: number,
+    frequency: number,
+    volume: number,
+    place?: { at?: SoundPoint; send?: number },
+  ) {
     if (!this.live || volume <= 0) return;
     const ctx = this.context!,
       at = ctx.currentTime;
     const source = ctx.createBufferSource(),
       filter = ctx.createBiquadFilter(),
-      gain = ctx.createGain();
+      gain = ctx.createGain(),
+      output = this.place(place?.at, place?.send ?? 0.25);
     source.buffer = this.noise!;
     filter.type = 'lowpass';
     filter.frequency.setValueAtTime(frequency, at);
@@ -148,7 +249,7 @@ export class AudioEngine {
     gain.gain.exponentialRampToValueAtTime(0.001, at + duration);
     source.connect(filter);
     filter.connect(gain);
-    gain.connect(this.bus!);
+    gain.connect(output);
     source.start(at);
     source.stop(at + duration);
     source.onended = () => {
@@ -302,9 +403,10 @@ export class AudioEngine {
       this.air(0.6, 3500, 0.4);
     }
   }
-  hit(kill: boolean) {
-    this.tone(kill ? 580 : 320, kill ? 1150 : 120, kill ? 0.18 : 0.08, 0.16, 'triangle');
-    this.air(0.12, 2800, 0.2);
+  hit(kill: boolean, at?: SoundPoint) {
+    const place = { at, send: SEND.impact };
+    this.tone(kill ? 580 : 320, kill ? 1150 : 120, kill ? 0.18 : 0.08, 0.16, 'triangle', 0, place);
+    this.air(0.12, 2800, 0.2, place);
   }
   dash() {
     this.air(0.3, 2400, 0.42);
@@ -317,6 +419,38 @@ export class AudioEngine {
     this.tone(1980, 2640, 0.26, 0.12, 'sine', 0.07);
     this.air(0.3, 5200, 0.14);
   }
+  /**
+   * The Prisma lance: a bright shot that opens into a body of sound while the light stands, held
+   * wet because the beam is the loudest thing the player owns and the room should answer it.
+   */
+  beam(heavy: boolean, at?: SoundPoint) {
+    const place = { at, send: SEND.beam };
+    if (heavy) {
+      this.tone(240, 46, 0.5, 0.42, 'triangle', 0, place);
+      this.tone(1180, 260, 0.34, 0.2, 'sine', 0, place);
+      this.air(0.5, 5200, 0.34, place);
+      this.tone(64, 30, 0.7, 0.3, 'sine', 0.02, place);
+    } else {
+      this.tone(980, 180, 0.22, 0.24, 'sine', 0, place);
+      this.air(0.24, 6400, 0.2, place);
+    }
+  }
+
+  /**
+   * A footfall. The surface changes the noise band and the length: the plaza's slabs click, the
+   * grit out past it scuffs. Fired from the player's own stride, so it is head-locked rather
+   * than placed — the body is always where the ears are.
+   */
+  step(surface: 'stone' | 'grit', weight = 1) {
+    const duck = this.crowd('step', 0.16);
+    if (duck === 0) return;
+    const place = { send: SEND.step },
+      level = 0.1 * weight * duck;
+    if (surface === 'grit') this.air(0.09, 1500, level * 1.2, place);
+    else this.air(0.06, 3200, level, place);
+    this.tone(surface === 'grit' ? 92 : 128, 60, 0.07, level * 0.7, 'triangle', 0, place);
+  }
+
   /** An Aegis piece snapping up in front of the body: quiet, the hit itself comes later. */
   raise() {
     const duck = this.crowd('raise', 0.06);
@@ -326,28 +460,31 @@ export class AudioEngine {
    * A shot striking a standing patch: a glassy chime, with a thud underneath for heavy shots.
    * Under a salvo the chimes thin out instead of piling up.
    */
-  block(kind: 'fire' | 'missile' | 'hammer' | 'vortex' | 'player' = 'fire') {
+  block(kind: 'fire' | 'missile' | 'hammer' | 'vortex' | 'player' = 'fire', at?: SoundPoint) {
     const duck = kind === 'hammer' ? 1 : this.crowd('block', 0.055);
     if (duck === 0) return;
-    this.tone(1200, 500, 0.2, 0.15 * duck);
-    this.tone(1700, 700, 0.3, 0.08 * duck);
+    const place = { at, send: SEND.block };
+    this.tone(1200, 500, 0.2, 0.15 * duck, 'sine', 0, place);
+    this.tone(1700, 700, 0.3, 0.08 * duck, 'sine', 0, place);
     if (kind === 'hammer') {
-      this.tone(90, 38, 0.4, 0.4);
-      this.air(0.3, 1400, 0.35);
-    } else if (kind === 'missile') this.air(0.12, 2600, 0.18 * duck);
-    else this.air(0.08, 4200, 0.12 * duck);
+      this.tone(90, 38, 0.4, 0.4, 'sine', 0, place);
+      this.air(0.3, 1400, 0.35, place);
+    } else if (kind === 'missile') this.air(0.12, 2600, 0.18 * duck, place);
+    else this.air(0.08, 4200, 0.12 * duck, place);
   }
   /** A solar vortex opening: a rising hum that keeps climbing while it pulls. */
-  vortex() {
-    this.tone(70, 190, 1.7, 0.22, 'sawtooth');
-    this.tone(140, 380, 1.7, 0.08, 'triangle');
-    this.air(1.6, 900, 0.14);
+  vortex(at?: SoundPoint) {
+    const place = { at, send: SEND.vortex };
+    this.tone(70, 190, 1.7, 0.22, 'sawtooth', 0, place);
+    this.tone(140, 380, 1.7, 0.08, 'triangle', 0, place);
+    this.air(1.6, 900, 0.14, place);
   }
   /** The vortex bursting into its ring of embers. */
-  detonate() {
-    this.tone(180, 30, 0.5, 0.45, 'triangle');
-    this.tone(900, 160, 0.25, 0.18);
-    this.air(0.55, 2600, 0.45);
+  detonate(at?: SoundPoint) {
+    const place = { at, send: SEND.detonate };
+    this.tone(180, 30, 0.5, 0.45, 'triangle', 0, place);
+    this.tone(900, 160, 0.25, 0.18, 'sine', 0, place);
+    this.air(0.55, 2600, 0.45, place);
   }
   /** A spent shield patch breaking up: a glassy crack falling into a short hiss. */
   shatter() {
@@ -355,20 +492,30 @@ export class AudioEngine {
     this.tone(2600, 900, 0.14, 0.1);
     this.air(0.22, 3200, 0.3);
   }
-  damage() {
-    this.tone(120, 35, 0.3, 0.5, 'triangle');
-    this.air(0.2, 600, 0.35);
+  damage(at?: SoundPoint) {
+    const place = { at, send: SEND.impact };
+    this.tone(120, 35, 0.3, 0.5, 'triangle', 0, place);
+    this.air(0.2, 600, 0.35, place);
   }
   beginDuel() {
     [330, 440, 660].forEach((f, i) => this.tone(f, f * 1.01, 0.4, 0.12, 'sine', i * 0.1));
   }
-  crash(strength: number) {
-    this.tone(60, 25, 0.6, Math.min(0.58, strength / 70));
-    this.air(0.6, 1800, 0.45);
+  /**
+   * A body slamming the world. Placed where it happened and sent generously to the room: the
+   * tail is most of what tells the player that the arena is big and made of stone. The surface
+   * colours it — ground absorbs, a wall rings — and a heavy one adds a low crack.
+   */
+  crash(strength: number, at?: SoundPoint, surface: 'ground' | 'wall' = 'ground') {
+    const loud = Math.min(0.58, strength / 70),
+      place = { at, send: SEND.crash };
+    this.tone(60, 25, 0.6, loud, 'sine', 0, place);
+    this.air(0.6, surface === 'wall' ? 2400 : 1500, 0.45, place);
+    if (surface === 'wall') this.tone(210, 90, 0.22, loud * 0.7, 'triangle', 0.004, place);
+    if (strength > 45) this.tone(38, 22, 0.9, loud * 0.8, 'sine', 0.01, place);
   }
   /** The telegraph: the one cue the player must never miss, so it sits a little forward. */
-  charge() {
-    this.tone(220, 820, 0.7, 0.14, 'triangle');
+  charge(at?: SoundPoint) {
+    this.tone(220, 820, 0.7, 0.14, 'triangle', 0, { at, send: SEND.cast });
   }
   click() {
     this.tone(620, 420, 0.04, 0.12);
