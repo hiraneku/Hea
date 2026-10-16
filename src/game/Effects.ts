@@ -29,6 +29,7 @@ export function adaptDensity(current: number, fps: number): number {
 }
 
 const UP = new THREE.Vector3(0, 1, 0);
+const PLANE_FORWARD = new THREE.Vector3(0, 0, 1);
 const v1 = new THREE.Vector3();
 const shaftX = new THREE.Vector3(),
   shaftY = new THREE.Vector3(),
@@ -179,6 +180,60 @@ function shaftTexture(): THREE.CanvasTexture {
     }
   }
   c.putImageData(image, 0, 0);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * The scar a lance presses into stone or earth: a small burst of hairline scratches with a
+ * faint crust of light around them, drawn dark-to-bright from the middle outwards.
+ */
+function scarTexture(): THREE.CanvasTexture {
+  const size = 64,
+    canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const c = canvas.getContext('2d')!,
+    middle = size / 2;
+  c.clearRect(0, 0, size, size);
+  c.lineCap = 'round';
+  // Hairline scratches: a fan of long, slightly bent strokes off the centre.
+  for (let i = 0; i < 9; i++) {
+    const angle = (i / 9) * Math.PI * 2 + Math.random() * 0.5,
+      length = middle * (0.55 + Math.random() * 0.42),
+      bend = (Math.random() - 0.5) * 0.5,
+      alpha = 0.35 + Math.random() * 0.4;
+    c.strokeStyle = `rgba(255,255,255,${alpha.toFixed(2)})`;
+    c.lineWidth = 0.7 + Math.random() * 0.9;
+    c.beginPath();
+    c.moveTo(middle, middle);
+    c.quadraticCurveTo(
+      middle + Math.cos(angle + bend) * length * 0.55,
+      middle + Math.sin(angle + bend) * length * 0.55,
+      middle + Math.cos(angle) * length,
+      middle + Math.sin(angle) * length,
+    );
+    c.stroke();
+  }
+  // Two pale rings of crust where the light pooled.
+  for (const [radius, alpha, width] of [
+    [0.3, 0.3, 1.4],
+    [0.58, 0.18, 2.2],
+  ] as const) {
+    c.strokeStyle = `rgba(210,244,255,${alpha})`;
+    c.lineWidth = width;
+    c.beginPath();
+    c.arc(middle, middle, middle * radius, 0, Math.PI * 2);
+    c.stroke();
+  }
+  // The hot centre, scaled back so the mark does not read as a light source.
+  const core = c.createRadialGradient(middle, middle, 0, middle, middle, middle * 0.42);
+  core.addColorStop(0, 'rgba(235,252,255,0.5)');
+  core.addColorStop(0.45, 'rgba(120,215,255,0.3)');
+  core.addColorStop(1, 'rgba(90,190,255,0)');
+  c.fillStyle = core;
+  c.fillRect(0, 0, size, size);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
@@ -481,6 +536,23 @@ export class Effects {
   readonly prismMap = prismTexture();
   private readonly glowMap = glowTexture();
   private readonly shaftMap = shaftTexture();
+  private readonly scarMap = scarTexture();
+  private readonly scarPlane = new THREE.PlaneGeometry(2, 2);
+  private readonly paneRing = new THREE.RingGeometry(0.94, 1, 64);
+  private readonly reticleRing = new THREE.RingGeometry(0.86, 1, 48);
+  /** How many lance scars have been pressed into the world since the arena was last reset. */
+  prismScars = 0;
+  /** How many curtains have shown themselves where a shot ran into them. */
+  prismPanes = 0;
+  /** How many threads of light have been left standing along a lance. */
+  lightVeins = 0;
+  private aimLine: {
+    group: THREE.Group;
+    core: THREE.Mesh;
+    halo: THREE.Mesh;
+    tip: THREE.Mesh;
+    flare: THREE.Sprite;
+  } | null = null;
   /** The eye the camera-facing effects lean towards; set by the game once it has one. */
   eye: THREE.Camera | null = null;
   private readonly splinter = splinterGeometry();
@@ -521,6 +593,10 @@ export class Effects {
       shards: this.timed.filter((e) => e.object.userData.kind === 'shield-shards').length,
       prismShards: this.timed.filter((e) => e.object.userData.kind === 'prism-shards').length,
       prismShatters: this.prismShatters,
+      prismScars: this.prismScars,
+      prismPanes: this.prismPanes,
+      lightVeins: this.lightVeins,
+      aimLine: this.aimLine?.group.visible ?? false,
       scorches: this.scorches.count,
       density: this.density,
       budget: this.particleBudget,
@@ -925,6 +1001,245 @@ export class Effects {
     // a two-frame splash reads as a shot that simply stopped.
     this.crush(remnant, normal, kind, size, kind === 'hammer' ? 0.34 : 0.24);
     this.impact(at, IMPACT_TINT[kind], kind === 'hammer', size);
+  }
+  /**
+   * The scar a lance presses into whatever stops it: hairline scratches and a faint crust of
+   * light on the surface, with a short flash as it lands. Masonry and ground keep the mark for
+   * a few seconds after the beam is gone, so a small beam leaves a trace of where it struck.
+   */
+  prismScar(at: THREE.Vector3, normal: THREE.Vector3, scale = 0.5) {
+    this.prismScars++;
+    const n = normal.clone().normalize(),
+      mesh = new THREE.Mesh(
+        this.scarPlane,
+        new THREE.MeshBasicMaterial({
+          map: this.scarMap,
+          // Saturated, not white: the arena's stone is nearly white, and a white mark on it
+          // reads as glare rather than as a scar.
+          color: new THREE.Color('#5ec8ff').multiplyScalar(1.5),
+          transparent: true,
+          opacity: 0.85,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        }),
+      );
+    mesh.position.copy(at).addScaledVector(n, 0.04);
+    mesh.quaternion.setFromUnitVectors(PLANE_FORWARD, n);
+    mesh.rotateZ(Math.random() * Math.PI * 2);
+    mesh.scale.setScalar((1.8 + Math.random() * 0.9) * scale);
+    mesh.userData.keepGeometry = true;
+    this.add(mesh, 3.6 + Math.random() * 1.8);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e, progress) => {
+      // It bites in over the first frames, then bleaches away with the light.
+      const bite = Math.min(1, progress * 8);
+      (mesh.material as THREE.MeshBasicMaterial).opacity =
+        0.85 * bite * Math.pow(1 - progress, 1.5);
+    };
+    this.flare(at, 0.5 * scale, 0.16, '#dff6ff', 1);
+  }
+  /**
+   * The pane of a curtain of light catching a shot: a soft disc square to the lance with a thin
+   * rim, flashing once where the shot ran into it. Without it a break reads as a shot that blew
+   * up on its own, with nothing to say what stopped it.
+   */
+  lancePane(at: THREE.Vector3, axis: THREE.Vector3, radius: number, heavy = false) {
+    this.prismPanes++;
+    const punch = heavy ? 1.25 : 1,
+      tint = new THREE.Color(heavy ? '#eaf9ff' : '#cfefff'),
+      disc = new THREE.Mesh(
+        this.scarPlane,
+        new THREE.MeshBasicMaterial({
+          map: this.glowMap,
+          color: tint.clone().multiplyScalar(0.75),
+          transparent: true,
+          opacity: 0.4,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        }),
+      ),
+      rim = new THREE.Mesh(
+        this.paneRing,
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color('#ffffff').multiplyScalar(2.1),
+          transparent: true,
+          opacity: 0.6,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        }),
+      ),
+      group = new THREE.Group();
+    group.add(disc, rim);
+    group.position.copy(at);
+    group.quaternion.setFromUnitVectors(PLANE_FORWARD, axis.clone().normalize());
+    group.userData.kind = 'lance-pane';
+    this.add(group, 0.24);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e, progress) => {
+      const fade = Math.pow(1 - progress, 1.6),
+        grow = 1 + 0.3 * progress;
+      disc.scale.setScalar(radius * 1.25 * punch * grow);
+      rim.scale.setScalar(radius * punch * (0.7 + 0.45 * progress));
+      (disc.material as THREE.MeshBasicMaterial).opacity = 0.4 * fade;
+      (rim.material as THREE.MeshBasicMaterial).opacity = 0.6 * fade;
+    };
+    this.flare(at, radius * 0.45 * punch, 0.2, '#ffffff', 1.1);
+  }
+  /**
+   * The thread of light a lance leaves standing along its own length: faint, but enough to show
+   * the corridor a beam is holding open for as long as it lasts.
+   */
+  lightVein(start: THREE.Vector3, end: THREE.Vector3, radius: number, life: number, heavy = false) {
+    const direction = v1.subVectors(end, start),
+      length = direction.length();
+    if (length < 0.5) return;
+    this.lightVeins++;
+    const line = (width: number, tint: string, opacity: number) => {
+      const mesh = new THREE.Mesh(
+        this.tube,
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(tint).multiplyScalar(1.6),
+          transparent: true,
+          opacity,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          toneMapped: false,
+        }),
+      );
+      mesh.userData.keepGeometry = true;
+      mesh.position.y = 0.5;
+      mesh.scale.set(width, 1, width);
+      return mesh;
+    };
+    const core = line(Math.max(0.05, radius * 0.03), '#eafbff', heavy ? 0.34 : 0.26),
+      halo = line(Math.max(0.16, radius * 0.09), '#63d6ff', heavy ? 0.16 : 0.12),
+      group = new THREE.Group();
+    group.add(core, halo);
+    group.position.copy(start);
+    group.quaternion.setFromUnitVectors(UP, direction.normalize());
+    group.scale.set(1, length, 1);
+    group.userData.kind = 'lance-vein';
+    this.add(group, life);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e) => {
+      // It arrives with the beam and thins away over the lance's life.
+      const fade = Math.min(1, (e.max - e.life) / 0.05) * Math.pow(e.life / e.max, 1.2);
+      (core.material as THREE.MeshBasicMaterial).opacity = 0.27 * (heavy ? 1.25 : 1) * fade;
+      (halo.material as THREE.MeshBasicMaterial).opacity = 0.13 * (heavy ? 1.25 : 1) * fade;
+    };
+  }
+  /**
+   * The sight of a charging heavy lance: a hairline from the circle to wherever the crosshair
+   * points, brightening as the charge fills, closed by a ring where it lands. It is a sight and
+   * nothing else — no shot leaves along it, and it blocks nothing.
+   */
+  aimTrace(start: THREE.Vector3, end: THREE.Vector3, charge: number) {
+    const line = this.aimLine ?? this.createAimLine(),
+      direction = v1.subVectors(end, start),
+      length = direction.length();
+    if (length < 0.5) {
+      line.group.visible = false;
+      return;
+    }
+    direction.normalize();
+    const core = line.core,
+      halo = line.halo;
+    // A needle, not a bar: the chase camera sits on the axis of this line and looks straight
+    // down it whenever the aim is level, so the thread is the least of the read-out — the ring
+    // at the far end is what carries the message.
+    core.scale.set(0.024, length, 0.024);
+    halo.scale.set(0.075, length, 0.075);
+    core.position.y = halo.position.y = length / 2;
+    line.tip.position.y = length;
+    line.flare.position.y = length;
+    // The landing mark: a ring around the point the lance would reach, growing and brightening
+    // with the charge — and growing with distance, because at 30 m a fixed metre across is a
+    // dot on screen, and the chase camera looks straight down the thread itself.
+    const reach = Math.min(2.4, 1 + start.distanceTo(end) * 0.04);
+    line.tip.scale.setScalar((0.5 + 0.4 * charge) * reach);
+    line.flare.scale.setScalar((0.35 + 0.45 * charge) * reach);
+    const bright = 0.3 + 0.7 * Math.min(1, Math.max(0, charge));
+    (core.material as THREE.MeshBasicMaterial).opacity = 0.4 * bright;
+    (halo.material as THREE.MeshBasicMaterial).opacity = 0.09 * bright;
+    (line.tip.material as THREE.MeshBasicMaterial).opacity = 0.5 * bright;
+    (line.flare.material as THREE.SpriteMaterial).opacity = 0.35 * bright;
+    line.group.visible = true;
+    line.group.position.copy(start);
+    line.group.quaternion.setFromUnitVectors(UP, direction);
+  }
+  private createAimLine() {
+    // Drawn over everything the way a sight is: the circle being charged stands between the eye
+    // and the landing point, so a depth-tested mark would vanish exactly when it is wanted. The
+    // thread still ends where the lance would land — it never reaches through a wall.
+    const line = (width: number, tint: string, opacity: number) => {
+      const mesh = new THREE.Mesh(
+        this.tube,
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color(tint).multiplyScalar(1.5),
+          transparent: true,
+          opacity,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          depthTest: false,
+          toneMapped: false,
+        }),
+      );
+      mesh.userData.keepGeometry = true;
+      mesh.position.y = 0.5;
+      mesh.scale.set(width, 1, width);
+      mesh.renderOrder = 8;
+      return mesh;
+    };
+    const core = line(0.024, '#eafbff', 0.4),
+      halo = line(0.075, '#63d6ff', 0.09),
+      tip = new THREE.Mesh(
+        this.reticleRing,
+        new THREE.MeshBasicMaterial({
+          color: new THREE.Color('#dff6ff').multiplyScalar(1.8),
+          transparent: true,
+          opacity: 0.4,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          depthTest: false,
+          side: THREE.DoubleSide,
+          toneMapped: false,
+        }),
+      ),
+      flare = new THREE.Sprite(
+        new THREE.SpriteMaterial({
+          map: this.glowMap,
+          color: '#dff6ff',
+          transparent: true,
+          opacity: 0.4,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          depthTest: false,
+          toneMapped: false,
+        }),
+      ),
+      group = new THREE.Group();
+    // The ring lies across the line rather than in it.
+    tip.rotation.x = -Math.PI / 2;
+    tip.renderOrder = 8;
+    flare.renderOrder = 8;
+    tip.userData.keepGeometry = true;
+    flare.userData.keepGeometry = true;
+    group.add(core, halo, tip, flare);
+    group.visible = false;
+    group.userData.kind = 'aim-line';
+    this.scene.add(group);
+    this.aimLine = { group, core, halo, tip, flare };
+    return this.aimLine;
+  }
+  /** Put the lance sight away (released, cancelled, or the arena reset). */
+  hideAimTrace() {
+    if (this.aimLine) this.aimLine.group.visible = false;
   }
   /** The projectile's body flattening against the patch and fading — contact you can see. */
   private crush(
@@ -2216,6 +2531,10 @@ export class Effects {
   clear() {
     this.shieldSerial = 0;
     this.prismShatters = 0;
+    this.prismScars = 0;
+    this.prismPanes = 0;
+    this.lightVeins = 0;
+    this.hideAimTrace();
     this.skidCalls = 0;
     this.clods = 0;
     this.airRecoveries = 0;

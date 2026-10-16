@@ -127,6 +127,8 @@ export type GameEvent =
   | { type: 'block'; direction: { x: number; y: number; z: number } }
   | { type: 'toast'; text: string }
   | { type: 'dodge' }
+  /** A cast refused — still cooling, or not enough energy — so the slot can dip and recover. */
+  | { type: 'dry'; spell: SpellId }
   | { type: 'lock'; locked: boolean }
   | { type: 'camera'; camera: CameraMode };
 

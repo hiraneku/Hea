@@ -61,7 +61,7 @@ app.innerHTML = `
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.16</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.17</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -202,6 +202,9 @@ function floatDamage(
   } else setTimeout(() => el.remove(), life);
 }
 
+/** One pending "dry cast" dip per spell slot. */
+const dryTimers: ReturnType<typeof setTimeout>[] = [];
+
 function event(event: GameEvent) {
   if (event.type === 'mode') {
     experience.dataset.mode = event.mode;
@@ -222,6 +225,15 @@ function event(event: GameEvent) {
     if (event.mode === 'playing')
       $('#pointer-tip').classList.toggle('visible', !isTouch && !document.pointerLockElement);
     if (event.mode !== 'paused') previousMode = event.mode;
+  } else if (event.type === 'dry') {
+    // A cast that could not be paid for: the slot dips for a moment and comes back. No sound,
+    // no buffer — just an answer to the click.
+    const slot = document.querySelector<HTMLElement>(`.spell-slot[data-spell="${event.spell}"]`);
+    if (slot) {
+      slot.classList.add('dry');
+      clearTimeout(dryTimers[event.spell]);
+      dryTimers[event.spell] = setTimeout(() => slot.classList.remove('dry'), 190);
+    }
   } else if (event.type === 'toast') toast(event.text);
   else if (event.type === 'duel') {
     $('#duel-announcement').classList.add('visible');
@@ -316,7 +328,7 @@ function renderPanel(type: Exclude<typeof panel, null>) {
         <div><span>Bergerak</span><b>JOYSTICK KIRI</b></div><div><span>Arahkan kamera</span><b>GESER AREA KANAN</b></div><div><span>Serang berulang</span><b>TAHAN TOMBOL SERANG</b></div><div><span>Ganti sihir</span><b>SENTUH SLOT SIHIR</b></div><div><span>Terbang naik / turun</span><b>TAHAN NAIK / TURUN</b></div><div><span>Menghindar / kunci kamera</span><b>DASH / FOKUS</b></div><div><span>Perisai ON / OFF</span><b><kbd>G</kbd> / TOMBOL AEGIS</b></div><div><span>Mode terbang / jalan</span><b><kbd>F</kbd> / TOMBOL MODE</b></div><div><span>Bantuan bidik</span><b>OTOMATIS AKTIF</b></div>
       </div>
       <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${['Proyektil cepat. Ikuti target dengan crosshair.', 'Tap: lingkaran acak di sekitarmu menembakkan sinar yang menyapu proyektil musuh di jalurnya. Tahan: lingkaran besar di depan pandangan mengisi; lepas untuk lancip berat yang membongkar dinding dan memecahkan serangan berat.', 'Ledakan kuat. Hempaskan boss dan hancurkan penghalang.'][i]}</span></div>`).join('')}</div>
-      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; selama masih berdiri, jejak itu ikut menahan tembakan berikutnya pada lintasan yang sama, dan saat OFF jejak lama tidak memblokir serangan baru. Patch yang muncul berdampingan menyusun diri rapat seperti kepingan puzzle, tidak menumpuk. Proyektil benar-benar menghantam permukaannya: tubuhnya gepeng dan memercik di sana, patch terdorong dan beriak. Satu patch hanya kuat menahan lima hit: kepingnya makin menyala dan retak, lalu pecah berhamburan dan menyisakan lubang di arah itu selama sesaat—bergeraklah. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat; hit berat membeku sejenak lalu lepas dalam gerak lambat sebelum hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret: tanah terbelah membentuk alur lurus searah seretan dengan gundukan terangkat di kiri-kanannya, bongkahan tanah berhamburan, lalu tubuh langsung bangkit; bila melayang lama tanpa menyentuh apa pun, ia menegakkan diri di udara. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Pusaran Surya: benih gelap meluncur ke dekatmu lalu membuka sumur gravitasi yang menyedot tubuh dan segala percikan selama hampir dua detik, kemudian meledak menjadi cincin bara mendatar—jangan kabur lurus (punggungmu buta), tapi naik atau menukik keluar dari bidang cincinnya. Sinar Prisma menyapu garis bidikmu: rentetan api dan orb homing pecah begitu melintasinya; bola surya dan inti Pusaran Surya hanya pecah oleh lancip berat. Seret kamera untuk melepas fokus.</p>
+      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; selama masih berdiri, jejak itu ikut menahan tembakan berikutnya pada lintasan yang sama, dan saat OFF jejak lama tidak memblokir serangan baru. Patch yang muncul berdampingan menyusun diri rapat seperti kepingan puzzle, tidak menumpuk. Proyektil benar-benar menghantam permukaannya: tubuhnya gepeng dan memercik di sana, patch terdorong dan beriak. Satu patch hanya kuat menahan lima hit: kepingnya makin menyala dan retak, lalu pecah berhamburan dan menyisakan lubang di arah itu selama sesaat—bergeraklah. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat; hit berat membeku sejenak lalu lepas dalam gerak lambat sebelum hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret: tanah terbelah membentuk alur lurus searah seretan dengan gundukan terangkat di kiri-kanannya, bongkahan tanah berhamburan, lalu tubuh langsung bangkit; bila melayang lama tanpa menyentuh apa pun, ia menegakkan diri di udara. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Pusaran Surya: benih gelap meluncur ke dekatmu lalu membuka sumur gravitasi yang menyedot tubuh dan segala percikan selama hampir dua detik, kemudian meledak menjadi cincin bara mendatar—jangan kabur lurus (punggungmu buta), tapi naik atau menukik keluar dari bidang cincinnya. Sinar Prisma menyapu garis bidikmu: rentetan api dan orb homing pecah begitu melintasinya; bola surya dan inti Pusaran Surya hanya pecah oleh lancip berat. Sinar kecil meninggalkan goresan di permukaan yang dihantamnya (tanpa membongkar dinding), lingkaran besar yang mengisi menarik garis bidik ke arah crosshair sebagai penanda, dan klik yang belum bisa dibayar membuat slot sihir meredup sekejap. Seret kamera untuk melepas fokus.</p>
       <button class="primary-button full-width" id="panel-done"><span>MENGERTI</span>${icons.arrow}</button>`;
   } else if (type === 'settings') {
     content = `<p class="panel-description">Preferensimu tersimpan di perangkat ini.</p>

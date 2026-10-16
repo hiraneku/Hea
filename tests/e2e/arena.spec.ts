@@ -7,6 +7,8 @@ import { beside } from '../../src/game/layout';
 
 declare global {
   interface Window {
+    /** Counts the "dry cast" dips the HUD applied, for the test that watches one. */
+    __drySeen: number;
     __HEA_DEBUG__: {
       snapshot(): Snapshot;
       diagnostics(): Game['diagnostics'];
@@ -1507,7 +1509,12 @@ test('a Prisma beam sweeps the boss’s fire out of the air: bolts and seekers t
   // Broken means gone: the bodies splash on the curtain and fade, never hanging in the air
   // where the lance caught them.
   await step(page, 0.5);
-  expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().strayShots)).toBe(0);
+  const swept = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(swept.strayShots).toBe(0);
+  // And the curtain showed itself doing it: a pane flashed where each shot ran into the light,
+  // with the lance's own thread left standing behind it.
+  expect(swept.particles.prismPanes).toBeGreaterThanOrEqual(2);
+  expect(swept.particles.lightVeins).toBeGreaterThan(0);
   // A seeker, thrown from the same clear lane: the beam takes it out of the air too. (The
   // previous beam's curtain has to burn out first, or it would break this one on the way in.)
   await step(page, 0.5);
@@ -1544,6 +1551,111 @@ test('a Prisma beam sweeps the boss’s fire out of the air: bolts and seekers t
   await page.mouse.up();
   await step(page, 1 / 60);
   expect(await shots()).not.toContain('hammer');
+});
+
+test('a small beam leaves its mark where it lands, and its circles stand beside the body', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page);
+  await scenario(page, 'nova');
+  await page.keyboard.press('Digit2');
+  const diagnostics = () => page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  // A monolith straight ahead at aim height: the beam lands square on its face.
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([30, 3, 20], [0, 3, 20]);
+    h.face(0, 0);
+    h.step(0.05);
+  });
+  await page.mouse.move(550, 350);
+  await page.mouse.down();
+  await step(page, 1 / 60);
+  await page.mouse.up();
+  await step(page, 0.5);
+  const marked = await diagnostics();
+  expect(marked.particles.prismScars).toBeGreaterThanOrEqual(1);
+  // A small beam marks masonry; it does not tear it open — that is the heavy lance's work.
+  expect((await state(page)).wallsBroken).toBe(0);
+  // The circles are drawn from the flanks of the ring, so the crosshair and the target stay
+  // clear: no circle stands in the middle of the aim line.
+  const position = (await state(page)).position,
+    centre = [position.x, position.y + 1.1, position.z];
+  for (const circle of marked.prisma.circles) {
+    const c = circle.position,
+      offset = [c[0] - centre[0], c[1] - centre[1], c[2] - centre[2]],
+      span = Math.hypot(...offset);
+    expect(offset[1] / span).toBeLessThan(0.75);
+  }
+});
+
+test('the charging lance shows where it is pointed, and a refused cast dips its slot', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page);
+  await scenario(page, 'nova');
+  await page.keyboard.press('Digit2');
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([0, 3, 20], [0, 5, -20]);
+    h.face(0, 0);
+    h.step(0.05);
+  });
+  const diagnostics = () => page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  // The sight: nothing on a tap, a thread out of the big circle while it charges, gone on release.
+  expect((await diagnostics()).particles.aimLine).toBe(false);
+  await page.mouse.move(550, 350);
+  await page.mouse.down();
+  await step(page, 0.45);
+  expect((await diagnostics()).particles.aimLine).toBe(true);
+  await step(page, 0.7);
+  expect((await diagnostics()).particles.aimLine).toBe(true);
+  await page.mouse.up();
+  await step(page, 0.05);
+  expect((await diagnostics()).particles.aimLine).toBe(false);
+  // Released early the circle breaks, and the sight goes with it. (The heavy cast's slow motion
+  // stretches the wait: the hold threshold is measured in game time, not wall clock.)
+  await page.mouse.down();
+  await step(page, 0.8);
+  expect((await diagnostics()).prisma.charging).toBe(true);
+  expect((await diagnostics()).particles.aimLine).toBe(true);
+  await page.mouse.up();
+  await step(page, 0.05);
+  expect((await diagnostics()).particles.aimLine).toBe(false);
+  // The lance that just went out still holds the spell on cooldown: the next tap is refused and
+  // only dips the slot. The dip is a class for 190 ms of wall clock, and a frozen step can swallow
+  // a whole second at once, so it is counted by an observer instead of caught by eye.
+  await page.evaluate(() => {
+    const slot = document.querySelector('.spell-slot[data-spell="1"]')!;
+    window.__drySeen = 0;
+    new MutationObserver(() => {
+      if (slot.classList.contains('dry')) window.__drySeen++;
+    }).observe(slot, { attributes: true, attributeFilter: ['class'] });
+  });
+  const refused = await state(page);
+  await page.mouse.move(550, 350);
+  await page.mouse.down();
+  await step(page, 1 / 60);
+  await page.mouse.up();
+  await step(page, 0.05);
+  const after = await state(page);
+  // Nothing was paid: the only thing that moved the bar is the passive regen.
+  expect(after.energy).toBeGreaterThanOrEqual(refused.energy);
+  expect((await diagnostics()).prisma.circles.length).toBe(0);
+  await expect.poll(() => page.evaluate(() => window.__drySeen)).toBeGreaterThan(0);
+  await expect(page.locator('.spell-slot[data-spell="1"]')).not.toHaveClass(/dry/, {
+    timeout: 2000,
+  });
+  // And once the cooldown has run out the same tap works, so the dip was the only thing missing.
+  await step(page, 0.8);
+  const ready = (await state(page)).energy;
+  await page.mouse.down();
+  await step(page, 1 / 60);
+  await page.mouse.up();
+  await step(page, 0.05);
+  expect((await diagnostics()).prisma.circles.length).toBe(1);
+  expect((await state(page)).energy).toBeLessThan(ready);
 });
 
 test('from the eyes Prisma raises its circles ahead of the view', async ({ page }, info) => {

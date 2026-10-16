@@ -148,6 +148,18 @@ const viewQuaternion = new THREE.Quaternion(),
   viewPoint = new THREE.Vector3(),
   viewSide = new THREE.Vector3();
 
+/**
+ * A standing lance of light: the corridor a beam left behind, swept clean every frame for as
+ * long as it burns.
+ */
+interface PrismaLance {
+  start: THREE.Vector3;
+  end: THREE.Vector3;
+  radius: number;
+  heavy: boolean;
+  life: number;
+}
+
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
   readonly scene = new THREE.Scene();
@@ -253,13 +265,12 @@ export class Game {
   private prismaLastAngle: number | null = null;
   private prismaRandom: () => number = Math.random;
   private prismaBeams = 0;
-  private prismaLights: {
-    start: THREE.Vector3;
-    end: THREE.Vector3;
-    radius: number;
-    heavy: boolean;
-    life: number;
-  }[] = [];
+  private prismaLights: PrismaLance[] = [];
+  /**
+   * How brightly the newest tapped circle is dimmed after a cast was refused: a quick dip that
+   * fades back over a third of a second, so a dry tap is answered without any input buffer.
+   */
+  private prismaDry = 0;
   private prismaBigCasts = 0;
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
@@ -2205,7 +2216,13 @@ export class Game {
   }
   private cast() {
     const spell = SPELLS[this.spell];
-    if (this.cooldowns[this.spell] > 0 || this.energy < spell.cost) return;
+    if (this.cooldowns[this.spell] > 0 || this.energy < spell.cost) {
+      // Nothing to cast: instead of silence, the slot dips and the newest circle loses its
+      // light for a moment. There is no buffer behind this — the press is simply spent.
+      this.emit({ type: 'dry', spell: this.spell });
+      if (this.spell === 1) this.prismaDry = 0.36;
+      return;
+    }
     const charge = novaCharge(this.spell === 2 ? this.novaHold : 0, this.energy, spell.cost);
     this.energy -= charge.cost;
     this.cooldowns[this.spell] = spell.cooldown;
@@ -2739,7 +2756,9 @@ export class Game {
     let position: THREE.Vector3 | null = null,
       angle = Math.PI / 2;
     for (let attempt = 0; attempt < 7 && !position; attempt++) {
-      angle = prismaAngle(this.prismaRandom, this.prismaLastAngle);
+      // `right` is the screen's right, so the flank band keeps the circles — and the beams they
+      // fire — beside the body rather than across the crosshair and the target.
+      angle = prismaAngle(this.prismaRandom, this.prismaLastAngle, PRISMA.flank);
       const radius = ring.min + (ring.max - ring.min) * this.prismaRandom();
       const candidate = centre
         .clone()
@@ -2805,6 +2824,26 @@ export class Game {
         at: end,
         along,
       });
+    else if (hit) {
+      // Where a small beam meets the world it leaves a mark: a glass scar, a puff of dust off
+      // the surface, and the record of what the shot met. It does not tear the wall open —
+      // that is the heavy lance's work.
+      const normal = this.surfaceNormal(hit, along);
+      this.fx.prismScar(end, normal, hit.ground ? 0.75 : 0.5);
+      this.fx.dust(end, 4, 0.8);
+      this.lastImpact = { surface: hit.ground ? 'ground' : 'wall', actor: 'player' };
+    }
+  }
+  /** The way out of the surface that stopped a beam: ground up, a wall along its deepest axis. */
+  private surfaceNormal(hit: TraceHit, along: THREE.Vector3) {
+    if (hit.ground) return UP.clone();
+    const back = along.clone().negate(),
+      ax = Math.abs(back.x),
+      ay = Math.abs(back.y),
+      az = Math.abs(back.z);
+    if (ax >= ay && ax >= az) return new THREE.Vector3(Math.sign(back.x) || 1, 0, 0);
+    if (az >= ax && az >= ay) return new THREE.Vector3(0, 0, Math.sign(back.z) || 1);
+    return new THREE.Vector3(0, Math.sign(back.y) || 1, 0);
   }
   /**
    * The hold: one large circle raised ahead of the caster along the view — not at the boss —
@@ -2853,6 +2892,7 @@ export class Game {
     const b = this.prismaBig;
     if (!b) return;
     this.prismaBig = null;
+    this.fx.hideAimTrace();
     this.fx.shatterPrism(b.group, b.normal, b.group.scale.x, 10);
   }
   /**
@@ -2864,6 +2904,7 @@ export class Game {
     const b = this.prismaBig;
     if (!b) return;
     this.prismaBig = null;
+    this.fx.hideAimTrace();
     this.energy -= PRISMA.big.cost;
     this.cooldowns[1] = 0.6;
     const along = b.normal.clone().normalize(),
@@ -2930,19 +2971,20 @@ export class Game {
    * lance breaks anything flying, including the solar sphere and the vortex seed.
    */
   private lightLance(start: THREE.Vector3, end: THREE.Vector3, radius: number, heavy: boolean) {
-    this.prismaLights.push({
-      start: start.clone(),
-      end: end.clone(),
-      radius,
-      heavy,
-      life: heavy ? 0.45 : PRISMA.beamLife,
-    });
+    const life = heavy ? 0.45 : PRISMA.beamLife;
+    // The corridor itself is drawn while it lasts: a faint thread along the lance, so the space
+    // a beam is holding open can be seen and not only felt when something runs into it.
+    this.fx.lightVein(start, end, radius, life, heavy);
+    this.prismaLights.push({ start: start.clone(), end: end.clone(), radius, heavy, life });
   }
   /** Break a shot against a lance: a flash at the contact, a puff of glass and a chime. */
-  private breakShot(index: number, at: THREE.Vector3) {
+  private breakShot(index: number, at: THREE.Vector3, lance?: PrismaLance) {
     const p = this.projectiles[index];
     if (!p) return;
     const travel = p.velocity.clone().normalize();
+    // The curtain shows itself where the shot ran into it: a pane of light square to the lance,
+    // so the light that did the stopping is the thing that is seen.
+    if (lance) this.fx.lancePane(at, lance.end.clone().sub(lance.start), lance.radius, lance.heavy);
     this.fx.burst(at, '#dffbff', 22, 6, 0.32, 1.4);
     this.fx.prismShards(at, travel, 0.7, 8);
     this.fx.shock(at, '#bff0ff', 4.5);
@@ -2954,13 +2996,14 @@ export class Game {
   }
   /** The shots a lance already stood across in the instant it was fired. */
   private breakShots(start: THREE.Vector3, end: THREE.Vector3, radius: number, heavy: boolean) {
+    const lance: PrismaLance = { start, end, radius, heavy, life: 0 };
     for (let i = this.projectiles.length - 1; i >= 0; i--) {
       const p = this.projectiles[i];
       if (p.kind === 'player') continue;
       const stubborn = p.kind === 'hammer' || p.kind === 'vortex';
       if (stubborn && !heavy) continue;
       const t = segmentSphere(start, end, p.mesh.position, radius + p.radius);
-      if (t !== null) this.breakShot(i, start.clone().lerp(end, t));
+      if (t !== null) this.breakShot(i, start.clone().lerp(end, t), lance);
     }
   }
   /**
@@ -2981,7 +3024,7 @@ export class Game {
           lance.radius + p.radius
         )
           continue;
-        this.breakShot(i, p.mesh.position.clone());
+        this.breakShot(i, p.mesh.position.clone(), lance);
         break;
       }
     }
@@ -3000,7 +3043,9 @@ export class Game {
     this.prismaHoldTime = this.prismaChargeStart = 0;
     this.prismaChimed = false;
     this.prismaLastAngle = null;
+    this.prismaDry = 0;
     this.prismaLights.length = 0;
+    this.fx.hideAimTrace();
   }
   /** Materialise, spin, fire and shatter the circles; grow and pulse the charging one. */
   private updatePrisma(dt: number) {
@@ -3039,11 +3084,14 @@ export class Game {
       // Dims as it hangs spent; the lens flares as the beam leaves.
       const spent = c.firedAt === null ? 1 : Math.max(0, 1 - c.age / c.shatterAt),
         flash = c.firedAt === null ? 0 : Math.max(0, 1 - (c.age - c.firedAt) / 0.14);
+      // A refused cast dips the newest circle: the click was heard, the spell was not paid for.
+      const dry =
+        i === this.prismaCircles.length - 1 ? 1 - 0.6 * Math.min(1, this.prismaDry * 3) : 1;
       this.fx.spinPrism(
         c.group,
         c.spin,
-        0.45 + 0.55 * spent + flash * 0.7,
-        (c.firedAt === null ? 0.6 : 0.9) + flash * 1.2,
+        (0.45 + 0.55 * spent + flash * 0.7) * dry,
+        ((c.firedAt === null ? 0.6 : 0.9) + flash * 1.2) * dry,
       );
       if (c.age >= c.shatterAt) this.dropPrismaCircle(i, true);
     }
@@ -3062,12 +3110,19 @@ export class Game {
       b.group.scale.setScalar(b.radius * (0.3 + 0.7 * progress) * pulse);
       b.spin += dt * (2 + 9 * progress);
       this.fx.spinPrism(b.group, b.spin, 0.6 + 0.4 * progress, 0.5 + progress);
+      // The sight of the charging lance: a hairline out of the circle to wherever the crosshair
+      // points, closed by a ring where it would land, brightening as the charge fills.
+      const far = b.position.clone().addScaledVector(direction, PRISMA.reach),
+        sight = this.trace(b.position, far, true);
+      if (sight) far.lerpVectors(b.position, far, sight.t);
+      this.fx.aimTrace(b.position, far, progress);
       if (charged && !this.prismaChimed) {
         this.prismaChimed = true;
         this.audio.chargeReady();
         this.fx.burst(b.position, '#fff6dc', 16, 2.2, 0.3, 1);
       }
-    }
+    } else this.fx.hideAimTrace();
+    this.prismaDry = Math.max(0, this.prismaDry - dt);
   }
   /**
    * Where a hit lands on screen, for the floating damage number: position in 0..1 (y down)

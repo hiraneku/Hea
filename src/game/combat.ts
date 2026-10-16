@@ -58,6 +58,17 @@ export const PRISMA = {
    */
   sweep: 2.4,
   /**
+   * Where on the ring the dice prefer to land. The ring stands square to the view, so its own
+   * "right" is the screen's right: the flanks (angle 0, or π on the other side) put a circle
+   * beside the body, clear of the crosshair and of whatever is being aimed at, while straight
+   * up and down the ring is where the sight line lives. `viewBias` is how often the flank band
+   * is drawn from — the rest of the draws still fall anywhere, so the ring keeps its surprise.
+   */
+  flank: 0,
+  viewBias: 0.7,
+  /** Half-width of the flank band, in radians: 0.55 keeps the circles well off dead centre. */
+  viewBiasSpread: 0.55,
+  /**
    * The heavy beam of the large circle. Damage is spent through the heavy-hit path, and the
    * impulse is a launch in Nova's class — a little short of it — so the lance throws the boss.
    */
@@ -86,13 +97,30 @@ export function ringDistance(a: number, b: number) {
  * least `minTurn` away from the previous one, so a quick volley wreathes the body instead of
  * stacking circles.
  */
-export function prismaAngle(random: () => number, previous: number | null): number {
-  let angle = random() * Math.PI * 2;
+export function prismaAngle(
+  random: () => number,
+  previous: number | null,
+  /**
+   * Ring angle that puts a circle beside the body, clear of the sight line. With it, most draws
+   * land in a narrow band on either flank and the rest anywhere on the ring; with it null the
+   * dice are even all the way round.
+   */
+  flank: number | null = null,
+  weight: number = PRISMA.viewBias,
+  spread: number = PRISMA.viewBiasSpread,
+): number {
+  const roll = () => {
+    if (flank === null || random() >= weight) return random() * Math.PI * 2;
+    // Either flank: the two sides are each other's mirror across the body.
+    return (random() < 0.5 ? flank : flank + Math.PI) + (random() * 2 - 1) * spread;
+  };
+  let angle = roll();
   for (let i = 0; i < 8 && previous !== null && ringDistance(angle, previous) < PRISMA.minTurn; i++)
-    angle = random() * Math.PI * 2;
+    angle = roll();
   if (previous !== null && ringDistance(angle, previous) < PRISMA.minTurn)
     angle = previous + Math.PI;
-  return angle % (Math.PI * 2);
+  const full = Math.PI * 2;
+  return ((angle % full) + full) % full;
 }
 
 /**

@@ -238,6 +238,32 @@ describe('Prisma circles and the held lance', () => {
       previous = angle;
     }
   });
+  it('keeps most circles on the flanks, beside the body and clear of the crosshair', () => {
+    const random = seededRandom(913),
+      limit = Math.cos(PRISMA.viewBiasSpread);
+    let left = 0,
+      right = 0,
+      flanked = 0,
+      previous: number | null = null;
+    const draw = 400;
+    for (let i = 0; i < draw; i++) {
+      const angle = prismaAngle(random, previous, PRISMA.flank);
+      if (previous !== null)
+        expect(ringDistance(angle, previous)).toBeGreaterThanOrEqual(PRISMA.minTurn);
+      previous = angle;
+      // Inside the band the circle stands beside the body, never near straight up or straight
+      // down the ring, where the sight line lives.
+      if (Math.abs(Math.cos(angle)) >= limit - 1e-9) {
+        flanked++;
+        if (Math.sin(angle) > 0) right++;
+        else left++;
+      }
+    }
+    // Most draws land on a flank, the rest stay anywhere on the ring, and both sides get used.
+    expect(flanked / draw).toBeGreaterThan(0.7);
+    expect(flanked / draw).toBeLessThan(0.95);
+    expect(Math.min(left, right)).toBeGreaterThan(80);
+  });
   it('falls back to the opposite side when the dice keep landing on the last angle', () => {
     const stuck = () => 0.25;
     const first = prismaAngle(stuck, null);

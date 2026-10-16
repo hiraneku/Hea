@@ -825,9 +825,6 @@ kbd {
   border: 1px solid #d6e8dc39;
   backdrop-filter: blur(12px);
   color: #ecf2e3;
-  transition:
-    background 0.18s,
-    border 0.18s;
   padding: 0 0 10px;
   overflow: hidden;
   display: flex;
@@ -846,6 +843,19 @@ kbd {
   background: var(--element);
   opacity: 0;
   transition: opacity 0.15s;
+}
+/* A cast that was refused — still cooling, or not enough energy: the slot dips and returns.
+   A dim flick, not a flash; it carries information and no motion, so comfort mode keeps it. */
+.spell-slot.dry {
+  opacity: 0.45;
+  filter: grayscale(0.45);
+}
+.spell-slot {
+  transition:
+    background 0.18s,
+    border 0.18s,
+    opacity 0.09s ease-out,
+    filter 0.09s ease-out;
 }
 .spell-slot.selected {
   border-color: var(--element);
