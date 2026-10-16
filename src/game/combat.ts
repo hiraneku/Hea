@@ -15,17 +15,22 @@ export const NOVA_CHARGE = {
 
 /**
  * Prisma. A tap raises a small prism circle at a random point on a ring around the body;
- * a moment later the circle fires a thin beam at the aim and is left hanging where it was
- * raised until it shatters. The button held past `holdAfter` raises one large circle ahead
- * of the body instead, which charges for `chargeTime` and fires a heavy beam on release.
+ * a moment later the circle fires a thin beam at the aim and then hangs alongside the body —
+ * every circle rides with the one who raised it, in first person with the view — until it
+ * shatters. The button held past `holdAfter` raises one large circle ahead of the body
+ * instead, which charges for `chargeTime` and fires a heavy beam on release.
  */
 export const PRISMA = {
   /** Seconds from the tap to the circle starting to materialise. */
-  circleDelay: 0.05,
-  /** Seconds from the circle starting to its beam leaving (tap to hit ≈ 0.17 s). */
-  beamDelay: 0.12,
+  circleDelay: 0.06,
+  /** Seconds the circle takes to materialise once it begins — slow enough to be watched. */
+  appear: 0.15,
+  /** Seconds from the circle starting to its beam leaving (tap to hit ≈ 0.22 s). */
+  beamDelay: 0.16,
+  /** Seconds the small beam stays up, fading over its tail instead of blinking out. */
+  beamLife: 0.4,
   /** Seconds the circle hangs after its beam before shattering. */
-  linger: 0.55,
+  linger: 0.45,
   /** The ring around the body centre the small circles are raised on, in metres. */
   ring: { min: 1.0, max: 2.2 },
   /** From the eyes the ring sits ahead of the view, tighter so it stays in frame. */
@@ -37,10 +42,10 @@ export const PRISMA = {
   /** Seconds for the large circle to charge once begun. */
   chargeTime: 0.6,
   range: 70,
-  circleRadius: 0.5,
-  beamRadius: 0.06,
+  circleRadius: 0.62,
+  beamRadius: 0.075,
   /** The heavy beam of the large circle. Damage is spent through the heavy-hit path. */
-  big: { damage: 90, cost: 20, radius: 0.5, circleRadius: 1.15, impulse: 12, linger: 0.4 },
+  big: { damage: 90, cost: 20, radius: 0.5, circleRadius: 1.5, impulse: 12, linger: 0.45 },
 } as const;
 
 /** The shortest angular distance between two directions on the ring. */

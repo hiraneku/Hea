@@ -358,7 +358,7 @@ test('Prisma damages the boss and Nova launches it into destructible cover', asy
   await scenario(page, 'nova');
   await page.locator('[data-spell="1"]').tap();
   await page.locator('#touch-fire').tap();
-  await step(page, 0.2);
+  await step(page, 0.3);
   expect((await state(page)).boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
   expect((await state(page)).impacts).toBe(0);
   await scenario(page, 'nova');
@@ -1279,7 +1279,7 @@ test('Nova charges while the fire button is held: a tap stays the ordinary blast
   await step(page, 0.05);
   expect((await state(page)).energy).toBeLessThan(100 - SPELLS[1].cost + 1);
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
-  await step(page, 0.15);
+  await step(page, 0.25);
   expect((await state(page)).boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
   expect(await numbers()).toContain(String(SPELLS[1].damage));
 });
@@ -1313,7 +1313,7 @@ test('Prisma raises a circle beside the body that fires a beat later and shatter
   expect(reach).toBeLessThan(PRISMA.ring.max + 0.05);
   expect(cy).toBeGreaterThan(s.position.y + 0.4);
   // ...then the beam leaves it and the hit floats its number.
-  await step(page, 0.12);
+  await step(page, 0.16);
   d = await prisma();
   s = await state(page);
   expect(d.beams).toBe(1);
@@ -1321,11 +1321,16 @@ test('Prisma raises a circle beside the body that fires a beat later and shatter
   expect(s.boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
   expect(s.impacts).toBe(0);
   expect(await numbers()).toContain(String(SPELLS[1].damage));
-  // The circle lingers where it was raised and shatters into splinters instead of fading.
-  await step(page, 0.3);
+  // The circle hangs beside the body — still on its ring, not left behind — and then shatters
+  // into splinters instead of fading away.
+  await step(page, 0.25);
   d = await prisma();
+  s = await state(page);
   expect(d.circles).toHaveLength(1);
-  expect(d.circles[0].position).toEqual([cx, cy, cz]);
+  const still = d.circles[0].position;
+  expect(
+    Math.hypot(still[0] - s.position.x, still[1] - (s.position.y + 1.1), still[2] - s.position.z),
+  ).toBeGreaterThan(PRISMA.ring.min - 0.05);
   await step(page, 0.3);
   d = await prisma();
   expect(d.circles).toHaveLength(0);
@@ -1358,15 +1363,32 @@ test('Prisma raises a circle beside the body that fires a beat later and shatter
   expect(s.boss.health).toBe(DUEL.bossHealth - 4 * SPELLS[1].damage);
   for (let i = 1; i < angles.length; i++)
     expect(ringDistance(angles[i], angles[i - 1])).toBeGreaterThanOrEqual(PRISMA.minTurn - 1e-6);
-  // The circles are anchored in the world: the body walks away and leaves them behind.
-  const anchored = d.circles.map((c) => c.position);
-  expect(anchored.length).toBeGreaterThan(0);
-  await page.keyboard.down('KeyW');
-  await step(page, 0.3);
-  await page.keyboard.up('KeyW');
-  d = await prisma();
+  // The circles ride with the body: they keep their place on the ring around it rather than
+  // being left hanging where they were raised. A volley of four is still standing here.
   expect(d.circles.length).toBeGreaterThan(0);
-  for (const c of d.circles) expect(anchored).toContainEqual(c.position);
+  for (const c of d.circles) {
+    const reach2 = Math.hypot(
+      c.position[0] - s.position.x,
+      c.position[1] - (s.position.y + 1.1),
+      c.position[2] - s.position.z,
+    );
+    expect(reach2).toBeGreaterThan(PRISMA.ring.min - 0.05);
+    expect(reach2).toBeLessThan(PRISMA.ring.max + 0.05);
+  }
+  const standing = d.circles[d.circles.length - 1].position,
+    home = s.position;
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([0, 12, -30], [0, 5, -60]));
+  await step(page, 1 / 60);
+  d = await prisma();
+  s = await state(page);
+  expect(d.circles.length).toBeGreaterThan(0);
+  // The body was carried right across the arena, and the circle went with it, keeping exactly
+  // the place it held on the ring.
+  const carried = d.circles[d.circles.length - 1].position;
+  expect(carried[0] - s.position.x).toBeCloseTo(standing[0] - home.x, 5);
+  expect(carried[1] - s.position.y).toBeCloseTo(standing[1] - home.y, 5);
+  expect(carried[2] - s.position.z).toBeCloseTo(standing[2] - home.z, 5);
+  expect(Math.hypot(carried[0] - standing[0], carried[2] - standing[2])).toBeGreaterThan(10);
   // Hold: the quick beam at the press, the large circle after the threshold, full charge later,
   // the heavy lance on release.
   await scenario(page, 'nova');
@@ -1452,8 +1474,28 @@ test('from the eyes Prisma raises its circles ahead of the view', async ({ page 
   expect(distance).toBeGreaterThan(PRISMA.eyeRing.depth - 0.2);
   expect(distance).toBeLessThan(PRISMA.eyeRing.depth + PRISMA.eyeRing.max + 0.2);
   expect(ahead).toBeGreaterThan(0.6);
-  await step(page, 0.12);
+  // The circle of the eyes is carried along with the view, never left hanging in the world:
+  // the body is thrown right across the arena and the circle keeps its place on the view.
+  const standing = d.prisma.circles[0].position;
+  await step(page, 0.16);
+  let after = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect((await state(page)).boss.health).toBe(DUEL.bossHealth - SPELLS[1].damage);
+  expect(after.prisma.beams).toBe(1);
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([0, 12, -30], [0, 5, -60]));
+  await step(page, 0.25);
+  after = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(after.prisma.circles).toHaveLength(1);
+  const carried = after.prisma.circles[0].position,
+    [mx, my, mz] = after.cameraPosition,
+    cdx = carried[0] - mx,
+    cdy = carried[1] - my,
+    cdz = carried[2] - mz,
+    cdist = Math.hypot(cdx, cdy, cdz),
+    cahead = (-Math.sin(yaw) * cdx - Math.cos(yaw) * cdz) / cdist;
+  expect(cdist).toBeGreaterThan(PRISMA.eyeRing.depth - 0.2);
+  expect(cdist).toBeLessThan(PRISMA.eyeRing.depth + PRISMA.eyeRing.max + 0.2);
+  expect(cahead).toBeGreaterThan(0.6);
+  expect(Math.hypot(carried[0] - standing[0], carried[2] - standing[2])).toBeGreaterThan(5);
 });
 
 test('the dash follows the stick in both views, and the surge after it dresses the frame until the speed settles', async ({

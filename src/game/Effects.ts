@@ -114,6 +114,26 @@ export function sigilTexture(): THREE.CanvasTexture {
 }
 
 /**
+ * A soft round bloom, bright at the middle and falling away to nothing at the rim: the light
+ * a beam throws at its muzzle and its hit, drawn as a camera-facing sprite.
+ */
+export function glowTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 128;
+  const c = canvas.getContext('2d')!;
+  const wash = c.createRadialGradient(64, 64, 0, 64, 64, 64);
+  wash.addColorStop(0, 'rgba(255,255,255,1)');
+  wash.addColorStop(0.28, 'rgba(255,255,255,0.55)');
+  wash.addColorStop(0.6, 'rgba(255,255,255,0.16)');
+  wash.addColorStop(1, 'rgba(255,255,255,0)');
+  c.fillStyle = wash;
+  c.fillRect(0, 0, 128, 128);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
  * The Prisma circle: a glass-like ring built from triangles — a hexagram of two thin
  * triangles, a bolder inner triangle turned against them, a scale of prism ticks on the rim
  * and a small lens at the centre the beam leaves from. Drawn white; the material tints it.
@@ -141,13 +161,13 @@ export function prismTexture(): THREE.CanvasTexture {
     }
     c.stroke();
   };
-  ring(240, 3.5);
-  ring(228, 1.2);
-  ring(92, 1.6);
-  triangle(214, 0, 2.2);
-  triangle(214, Math.PI / 3, 2.2);
-  triangle(120, Math.PI, 3.4);
-  triangle(60, 0, 1.8);
+  ring(240, 5.6);
+  ring(227, 2.2);
+  ring(92, 2.6);
+  triangle(213, 0, 3.4);
+  triangle(213, Math.PI / 3, 3.4);
+  triangle(120, Math.PI, 4.6);
+  triangle(60, 0, 2.8);
   // Prism ticks around the rim, every fifth one a small filled wedge.
   for (let i = 0; i < 48; i++) {
     c.save();
@@ -160,16 +180,16 @@ export function prismTexture(): THREE.CanvasTexture {
       c.closePath();
       c.fill();
     } else {
-      c.lineWidth = 1.4;
+      c.lineWidth = 2.2;
       c.beginPath();
-      c.moveTo(0, -229);
-      c.lineTo(0, -238);
+      c.moveTo(0, -228);
+      c.lineTo(0, -239);
       c.stroke();
     }
     c.restore();
   }
   // Spokes from the lens to the hexagram's points.
-  c.lineWidth = 1.1;
+  c.lineWidth = 1.9;
   for (let i = 0; i < 6; i++) {
     const a = (i * Math.PI) / 3 - Math.PI / 2;
     c.beginPath();
@@ -408,6 +428,7 @@ const IMPACT_TINT: Record<ProjectileKind, string> = {
 export class Effects {
   readonly sigilMap = sigilTexture();
   readonly prismMap = prismTexture();
+  private readonly glowMap = glowTexture();
   private readonly splinter = splinterGeometry();
   private readonly tube = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true);
   private prismShatters = 0;
@@ -1473,7 +1494,7 @@ export class Effects {
         new THREE.PlaneGeometry(size, size),
         new THREE.MeshBasicMaterial({
           map: this.prismMap,
-          color: tint.clone().multiplyScalar(big ? 3.2 : 3),
+          color: tint.clone().multiplyScalar(big ? 3.6 : 3.4),
           transparent: true,
           opacity,
           blending: THREE.AdditiveBlending,
@@ -1483,9 +1504,24 @@ export class Effects {
         }),
       );
     const outer = plate(2, 1),
-      inner = plate(1.26, 0.75);
+      inner = plate(1.26, 0.85);
     inner.userData.counter = true;
     inner.position.z = 0.004;
+    // The light the circle itself throws: a soft wash under the plates, so it reads as lit.
+    const halo = new THREE.Mesh(
+      new THREE.PlaneGeometry(3.1, 3.1),
+      new THREE.MeshBasicMaterial({
+        map: this.glowMap,
+        color: tint.clone().multiplyScalar(big ? 1.5 : 1.2),
+        transparent: true,
+        opacity: big ? 0.5 : 0.4,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+    );
+    halo.position.z = -0.008;
     const glass = new THREE.Mesh(
       new THREE.CircleGeometry(0.97, 48),
       new THREE.MeshBasicMaterial({
@@ -1502,9 +1538,9 @@ export class Effects {
     const rim = new THREE.Mesh(
       new THREE.RingGeometry(0.975, 1.03, 72),
       new THREE.MeshBasicMaterial({
-        color: new THREE.Color('#ffffff').multiplyScalar(1.6),
+        color: new THREE.Color('#ffffff').multiplyScalar(2.4),
         transparent: true,
-        opacity: 0.9,
+        opacity: 0.95,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         side: THREE.DoubleSide,
@@ -1513,9 +1549,9 @@ export class Effects {
     );
     rim.position.z = 0.006;
     const lens = new THREE.Mesh(
-      new THREE.CircleGeometry(0.1, 24),
+      new THREE.CircleGeometry(0.12, 24),
       new THREE.MeshBasicMaterial({
-        color: '#ffffff',
+        color: new THREE.Color('#ffffff').multiplyScalar(3.2),
         transparent: true,
         opacity: 0.95,
         blending: THREE.AdditiveBlending,
@@ -1526,7 +1562,7 @@ export class Effects {
     );
     lens.position.z = 0.008;
     lens.userData.lens = true;
-    group.add(glass, outer, inner, rim, lens);
+    group.add(halo, glass, outer, inner, rim, lens);
     group.traverse((o) => {
       if (o instanceof THREE.Mesh) o.userData.baseOpacity = (o.material as THREE.Material).opacity;
     });
@@ -1543,10 +1579,11 @@ export class Effects {
     }
   }
   /**
-   * The Prisma beam: a white core in a cyan body, with the thin spectral fringes a prism
-   * throws — magenta to one side, amber to the other — and a wide faint halo. It extends from
-   * its circle to the target over 40 ms, holds, then thins and fades out; the heavy lance is
-   * the same beam at ten times the radius, pinching as it dies.
+   * The Prisma beam: a white-hot core inside a cyan body, wrapped in a wide soft halo, with
+   * the thin spectral fringes a prism throws — magenta to one side, amber to the other — and
+   * a camera-facing flare at the muzzle and at the hit. It extends from its circle to the
+   * target over 60 ms, then holds and fades away over its tail (rather than blinking out);
+   * the heavy lance is the same beam at seven times the radius, pinching as it dies.
    */
   prismBeam(start: THREE.Vector3, end: THREE.Vector3, radius: number, life: number, big = false) {
     const direction = v1.subVectors(end, start),
@@ -1584,11 +1621,15 @@ export class Effects {
       return mesh;
     };
     group.add(
-      tube(radius * 2.6, '#8cedf7', big ? 0.14 : 0.1, 1.2, null),
-      tube(radius, '#8cedf7', big ? 0.8 : 0.9, big ? 1.9 : 2.6, null),
-      tube(radius * 0.34, '#ffffff', 1, 1, null),
-      tube(radius * 0.5, '#f0a6ff', big ? 0.75 : 0.5, 1.6, new THREE.Vector3(radius, 0, 0)),
-      tube(radius * 0.5, '#fff0a8', big ? 0.7 : 0.45, 1.6, new THREE.Vector3(-radius, 0, 0)),
+      // The aura: a broad wash of cyan light around the whole lance, well past its body.
+      tube(radius * (big ? 4.4 : 7.6), '#4fd2ff', big ? 0.14 : 0.13, 1.15, null),
+      // The glow proper, bloomed by the composer.
+      tube(radius * (big ? 2.3 : 3.2), '#7fe4ff', big ? 0.34 : 0.3, big ? 1.5 : 1.9, null),
+      tube(radius * 1.25, '#8ceaff', big ? 0.8 : 0.85, big ? 1.5 : 2.2, null),
+      tube(radius * 0.34, '#ffffff', 1, big ? 4.4 : 5, null),
+      // The spectrum, thrown just clear of the body so the dispersion is actually seen.
+      tube(radius * 0.45, '#f0a6ff', big ? 0.85 : 0.75, 1.3, new THREE.Vector3(radius * 1.3, 0, 0)),
+      tube(radius * 0.45, '#fff0a8', big ? 0.8 : 0.7, 1.3, new THREE.Vector3(-radius * 1.3, 0, 0)),
     );
     group.position.copy(start);
     group.quaternion.setFromUnitVectors(UP, direction);
@@ -1596,11 +1637,14 @@ export class Effects {
     group.userData.kind = 'prism-beam';
     this.add(group, life);
     const effect = this.timed[this.timed.length - 1];
+    // Fire a flare at each end: the light bursting off the lens and off whatever it lands on.
+    this.flare(start, radius * (big ? 3.2 : 4.4), life * 0.8, '#dff6ff', 1);
+    this.flare(end, radius * (big ? 5 : 7), life * 0.75, '#ffffff', 1.25);
     // The heavy lance lands inside a contact freeze, so it is drawn whole at once; the small
-    // beams extend over their first 40 ms.
+    // beams extend over their first 60 ms.
     const drive = (age: number, left: number) => {
-      const reach = big ? 1 : Math.min(1, age / 0.04),
-        fade = Math.min(1, left / (big ? 0.22 : 0.12)),
+      const reach = big ? 1 : Math.min(1, age / 0.06),
+        fade = Math.min(1, left / (big ? 0.24 : life * 0.6)),
         pinch = big ? 1 - 0.55 * Math.pow(1 - left / life, 2) : 1 - 0.3 * (1 - left / life);
       group.scale.y = Math.max(0.001, length * reach * reach * (3 - 2 * reach));
       for (const child of group.children) {
@@ -1618,6 +1662,39 @@ export class Effects {
     };
     drive(0, life);
     effect.animate = (e) => drive(e.max - e.life, e.life);
+  }
+  /**
+   * A camera-facing bloom of light at `at`, `radius` across the middle, swelling a touch as it
+   * burns out. Sprites are not meshes, so it fades itself rather than leaning on `update`.
+   */
+  flare(
+    at: THREE.Vector3,
+    radius: number,
+    life: number,
+    tint: THREE.ColorRepresentation,
+    punch = 1,
+  ) {
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: this.glowMap,
+        color: new THREE.Color(tint),
+        transparent: true,
+        opacity: 1,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        toneMapped: false,
+      }),
+    );
+    sprite.position.copy(at);
+    sprite.scale.setScalar(radius * 2 * punch);
+    sprite.userData.keepGeometry = true;
+    this.add(sprite, life);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e) => {
+      const burn = 1 - e.life / e.max;
+      sprite.scale.setScalar(radius * 2 * punch * (1 + 0.5 * burn));
+      (sprite.material as THREE.SpriteMaterial).opacity = Math.pow(1 - burn, 1.6) * 0.85;
+    };
   }
   /**
    * Prism splinters: small glass triangles in the spectrum's tints, thrown out across the
@@ -1989,8 +2066,9 @@ export class Effects {
     e.object.removeFromParent();
     const geometries = new Set<THREE.BufferGeometry>();
     e.object.traverse((o) => {
-      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments) {
-        if (!o.userData.keepGeometry) geometries.add(o.geometry);
+      if (o instanceof THREE.Mesh || o instanceof THREE.LineSegments || o instanceof THREE.Sprite) {
+        const mesh = o as THREE.Mesh;
+        if (mesh.geometry && !o.userData.keepGeometry) geometries.add(mesh.geometry);
         const materials = Array.isArray(o.material) ? o.material : [o.material];
         materials.forEach((m) => m.dispose());
       }

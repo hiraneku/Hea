@@ -107,11 +107,19 @@ interface TraceHit {
   obstacle?: Obstacle;
   ground?: boolean;
 }
-/** A Prisma circle hanging in the world: raised by a tap (or the hold), fires once, shatters. */
+/**
+ * A Prisma circle: raised by a tap (or the hold), fires once, then shatters. It rides with
+ * whoever raised it — `offset` is where it sits relative to the body chest, or to the view in
+ * first person, and is refreshed every frame so no circle is ever left behind.
+ */
 interface PrismaCircle {
   group: THREE.Group;
   position: THREE.Vector3;
   normal: THREE.Vector3;
+  /** Home relative to the body chest, or to the view when `eye` is set. */
+  offset: THREE.Vector3;
+  /** True when the circle rides the first-person view instead of the body. */
+  eye: boolean;
   radius: number;
   /** Seconds since it began to materialise (negative while still waiting to). */
   age: number;
@@ -131,7 +139,10 @@ const UP = new THREE.Vector3(0, 1, 0);
 const HAMMER_SPLASH = 3.6;
 /** Height of the ragdoll's pelvis above the physics root (the lying body's thickness). */
 const RAGDOLL_ROOT = 0.3;
+/** Where Prisma circles ride on the body: the chest, not the feet. */
+const PRISMA_LIFT = new THREE.Vector3(0, 1.1, 0);
 const direction = new THREE.Vector3();
+const viewQuaternion = new THREE.Quaternion();
 
 export class Game {
   readonly renderer: THREE.WebGLRenderer;
@@ -2630,6 +2641,21 @@ export class Game {
     return { progress: 0, charged: false };
   }
   /** Where Prisma is aimed right now: the boss when it is in the sights, else far down the view. */
+  /**
+   * Where a circle belongs right now: on the body's chest, or in first person on the view
+   * itself — turning the head carries the circle round with it.
+   */
+  private prismaSpot(c: PrismaCircle) {
+    if (!c.eye) return this.player.clone().add(PRISMA_LIFT).add(c.offset);
+    this.camera.getWorldQuaternion(viewQuaternion);
+    return this.camera.position.clone().add(c.offset.clone().applyQuaternion(viewQuaternion));
+  }
+  /** The home of a circle raised at `position`, in its anchor's own frame. */
+  private prismaOffset(position: THREE.Vector3, eye: boolean) {
+    if (!eye) return position.clone().sub(this.player).sub(PRISMA_LIFT);
+    this.camera.getWorldQuaternion(viewQuaternion).invert();
+    return position.clone().sub(this.camera.position).applyQuaternion(viewQuaternion);
+  }
   private prismaAim(hasTarget: boolean) {
     this.camera.getWorldDirection(direction);
     return this.boss.alive && (hasTarget || this.aimsAtBoss(direction))
@@ -2639,14 +2665,14 @@ export class Game {
   /**
    * A tap of Prisma: raise a small circle at a random point on the ring around the body (or
    * ahead of the eyes), on the plane square to the aim, somewhere the floor and the walls
-   * leave clear, turned well away from the previous one. It fires on its own a moment later
-   * and stays where it was raised — the body is free to leave it behind.
+   * leave clear, turned well away from the previous one. It fires on its own a moment later,
+   * and rides with the body from then on.
    */
   private raisePrismaCircle(hasTarget: boolean) {
     const first = this.cameraMode === 'first';
     const aim = this.prismaAim(hasTarget);
     this.camera.getWorldDirection(direction);
-    const centre = this.player.clone().add(new THREE.Vector3(0, 1.1, 0));
+    const centre = this.player.clone().add(PRISMA_LIFT);
     if (first) {
       // Ahead of the eyes, pulled in short of anything the view is pressed against.
       let depth: number = PRISMA.eyeRing.depth;
@@ -2695,6 +2721,8 @@ export class Game {
       group,
       position,
       normal,
+      offset: this.prismaOffset(position, first),
+      eye: first,
       radius: PRISMA.circleRadius,
       age: -PRISMA.circleDelay,
       fireAt: PRISMA.beamDelay,
@@ -2716,9 +2744,9 @@ export class Game {
     // The circle squares up to the beam it fires.
     c.normal.copy(along);
     c.group.quaternion.setFromUnitVectors(FORWARD, along);
-    this.fx.prismBeam(c.position, end, PRISMA.beamRadius, 0.25);
-    this.fx.burst(end, '#95f5ff', 12, 3, 0.28, 1);
-    this.fx.prismShards(end, along.clone().negate(), 0.5, 5);
+    this.fx.prismBeam(c.position, end, PRISMA.beamRadius, PRISMA.beamLife);
+    this.fx.burst(end, '#95f5ff', 14, 3, 0.32, 1);
+    this.fx.prismShards(end, along.clone().negate(), 0.55, 6);
     this.audio.cast(1);
     this.prismaBeams++;
     if (hit?.boss)
@@ -2729,16 +2757,14 @@ export class Game {
       });
   }
   /**
-   * The hold: one large circle raised ahead of the body, square to the aim, which charges in
-   * place (it does not follow the body either) and fires the heavy lance on release.
+   * The hold: one large circle raised ahead of the body, square to the aim, which charges as
+   * it travels with the body and fires the heavy lance on release.
    */
   private raisePrismaBig() {
     this.camera.getWorldDirection(direction);
     const first = this.cameraMode === 'first';
     const aim = this.prismaAim(false);
-    const anchor = first
-      ? this.camera.position.clone()
-      : this.player.clone().add(new THREE.Vector3(0, 1.15, 0));
+    const anchor = first ? this.camera.position.clone() : this.player.clone().add(PRISMA_LIFT);
     const toAim = aim.clone().sub(anchor).normalize();
     let reach = first ? 1.7 : 1.5;
     const wall = this.trace(anchor, anchor.clone().addScaledVector(toAim, reach), false, 0.4);
@@ -2757,6 +2783,8 @@ export class Game {
       group,
       position,
       normal: toAim,
+      offset: this.prismaOffset(position, first),
+      eye: first,
       radius: PRISMA.big.circleRadius,
       age: 0,
       fireAt: null,
@@ -2846,15 +2874,18 @@ export class Game {
     for (let i = this.prismaCircles.length - 1; i >= 0; i--) {
       const c = this.prismaCircles[i];
       c.age += dt;
+      // Every circle rides with its caster: it is never left hanging where it was raised.
+      c.position.copy(this.prismaSpot(c));
+      c.group.position.copy(c.position);
       if (c.age < 0) continue;
       c.group.visible = true;
       if (!c.big) {
-        // Snaps up with a small overshoot, flicking round fast as it forms, then drifting.
-        const appear = Math.min(1, c.age / 0.09),
-          ease = appear * (2 - appear),
-          overshoot = 1 + 0.14 * Math.sin(Math.min(1, c.age / 0.16) * Math.PI);
-        c.group.scale.setScalar(c.radius * (0.35 + 0.65 * ease) * overshoot);
-        c.spin += dt * (c.fireAt === null ? 1.8 : 9 - 6 * ease);
+        // Opens unhurried — a slow bloom rather than a snap — then spins up as it is born.
+        const appear = Math.min(1, c.age / PRISMA.appear),
+          ease = appear * appear * (3 - 2 * appear),
+          overshoot = 1 + 0.1 * Math.sin(Math.min(1, c.age / (PRISMA.appear + 0.08)) * Math.PI);
+        c.group.scale.setScalar(c.radius * (0.22 + 0.78 * ease) * overshoot);
+        c.spin += dt * (2.2 + (c.fireAt === null ? 0 : 6.5 * ease));
       } else c.spin += dt * 2.5;
       if (c.fireAt !== null && c.age >= c.fireAt) {
         c.fireAt = null;
@@ -2875,6 +2906,9 @@ export class Game {
     const b = this.prismaBig;
     if (b) {
       b.age += dt;
+      // The charging circle is held out in front of the caster and travels with them too.
+      b.position.copy(this.prismaSpot(b));
+      b.group.position.copy(b.position);
       const { progress, charged } = this.heldSpell();
       const pulse = charged ? 1 + 0.06 * Math.sin(this.time * 20) : 1;
       b.group.scale.setScalar(b.radius * (0.3 + 0.7 * progress) * pulse);

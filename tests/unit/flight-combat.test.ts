@@ -258,6 +258,17 @@ describe('Prisma circles and the held lance', () => {
     // A circle raised late (energy arrived mid-hold) counts its charge from when it rose.
     expect(prismaHold(1.0, 100, 0.8).progress).toBeCloseTo(1 / 3, 5);
   });
+  it('forms each circle before its beam leaves, and lets the beam burn on after it', () => {
+    // The circle opens over `appear`; the beam waits at least that long, so it never fires
+    // out of a half-formed ring.
+    expect(PRISMA.appear).toBeLessThanOrEqual(PRISMA.beamDelay);
+    expect(PRISMA.beamDelay).toBeGreaterThan(0.1);
+    // The beam lingers well past the frame it was fired on instead of blinking out.
+    expect(PRISMA.beamLife).toBeGreaterThan(0.3);
+    // A circle big enough to read as a ring, not a bead on the end of the beam.
+    expect(PRISMA.circleRadius).toBeGreaterThan(PRISMA.beamRadius * 5);
+    expect(PRISMA.big.circleRadius).toBeGreaterThan(PRISMA.big.radius * 2);
+  });
   it('keeps the agreed prices: cheap quick beams, a heavy lance at 90 for 20', () => {
     expect(SPELLS[1].cost).toBe(2);
     expect(SPELLS[1].damage).toBe(15);
