@@ -61,7 +61,7 @@ app.innerHTML = `
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.15</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.16</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -315,8 +315,8 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       <div id="mobile-guide" class="control-guide" ${!isTouch ? 'hidden' : ''}>
         <div><span>Bergerak</span><b>JOYSTICK KIRI</b></div><div><span>Arahkan kamera</span><b>GESER AREA KANAN</b></div><div><span>Serang berulang</span><b>TAHAN TOMBOL SERANG</b></div><div><span>Ganti sihir</span><b>SENTUH SLOT SIHIR</b></div><div><span>Terbang naik / turun</span><b>TAHAN NAIK / TURUN</b></div><div><span>Menghindar / kunci kamera</span><b>DASH / FOKUS</b></div><div><span>Perisai ON / OFF</span><b><kbd>G</kbd> / TOMBOL AEGIS</b></div><div><span>Mode terbang / jalan</span><b><kbd>F</kbd> / TOMBOL MODE</b></div><div><span>Bantuan bidik</span><b>OTOMATIS AKTIF</b></div>
       </div>
-      <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${['Proyektil cepat. Ikuti target dengan crosshair.', 'Tap: lingkaran acak di sekitarmu menembakkan sinar. Tahan: lingkaran besar di depan pandangan mengisi, lepas untuk meluncurkan lancip berat.', 'Ledakan kuat. Hempaskan boss dan hancurkan penghalang.'][i]}</span></div>`).join('')}</div>
-      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; selama masih berdiri, jejak itu ikut menahan tembakan berikutnya pada lintasan yang sama, dan saat OFF jejak lama tidak memblokir serangan baru. Patch yang muncul berdampingan menyusun diri rapat seperti kepingan puzzle, tidak menumpuk. Proyektil benar-benar menghantam permukaannya: tubuhnya gepeng dan memercik di sana, patch terdorong dan beriak. Satu patch hanya kuat menahan lima hit: kepingnya makin menyala dan retak, lalu pecah berhamburan dan menyisakan lubang di arah itu selama sesaat—bergeraklah. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat; hit berat membeku sejenak lalu lepas dalam gerak lambat sebelum hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret: tanah terbelah membentuk alur lurus searah seretan dengan gundukan terangkat di kiri-kanannya, bongkahan tanah berhamburan, lalu tubuh langsung bangkit; bila melayang lama tanpa menyentuh apa pun, ia menegakkan diri di udara. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Pusaran Surya: benih gelap meluncur ke dekatmu lalu membuka sumur gravitasi yang menyedot tubuh dan segala percikan selama hampir dua detik, kemudian meledak menjadi cincin bara mendatar—jangan kabur lurus (punggungmu buta), tapi naik atau menukik keluar dari bidang cincinnya. Seret kamera untuk melepas fokus.</p>
+      <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${['Proyektil cepat. Ikuti target dengan crosshair.', 'Tap: lingkaran acak di sekitarmu menembakkan sinar yang menyapu proyektil musuh di jalurnya. Tahan: lingkaran besar di depan pandangan mengisi; lepas untuk lancip berat yang membongkar dinding dan memecahkan serangan berat.', 'Ledakan kuat. Hempaskan boss dan hancurkan penghalang.'][i]}</span></div>`).join('')}</div>
+      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; selama masih berdiri, jejak itu ikut menahan tembakan berikutnya pada lintasan yang sama, dan saat OFF jejak lama tidak memblokir serangan baru. Patch yang muncul berdampingan menyusun diri rapat seperti kepingan puzzle, tidak menumpuk. Proyektil benar-benar menghantam permukaannya: tubuhnya gepeng dan memercik di sana, patch terdorong dan beriak. Satu patch hanya kuat menahan lima hit: kepingnya makin menyala dan retak, lalu pecah berhamburan dan menyisakan lubang di arah itu selama sesaat—bergeraklah. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat; hit berat membeku sejenak lalu lepas dalam gerak lambat sebelum hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret: tanah terbelah membentuk alur lurus searah seretan dengan gundukan terangkat di kiri-kanannya, bongkahan tanah berhamburan, lalu tubuh langsung bangkit; bila melayang lama tanpa menyentuh apa pun, ia menegakkan diri di udara. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Pusaran Surya: benih gelap meluncur ke dekatmu lalu membuka sumur gravitasi yang menyedot tubuh dan segala percikan selama hampir dua detik, kemudian meledak menjadi cincin bara mendatar—jangan kabur lurus (punggungmu buta), tapi naik atau menukik keluar dari bidang cincinnya. Sinar Prisma menyapu garis bidikmu: rentetan api dan orb homing pecah begitu melintasinya; bola surya dan inti Pusaran Surya hanya pecah oleh lancip berat. Seret kamera untuk melepas fokus.</p>
       <button class="primary-button full-width" id="panel-done"><span>MENGERTI</span>${icons.arrow}</button>`;
   } else if (type === 'settings') {
     content = `<p class="panel-description">Preferensimu tersimpan di perangkat ini.</p>
@@ -516,10 +516,12 @@ function updateHud(s: Snapshot) {
   $('#hud-fps').textContent = `${s.fps} FPS`;
   $('#menu-fps').textContent = String(s.fps);
   const fast = (s.flight.speed > 25.5 || s.launched) && s.mode === 'playing';
-  $('#speed-lines').classList.toggle('active', fast && !settings.reducedEffects);
+  dressing.fast = fast && !settings.reducedEffects && s.mode === 'playing';
+  $('#speed-lines').classList.toggle('active', dressing.fast);
   // The post-dash surge: the speed lines thicken and a thin vignette closes in while the
   // motor runs hot, both easing away with the boost itself.
   const surge = s.mode === 'playing' && !settings.reducedEffects ? s.flight.boost : 0;
+  dressing.surge = surge;
   $('#speed-lines').classList.toggle('surge', surge > 0.05);
   experience.style.setProperty('--surge', surge.toFixed(3));
   document.querySelectorAll<HTMLElement>('.spell-slot').forEach((button, i) => {
@@ -555,6 +557,45 @@ function updateHud(s: Snapshot) {
     falling: 'DI UDARA',
   }[s.flight.phase];
   $('#flight-altitude').textContent = `${s.flight.altitude.toFixed(1)} M`;
+}
+
+/**
+ * The speed lines are dressed every frame rather than on the HUD's slow tick: the vanishing
+ * point they radiate from follows the way the body is travelling — the stick you are holding,
+ * the dive you are in — easing after it instead of snapping.
+ */
+const dressing = {
+  fast: false,
+  surge: 0,
+  x: 0,
+  y: 0,
+  last: 0,
+};
+function dressFrame() {
+  requestAnimationFrame(dressFrame);
+  const now = performance.now(),
+    dt = Math.min(0.1, (now - dressing.last) / 1000 || 0);
+  dressing.last = now;
+  if (!game) return;
+  let targetX = 0,
+    targetY = 0;
+  if (dressing.fast) {
+    const travel = game.travel,
+      // Travel measured across the view itself: a turn (or a strafe) leans the spokes that way,
+      // a dive pulls the vanishing point up and a climb pushes it down.
+      lateral = travel.dot(game.viewRight),
+      vertical = travel.dot(game.viewUp);
+    targetX = Math.max(-90, Math.min(90, lateral * 2.6));
+    targetY = Math.max(-70, Math.min(70, -vertical * 2.2));
+  }
+  // They always drift back to the centre of the screen, so the next burst of speed starts
+  // from the middle instead of from wherever the last turn left them.
+  const ease = 1 - Math.exp(-dt * 6);
+  dressing.x += (targetX - dressing.x) * ease;
+  dressing.y += (targetY - dressing.y) * ease;
+  const lines = $('#speed-lines');
+  lines.style.setProperty('--line-x', `${dressing.x.toFixed(1)}px`);
+  lines.style.setProperty('--line-y', `${dressing.y.toFixed(1)}px`);
 }
 
 async function boot() {
@@ -616,6 +657,7 @@ async function boot() {
     setInterval(() => {
       if (!document.hidden) updateHud(game.snapshot);
     }, 100);
+    requestAnimationFrame(dressFrame);
     requestAnimationFrame(() => {
       $('#boot').classList.add('loaded');
       setTimeout(() => {

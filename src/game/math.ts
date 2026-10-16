@@ -112,6 +112,43 @@ export function segmentSphere(
   return t >= 0 && t <= 1 ? t : null;
 }
 
+/**
+ * How close two segments pass each other, in metres — the least distance between any point of
+ * `a` and any point of `b`. Used for the beams: a shot is caught if the path it flew this
+ * frame came within reach of the lance, so a fast bolt cannot slip through between frames.
+ */
+export function segmentDistance(a1: Point3, a2: Point3, b1: Point3, b2: Point3): number {
+  const ux = a2.x - a1.x,
+    uy = a2.y - a1.y,
+    uz = a2.z - a1.z,
+    vx = b2.x - b1.x,
+    vy = b2.y - b1.y,
+    vz = b2.z - b1.z,
+    wx = a1.x - b1.x,
+    wy = a1.y - b1.y,
+    wz = a1.z - b1.z;
+  const a = ux * ux + uy * uy + uz * uz,
+    b = ux * vx + uy * vy + uz * vz,
+    c = vx * vx + vy * vy + vz * vz,
+    d = ux * wx + uy * wy + uz * wz,
+    e = vx * wx + vy * wy + vz * wz,
+    denom = a * c - b * b;
+  // Closest parameters along each segment, clamped so a degenerate (point) segment still works.
+  let s = denom > 1e-9 ? clamp((b * e - c * d) / denom, 0, 1) : 0;
+  let t = c > 1e-9 ? (b * s + e) / c : 0;
+  if (t < 0) {
+    t = 0;
+    s = a > 1e-9 ? clamp(-d / a, 0, 1) : 0;
+  } else if (t > 1) {
+    t = 1;
+    s = a > 1e-9 ? clamp((b - d) / a, 0, 1) : 0;
+  }
+  const dx = wx + ux * s - vx * t,
+    dy = wy + uy * s - vy * t,
+    dz = wz + uz * s - vz * t;
+  return Math.hypot(dx, dy, dz);
+}
+
 export function segmentBox(start: Point3, end: Point3, b: Obstacle, padding = 0): number | null {
   let near = 0,
     far = 1;

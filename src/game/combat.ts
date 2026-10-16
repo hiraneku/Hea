@@ -50,13 +50,29 @@ export const PRISMA = {
   chargeTime: 0.6,
   /** How far a beam is followed when it meets nothing at all — a barrier in the far blue. */
   reach: FAR_REACH,
-  circleRadius: 0.62,
-  beamRadius: 0.075,
+  circleRadius: 0.72,
+  beamRadius: 0.085,
+  /**
+   * How far off its own line a beam still breaks enemy fire: a lance of light is a defensive
+   * tool, so its corridor is generous rather than a razor's width.
+   */
+  sweep: 2.4,
   /**
    * The heavy beam of the large circle. Damage is spent through the heavy-hit path, and the
    * impulse is a launch in Nova's class — a little short of it — so the lance throws the boss.
    */
-  big: { damage: 90, cost: 20, radius: 0.5, circleRadius: 1.5, impulse: 115, linger: 0.45 },
+  big: {
+    damage: 90,
+    cost: 20,
+    radius: 0.5,
+    circleRadius: 1.5,
+    impulse: 115,
+    linger: 0.45,
+    /** The heavy lance's own corridor: wider, and it breaks the sphere and the seed too. */
+    sweep: 2.8,
+    /** Radius of the wound the lance tears out of a slab too thick to bore through. */
+    crater: 2.9,
+  },
 } as const;
 
 /** The shortest angular distance between two directions on the ring. */

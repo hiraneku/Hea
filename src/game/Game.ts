@@ -42,6 +42,7 @@ import {
   resolveCircle,
   seededRandom,
   segmentBox,
+  segmentDistance,
   segmentSphere,
   type Obstacle,
 } from './math';
@@ -169,6 +170,9 @@ export class Game {
   private player = START.clone();
   private previousPlayer = START.clone();
   private velocity = new THREE.Vector3();
+  private travelCache = new THREE.Vector3();
+  private viewRightCache = new THREE.Vector3();
+  private viewUpCache = new THREE.Vector3();
   private impulse = new THREE.Vector3();
   private airDash = new AirDash();
   private flightEnabled = true;
@@ -249,6 +253,13 @@ export class Game {
   private prismaLastAngle: number | null = null;
   private prismaRandom: () => number = Math.random;
   private prismaBeams = 0;
+  private prismaLights: {
+    start: THREE.Vector3;
+    end: THREE.Vector3;
+    radius: number;
+    heavy: boolean;
+    life: number;
+  }[] = [];
   private prismaBigCasts = 0;
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
@@ -379,6 +390,7 @@ export class Game {
       },
     );
     this.fx = new Effects(this.scene);
+    this.fx.eye = this.camera;
     this.spellRuneMaterial = new THREE.MeshBasicMaterial({
       map: this.fx.sigilMap,
       color: '#ffba78',
@@ -2647,6 +2659,17 @@ export class Game {
     }
     return { progress: 0, charged: false };
   }
+  /** How the body is travelling right now, for the frame-rate dressing of the screen. */
+  get travel() {
+    return this.travelCache.copy(this.velocity).add(this.impulse).add(this.airDash.velocity);
+  }
+  /** The view's own right and up in the world: travel across them is what a turn looks like. */
+  get viewRight() {
+    return this.viewRightCache.set(1, 0, 0).applyQuaternion(this.camera.quaternion);
+  }
+  get viewUp() {
+    return this.viewUpCache.set(0, 1, 0).applyQuaternion(this.camera.quaternion);
+  }
   /** Where Prisma is aimed right now: the boss when it is in the sights, else far down the view. */
   /**
    * Where a following circle belongs right now: `reach` metres ahead of its caster along the
@@ -2746,7 +2769,7 @@ export class Game {
   /** The beam of a small circle: a thin lance from the circle to the aim, hitting at once. */
   private firePrismaBeam(c: PrismaCircle) {
     const aim = this.prismaAim(c.hasTarget),
-      along = aim.sub(c.position).normalize(),
+      along = aim.clone().sub(c.position).normalize(),
       end = c.position.clone().addScaledVector(along, PRISMA.reach),
       hit = this.trace(c.position, end, true);
     if (hit) end.lerpVectors(c.position, end, hit.t);
@@ -2758,6 +2781,12 @@ export class Game {
     this.fx.prismShards(end, along.clone().negate(), 0.55, 6);
     this.audio.cast(1);
     this.prismaBeams++;
+    // The curtain of light stands on the body's own line of fire — from the chest to the aim —
+    // rather than on the slanted line from the circle, so what it sweeps is the lane being
+    // defended, whichever side of the body the circle was raised on.
+    const curtain = this.player.clone().add(PRISMA_LIFT);
+    this.breakShots(curtain, aim, PRISMA.sweep, false);
+    this.lightLance(curtain, aim, PRISMA.sweep, false);
     if (hit?.boss)
       this.damageBoss(SPELLS[1].damage, along.clone().multiplyScalar(1.5), {
         spell: 1,
@@ -2828,28 +2857,49 @@ export class Game {
     const along = b.normal.clone().normalize(),
       far = b.position.clone().addScaledVector(along, PRISMA.reach),
       sweep = PRISMA.big.radius * 0.6;
-    let hit = this.trace(b.position, far, true, sweep);
+    let hit = this.trace(b.position, far, true, sweep),
+      gouged = 0;
+    // Four bites: thin slabs are bored clean through, thick ones are gouged and the lance is
+    // followed into the wound, so masonry that used to stop it is eaten away instead.
     for (let n = 0; n < 4 && hit?.obstacle; n++) {
       const contact = b.position.clone().lerp(far, hit.t);
       const bored = this.world.pierceThin(hit.obstacle, b.position, along, contact);
       if (!bored) {
-        this.world.damageWall(hit.obstacle, contact, along.clone().multiplyScalar(18), 1.3);
-        break;
+        const carved = this.world.damageWall(
+          hit.obstacle,
+          contact,
+          along.clone().multiplyScalar(34),
+          PRISMA.big.crater,
+        );
+        this.fx.burst(contact, '#dffbff', 26, 7, 0.4, 2);
+        this.fx.debris(contact, 16, 8, 1.4, along);
+        if (!carved) break;
+        gouged++;
+      } else {
+        this.fx.burst(bored.entry, '#dffbff', 22, 6, 0.35, 2);
+        this.fx.debris(bored.entry, 12, 7, 1.2, along.clone().negate());
       }
-      this.fx.burst(bored.entry, '#dffbff', 16, 5, 0.35, 2);
       hit = this.trace(b.position, far, true, sweep);
     }
     const end = hit ? b.position.clone().lerp(far, hit.t) : far;
     b.normal.copy(along);
     b.group.quaternion.setFromUnitVectors(FORWARD, along);
     this.fx.prismBeam(b.position, end, PRISMA.big.radius, 0.45, true);
-    this.fx.impact(end, '#dff9ff', true, 0.75);
-    this.fx.prismShards(end, along.clone().negate(), 1.3, 14);
+    // The impact: a real blow, wherever it lands — a shock ring, a plume, stinging debris.
+    this.fx.impact(end, '#dff9ff', true, 1.5);
+    this.fx.shock(end, '#cdf4ff', 15);
+    this.fx.debris(end, 26, 9, 1.5, along);
+    this.fx.dust(end, 16, 3.2);
+    this.fx.prismShards(end, along.clone().negate(), 1.8, 20);
+    if (gouged > 0 || hit?.obstacle) this.fx.burst(end, '#ffffff', 20, 8, 0.3, 2);
     this.audio.cast(1);
     this.audio.novaCharged();
-    this.shake = Math.max(this.shake, 0.028);
+    if (hit && !hit.boss) this.audio.crash(1.6);
+    this.shake = Math.max(this.shake, hit?.boss ? 0.028 : 0.05);
     if (this.cameraMode === 'first') this.castKick = 1;
     this.prismaBigCasts++;
+    this.breakShots(b.position, end, PRISMA.big.sweep, true);
+    this.lightLance(b.position, end, PRISMA.big.sweep, true);
     if (hit?.boss)
       this.damageBoss(
         PRISMA.big.damage,
@@ -2862,6 +2912,63 @@ export class Game {
     b.firedAt = 0;
     b.shatterAt = PRISMA.big.linger;
     this.prismaCircles.push(b);
+  }
+  /**
+   * Sweep enemy fire out of a beam's path. The light lance breaks bolts and seekers; the heavy
+   * lance breaks anything flying, including the solar sphere and the vortex seed.
+   */
+  private lightLance(start: THREE.Vector3, end: THREE.Vector3, radius: number, heavy: boolean) {
+    this.prismaLights.push({
+      start: start.clone(),
+      end: end.clone(),
+      radius,
+      heavy,
+      life: heavy ? 0.45 : PRISMA.beamLife,
+    });
+  }
+  /** Break a shot against a lance: a flash at the contact, a puff of glass and a chime. */
+  private breakShot(index: number, at: THREE.Vector3) {
+    const p = this.projectiles[index];
+    if (!p) return;
+    this.fx.burst(at, '#dffbff', 22, 6, 0.32, 1.4);
+    this.fx.prismShards(at, p.velocity.clone().normalize(), 0.7, 8);
+    this.fx.shock(at, '#bff0ff', 4.5);
+    this.audio.block(p.kind);
+    this.removeProjectile(index, true);
+  }
+  /** The shots a lance already stood across in the instant it was fired. */
+  private breakShots(start: THREE.Vector3, end: THREE.Vector3, radius: number, heavy: boolean) {
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      if (p.kind === 'player') continue;
+      const stubborn = p.kind === 'hammer' || p.kind === 'vortex';
+      if (stubborn && !heavy) continue;
+      const t = segmentSphere(start, end, p.mesh.position, radius + p.radius);
+      if (t !== null) this.breakShot(i, start.clone().lerp(end, t));
+    }
+  }
+  /**
+   * Sweep the standing lances across every shot in the air. A bolt fast enough to cross the
+   * whole corridor inside one frame is still caught: the check is between the path the shot
+   * flew this frame and the lance, not between two points.
+   */
+  private sweepLances() {
+    if (!this.prismaLights.length || !this.projectiles.length) return;
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      if (p.kind === 'player') continue;
+      const stubborn = p.kind === 'hammer' || p.kind === 'vortex';
+      for (const lance of this.prismaLights) {
+        if (stubborn && !lance.heavy) continue;
+        if (
+          segmentDistance(lance.start, lance.end, p.last, p.mesh.position) >
+          lance.radius + p.radius
+        )
+          continue;
+        this.breakShot(i, p.mesh.position.clone());
+        break;
+      }
+    }
   }
   private dropPrismaCircle(index: number, shatter: boolean) {
     const [c] = this.prismaCircles.splice(index, 1);
@@ -2877,9 +2984,16 @@ export class Game {
     this.prismaHoldTime = this.prismaChargeStart = 0;
     this.prismaChimed = false;
     this.prismaLastAngle = null;
+    this.prismaLights.length = 0;
   }
   /** Materialise, spin, fire and shatter the circles; grow and pulse the charging one. */
   private updatePrisma(dt: number) {
+    for (let i = this.prismaLights.length - 1; i >= 0; i--) {
+      const lance = this.prismaLights[i];
+      lance.life -= dt;
+      if (lance.life <= 0) this.prismaLights.splice(i, 1);
+    }
+    this.sweepLances();
     for (let i = this.prismaCircles.length - 1; i >= 0; i--) {
       const c = this.prismaCircles[i];
       c.age += dt;

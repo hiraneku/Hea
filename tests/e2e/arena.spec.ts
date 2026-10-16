@@ -1458,6 +1458,90 @@ test('Prisma raises a circle beside the body that fires a beat later and shatter
   expect(s.energy).toBeGreaterThan(100 - SPELLS[1].cost - 1);
 });
 
+test('a Prisma beam sweeps the boss’s fire out of the air: bolts and seekers to the light lance, the solar sphere only to the heavy one', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop');
+  await load(page);
+  await scenario(page, 'nova');
+  await page.keyboard.press('Digit2');
+  // Aegis off, so nothing but the beam is touching these shots.
+  await page.keyboard.press('KeyG');
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([0, 3, 20], [0, 5, -20]);
+    h.face(0, 0);
+    h.step(0.05);
+  });
+  const shots = async () =>
+    (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).shots.map((p) => p.kind);
+  const aimAt = (at: number[]) =>
+    page.evaluate((at) => {
+      const d = window.__HEA_DEBUG__.diagnostics(),
+        [bx, by, bz] = at,
+        [cx, cy, cz] = d.cameraPosition,
+        flat = Math.hypot(bx - cx, bz - cz);
+      window.__HEA_DEBUG__.harness!.face(
+        Math.atan2(-(bx - cx), -(bz - cz)),
+        Math.atan2(by - cy, flat),
+      );
+    }, at);
+  const fire = async () => {
+    await page.mouse.move(550, 350);
+    await page.mouse.down();
+    await step(page, 1 / 60);
+    await page.mouse.up();
+    await step(page, 0.3);
+  };
+  // A rake of bolts straight down the lane — the centred shots of each packet.
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.castBoss('fire', 1);
+    h.castBoss('fire', 5);
+  });
+  await step(page, 0.3);
+  expect((await shots()).filter((kind) => kind === 'fire').length).toBeGreaterThan(1);
+  await aimAt([0, 5, -20]);
+  await fire();
+  expect(await shots()).not.toContain('fire');
+  // A seeker, thrown from the same clear lane: the beam takes it out of the air too. (The
+  // previous beam's curtain has to burn out first, or it would break this one on the way in.)
+  await step(page, 0.5);
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([0, 3, 20], [0, 5, -20]);
+    h.face(0, 0);
+    h.castBoss('missiles', 0);
+  });
+  await step(page, 0.3);
+  const seekers = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).shots.filter(
+    (p) => p.kind === 'missile',
+  );
+  expect(seekers.length).toBeGreaterThan(0);
+  // Keep the curtain up while they close in: a seeker chasing the body has to cross it.
+  await aimAt([0, 5, -20]);
+  for (let i = 0; i < 4; i++) await fire();
+  expect((await shots()).filter((kind) => kind === 'missile').length).toBeLessThan(seekers.length);
+  // The solar sphere shrugs the light lance off...
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([0, 3, 20], [0, 5, -20]);
+    h.face(0, 0);
+    h.castBoss('hammer', 0);
+  });
+  await step(page, 0.1);
+  expect(await shots()).toContain('hammer');
+  await fire();
+  expect(await shots()).toContain('hammer');
+  // ...and is eaten by the heavy one.
+  await page.mouse.move(550, 350);
+  await page.mouse.down();
+  await step(page, 1);
+  await page.mouse.up();
+  await step(page, 1 / 60);
+  expect(await shots()).not.toContain('hammer');
+});
+
 test('from the eyes Prisma raises its circles ahead of the view', async ({ page }, info) => {
   test.skip(info.project.name !== 'desktop');
   await load(page);
@@ -1528,6 +1612,15 @@ test('the dash follows the stick in both views, and the surge after it dresses t
       surge: Number(document.getElementById('experience')!.style.getPropertyValue('--surge')),
       lines: document.getElementById('speed-lines')!.classList.contains('surge'),
     }));
+  // The vanishing point the spokes radiate from, in pixels off the centre of the screen.
+  const vanishing = () =>
+    page.evaluate(() => {
+      const style = document.getElementById('speed-lines')!.style;
+      return {
+        x: Number.parseFloat(style.getPropertyValue('--line-x')),
+        y: Number.parseFloat(style.getPropertyValue('--line-y')),
+      };
+    });
   // Facing -z, a dash with the stick held left goes left, not forward.
   await page.keyboard.down('KeyA');
   await step(page, 0.1);
@@ -1545,12 +1638,17 @@ test('the dash follows the stick in both views, and the surge after it dresses t
   expect((await state(page)).flight.boost).toBeGreaterThan(0.9);
   await expect.poll(async () => (await dressing()).lines).toBe(true);
   expect((await dressing()).surge).toBeGreaterThan(0.9);
+  // Held left while the motor runs hot, the lines are dragged left with the travel — and by the
+  // frame loop, not the HUD's slow tick, so the lean is there without the game being stepped.
+  await expect.poll(async () => (await vanishing()).x, { timeout: 8000 }).toBeLessThan(-4);
   expect(
     await page.locator('#boost-vignette').evaluate((el) => getComputedStyle(el).display),
   ).not.toBe('none');
   await page.keyboard.up('KeyA');
   await step(page, 2.5);
   await expect.poll(dressing).toEqual({ surge: 0, lines: false });
+  // Settled, they drift back to the middle of the screen.
+  await expect.poll(async () => (await vanishing()).x, { timeout: 8000 }).toBeGreaterThan(-2);
   // From the eyes, the stick still steers the dash: held right goes right.
   await page.keyboard.press('KeyV');
   await step(page, 0.1);

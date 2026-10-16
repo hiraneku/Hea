@@ -30,6 +30,30 @@ export function adaptDensity(current: number, fps: number): number {
 
 const UP = new THREE.Vector3(0, 1, 0);
 const v1 = new THREE.Vector3();
+const shaftX = new THREE.Vector3(),
+  shaftY = new THREE.Vector3(),
+  shaftZ = new THREE.Vector3(),
+  shaftEye = new THREE.Vector3(),
+  shaftBasis = new THREE.Matrix4();
+/**
+ * Lean a bar of light towards the eye while its length stays on the beam. The mesh lives in
+ * the beam group's own frame — where the beam runs up its local +y and the eye is at `eye`
+ * pulled into that frame — so no parent world matrix is involved and the first frame is right.
+ */
+function orientShaft(mesh: THREE.Mesh, group: THREE.Group, eye: THREE.Vector3) {
+  shaftEye.copy(eye).sub(group.position).applyQuaternion(group.quaternion.clone().invert());
+  const local = mesh.position;
+  shaftZ.copy(shaftEye).sub(local);
+  if (shaftZ.lengthSq() < 1e-6) return;
+  shaftZ.normalize();
+  shaftY.set(0, 1, 0);
+  shaftX.crossVectors(shaftY, shaftZ);
+  if (shaftX.lengthSq() < 1e-6) shaftX.set(1, 0, 0);
+  shaftX.normalize();
+  shaftY.crossVectors(shaftZ, shaftX).normalize();
+  shaftBasis.makeBasis(shaftX, shaftY, shaftZ);
+  mesh.quaternion.setFromRotationMatrix(shaftBasis);
+}
 const v2 = new THREE.Vector3();
 const dummy = new THREE.Object3D();
 
@@ -128,6 +152,33 @@ export function glowTexture(): THREE.CanvasTexture {
   wash.addColorStop(1, 'rgba(255,255,255,0)');
   c.fillStyle = wash;
   c.fillRect(0, 0, 128, 128);
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+/**
+ * The wash a shaft of light casts: bright through the middle of the bar, falling away to
+ * nothing at either edge, with the tips eased so the bar does not end in a hard line.
+ */
+function shaftTexture(): THREE.CanvasTexture {
+  const width = 64,
+    height = 32,
+    canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const c = canvas.getContext('2d')!;
+  const image = c.createImageData(width, height);
+  for (let y = 0; y < height; y++) {
+    const along = 1 - Math.abs(y / (height - 1) - 0.5) * 0.7;
+    for (let x = 0; x < width; x++) {
+      const across = Math.pow(Math.sin((x / (width - 1)) * Math.PI), 1.6),
+        i = (y * width + x) * 4;
+      image.data[i] = image.data[i + 1] = image.data[i + 2] = 255;
+      image.data[i + 3] = Math.round(255 * Math.min(1, across * along));
+    }
+  }
+  c.putImageData(image, 0, 0);
   const texture = new THREE.CanvasTexture(canvas);
   texture.colorSpace = THREE.SRGBColorSpace;
   return texture;
@@ -429,6 +480,9 @@ export class Effects {
   readonly sigilMap = sigilTexture();
   readonly prismMap = prismTexture();
   private readonly glowMap = glowTexture();
+  private readonly shaftMap = shaftTexture();
+  /** The eye the camera-facing effects lean towards; set by the game once it has one. */
+  eye: THREE.Camera | null = null;
   private readonly splinter = splinterGeometry();
   private readonly tube = new THREE.CylinderGeometry(1, 1, 1, 10, 1, true);
   private prismShatters = 0;
@@ -1579,11 +1633,99 @@ export class Effects {
     }
   }
   /**
-   * The Prisma beam: a white-hot core inside a cyan body, wrapped in a wide soft halo, with
-   * the thin spectral fringes a prism throws — magenta to one side, amber to the other — and
-   * a camera-facing flare at the muzzle and at the hit. It extends from its circle to the
+   * The light of a beam as a shader: a soft sheath that runs from the muzzle outwards, bright
+   * where the tube turns away from the eye — the silhouette of a glass cylinder — with a soft
+   * core through the middle and a slow roll of energy travelling down it. Additive, so the
+   * bloom pass can spread it; the lengthwise gradient keeps it from reading as a flat bar.
+   */
+  private lightMaterial(tint: string, gain: number, roll: number, fringe = 0) {
+    const material = new THREE.ShaderMaterial({
+      uniforms: {
+        uColor: { value: new THREE.Color(tint) },
+        uGain: { value: gain },
+        uFade: { value: 1 },
+        uRoll: { value: roll },
+        uFringe: { value: fringe },
+        uTime: { value: 0 },
+      },
+      vertexShader: `
+        varying vec3 vNormalW;
+        varying vec3 vViewDir;
+        varying vec2 vShade;
+        void main() {
+          vec4 world = modelMatrix * vec4(position, 1.0);
+          vNormalW = normalize(mat3(modelMatrix) * normal);
+          vViewDir = normalize(cameraPosition - world.xyz);
+          vShade = uv;
+          gl_Position = projectionMatrix * viewMatrix * world;
+        }`,
+      fragmentShader: `
+        uniform vec3 uColor;
+        uniform float uGain;
+        uniform float uFade;
+        uniform float uRoll;
+        uniform float uFringe;
+        uniform float uTime;
+        varying vec3 vNormalW;
+        varying vec3 vViewDir;
+        varying vec2 vShade;
+        void main() {
+          float facing = abs(dot(normalize(vNormalW), normalize(vViewDir)));
+          float rim = pow(1.0 - facing, 2.4);
+          float core = pow(facing, 1.5);
+          float muzzle = 1.0 - 0.4 * vShade.y;
+          float roll = 1.0 + uRoll * 0.3 * sin(vShade.y * 22.0 - uTime * 9.0);
+          vec3 tint = uColor;
+          if (uFringe > 0.0) {
+            // The spectrum the prism throws: magenta down one flank, amber down the other,
+            // strongest where the tube turns away and the light has furthest to travel.
+            float around = cos(vShade.x * 6.28318);
+            vec3 flanks = around > 0.0
+              ? vec3(1.0, 0.34, 0.95)
+              : vec3(1.0, 0.82, 0.3);
+            tint += uFringe * (rim * 0.8 + core * 0.25) * abs(around) * flanks;
+          }
+          gl_FragColor = vec4(tint * uGain * (core * 0.5 + rim * 0.85) * muzzle * roll * uFade, 1.0);
+        }`,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    material.toneMapped = false;
+    return material;
+  }
+  /**
+   * A camera-facing shaft of glow along the whole beam: a stretched wash of light that keeps
+   * the middle of the lance soft and rounded instead of glassy. It is a child of the beam, so
+   * the beam's own stretch carries it; only its lean to the eye is recomputed each frame.
+   */
+  private shaft(width: number, tint: string, opacity: number) {
+    const mesh = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({
+        map: this.shaftMap,
+        color: new THREE.Color(tint).multiplyScalar(1.35),
+        transparent: true,
+        opacity,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+    );
+    mesh.position.y = 0.5;
+    mesh.scale.set(width, 1, 1);
+    mesh.userData.shaft = true;
+    mesh.userData.width = width;
+    return mesh;
+  }
+  /**
+   * The Prisma beam: a white-hot core inside a soft-lit cyan sheath, wrapped in a wide halo,
+   * with the thin spectral fringes a prism throws — magenta to one side, amber to the other —
+   * and a camera-facing flare at the muzzle and at the hit. It extends from its circle to the
    * target over 60 ms, then holds and fades away over its tail (rather than blinking out);
-   * the heavy lance is the same beam at seven times the radius, pinching as it dies.
+   * the heavy lance is the same beam five times the radius, pinching as it dies.
    */
   prismBeam(start: THREE.Vector3, end: THREE.Vector3, radius: number, life: number, big = false) {
     const direction = v1.subVectors(end, start),
@@ -1620,16 +1762,24 @@ export class Effects {
       mesh.scale.set(width, 1, width);
       return mesh;
     };
+    const sheath = (width: number, tint: string, gain: number, roll: number, fringe = 0) => {
+      const mesh = new THREE.Mesh(this.tube, this.lightMaterial(tint, gain, roll, fringe));
+      mesh.userData.keepGeometry = true;
+      mesh.userData.width = width;
+      mesh.position.y = 0.5;
+      mesh.scale.set(width, 1, width);
+      return mesh;
+    };
     group.add(
-      // The aura: a broad wash of cyan light around the whole lance, well past its body.
-      tube(radius * (big ? 4.4 : 7.6), '#4fd2ff', big ? 0.14 : 0.13, 1.15, null),
-      // The glow proper, bloomed by the composer.
-      tube(radius * (big ? 2.3 : 3.2), '#7fe4ff', big ? 0.34 : 0.3, big ? 1.5 : 1.9, null),
-      tube(radius * 1.25, '#8ceaff', big ? 0.8 : 0.85, big ? 1.5 : 2.2, null),
-      tube(radius * 0.34, '#ffffff', 1, big ? 4.4 : 5, null),
-      // The spectrum, thrown just clear of the body so the dispersion is actually seen.
-      tube(radius * 0.45, '#f0a6ff', big ? 0.85 : 0.75, 1.3, new THREE.Vector3(radius * 1.3, 0, 0)),
-      tube(radius * 0.45, '#fff0a8', big ? 0.8 : 0.7, 1.3, new THREE.Vector3(-radius * 1.3, 0, 0)),
+      // The aura: a broad wash of blue light around the whole lance, well past its body.
+      sheath(radius * (big ? 3.8 : 6.4), '#1fa8ff', big ? 0.34 : 0.3, 0.5),
+      // The lit body of the beam, twice over: the sheath and its tighter core.
+      sheath(radius * (big ? 2.2 : 3), '#4fcfff', big ? 0.8 : 0.75, 0.8),
+      // The lit body of the beam, the outermost layer carrying the prism's dispersion.
+      sheath(radius * 1.25, '#8fe8ff', big ? 1.3 : 1.2, 1, big ? 0.8 : 0.9),
+      // The hot middle, straight down the axis; the shaft softens it into a rounded glow.
+      tube(radius * 0.3, '#ffffff', 1, big ? 4.6 : 5.5, null),
+      this.shaft(radius * (big ? 5 : 7), '#9fe4ff', big ? 0.26 : 0.2),
     );
     group.position.copy(start);
     group.quaternion.setFromUnitVectors(UP, direction);
@@ -1656,8 +1806,16 @@ export class Effects {
           mesh.position.x = offset.x * pinch;
           mesh.position.z = offset.z * pinch;
         }
-        (mesh.material as THREE.Material & { opacity: number }).opacity =
-          (mesh.userData.baseOpacity ?? 1) * fade;
+        const material = mesh.material as THREE.Material & {
+          opacity: number;
+          uniforms?: Record<string, { value: number }>;
+        };
+        const shader = material.uniforms;
+        if (shader?.uFade) {
+          shader.uFade.value = fade;
+          if (shader.uTime) shader.uTime.value = age;
+        } else material.opacity = (mesh.userData.baseOpacity ?? 1) * fade;
+        if (mesh.userData.shaft && this.eye) orientShaft(mesh, group, this.eye.position);
       }
     };
     drive(0, life);

@@ -1271,13 +1271,16 @@ kbd {
   opacity: 1;
 }
 #speed-lines {
+  /* The vanishing point the spokes radiate from: moved every frame to follow travel. */
+  --line-x: 0px;
+  --line-y: 0px;
   position: absolute;
   z-index: 7;
   inset: 0;
   pointer-events: none;
   opacity: 0;
   background: repeating-conic-gradient(
-    from 20deg at 50% 50%,
+    from 20deg at calc(50% + var(--line-x)) calc(50% + var(--line-y)),
     #fff6 0deg 0.15deg,
     transparent 0.15deg 22deg,
     #fff2 22deg 22.3deg,
@@ -1293,7 +1296,7 @@ kbd {
 #speed-lines.surge {
   opacity: calc(0.35 + 0.65 * var(--surge, 0));
   background: repeating-conic-gradient(
-    from 20deg at 50% 50%,
+    from 20deg at calc(50% + var(--line-x)) calc(50% + var(--line-y)),
     #fff8 0deg 0.18deg,
     transparent 0.18deg 11deg,
     #fff3 11deg 11.3deg,

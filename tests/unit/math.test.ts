@@ -6,6 +6,7 @@ import {
   resolveCircle,
   seededRandom,
   segmentBox,
+  segmentDistance,
   segmentSphere,
   type Obstacle,
 } from '../../src/game/math';
@@ -77,6 +78,36 @@ describe('continuous projectile collision', () => {
   });
   it('hits the expanded box for a projectile with radius', () => {
     expect(segmentBox({ x: 1.1, y: 1, z: 5 }, { x: 1.1, y: 1, z: -5 }, box, 0.2)).toBeCloseTo(0.38);
+  });
+});
+
+describe('the gap between two segments', () => {
+  const v = (x: number, y: number, z: number) => ({ x, y, z });
+  it('measures a straight miss, and a clean intersection as nothing', () => {
+    // Two parallel rails a metre apart.
+    expect(segmentDistance(v(-5, 0, 0), v(5, 0, 0), v(-5, 1, 0), v(5, 1, 0))).toBeCloseTo(1, 6);
+    // Crossing in plan but at different heights: the gap is the height.
+    expect(segmentDistance(v(-5, 0, 0), v(5, 0, 0), v(0, 2, -5), v(0, 2, 5))).toBeCloseTo(2, 6);
+    // And a clean crossing is zero however far along each segment it falls.
+    expect(segmentDistance(v(-5, 0, 0), v(5, 0, 0), v(2, -3, 0), v(2, 3, 0))).toBeCloseTo(0, 6);
+  });
+  it('clamps to the ends: a short segment measures to the nearest point of the other', () => {
+    // A point segment beside the middle of a rail.
+    expect(segmentDistance(v(0, 3, 0), v(0, 3, 0), v(-4, 0, 0), v(4, 0, 0))).toBeCloseTo(3, 6);
+    // A rail that stops short of the crossing still measures to its own end.
+    expect(segmentDistance(v(-5, 0, 0), v(5, 0, 0), v(9, -2, 0), v(9, 2, 0))).toBeCloseTo(4, 6);
+  });
+  it('is symmetric, and finds a bolt that crossed the beam inside one frame', () => {
+    const beamA = v(0, 0, 0),
+      beamB = v(0, 0, 30),
+      boltA = v(6, 0, 20),
+      boltB = v(-6, 0, 12);
+    expect(segmentDistance(beamA, beamB, boltA, boltB)).toBeCloseTo(
+      segmentDistance(boltA, boltB, beamA, beamB),
+      9,
+    );
+    // The bolt's path passes within a metre of the beam: a corridor of that width catches it.
+    expect(segmentDistance(beamA, beamB, boltA, boltB)).toBeLessThan(1);
   });
 });
 

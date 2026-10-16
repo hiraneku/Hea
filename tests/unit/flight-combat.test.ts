@@ -287,6 +287,13 @@ describe('Prisma circles and the held lance', () => {
     for (const shot of Object.values(PROJECTILES))
       expect(shot.range / shot.speed).toBeGreaterThan(10);
   });
+  it('keeps the tapped circle wide enough to read, and the lance’s crater wide too', () => {
+    expect(PRISMA.circleRadius).toBeGreaterThan(0.68);
+    expect(PRISMA.beamRadius).toBeGreaterThan(0.08);
+    // The wound the lance tears out of a slab it cannot bore through is a real crater.
+    expect(PRISMA.big.crater).toBeGreaterThan(2.5);
+    expect(PRISMA.big.crater).toBeGreaterThan(PRISMA.big.radius * 4);
+  });
 });
 
 describe('camera settings', () => {
