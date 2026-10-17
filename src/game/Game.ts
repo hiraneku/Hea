@@ -1577,7 +1577,10 @@ export class Game {
           (1 - Math.min(1, this.velocity.length() / FLIGHT.speed));
       desired = this.player
         .clone()
-        .addScaledVector(UP, (this.flightEnabled ? 1.36 : 1.18) + bob)
+        // The visor, not the chin: the avatar's `Head` bone sits 0.94 m up a 1.52 m body, so the
+        // eye line is about 1.30 — measured off the rig, not guessed. Flying keeps the higher
+        // eye it always had.
+        .addScaledVector(UP, (this.flightEnabled ? 1.36 : 1.3) + bob)
         .addScaledVector(right, -this.bank.z * 0.12)
         .addScaledVector(forward, 0.12);
     } else {

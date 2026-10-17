@@ -868,7 +868,8 @@ test('first person: V moves the camera into the eyes, hides the body, and hands 
   await step(page, 0.1);
   expect((await state(page)).camera).toBe('first');
   const eyes = await distance();
-  // The eye line sits 1.36 m above the physics root (the top of the 1.3 m body).
+  // The eye line sits at the visor, 1.30 m above the physics root — the avatar's head bone is at
+  // 0.94 m of its 1.52 m, so this is the eye, not the chin.
   expect(eyes.gap).toBeLessThan(1.6);
   expect(eyes.gap).toBeGreaterThan(1.1);
   expect(eyes.avatar).toBe(false);
