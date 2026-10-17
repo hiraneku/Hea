@@ -77,6 +77,7 @@ import {
   BodyTumble,
   LaunchRelease,
   recoveryBlend,
+  landingDip,
   springVector,
   landingSlide,
   groundFriction,
@@ -202,6 +203,16 @@ export class Game {
   private flightEnabled = true;
   private verticalVelocity = 0;
   private groundJumps = 0;
+  /**
+   * A shove of the whole view, in world metres: the body is hit from somewhere and the eye
+   * should learn the direction the same way the body does. Springs back to nothing in
+   * `updateCamera`; `cameraKickRate` is the spring's velocity.
+   */
+  private readonly cameraKick = new THREE.Vector3();
+  private readonly cameraKickRate = new THREE.Vector3();
+  private readonly cameraKickZero = new THREE.Vector3();
+  /** How many landings have shoved the view since the duel began, for the tests. */
+  private cameraLandings = 0;
   private heavyPenetrations: {
     owner: number;
     thickness: number;
@@ -642,7 +653,12 @@ export class Game {
       lowQuality: this.lowQuality,
       geometries: this.renderer.info.memory.geometries,
       textures: this.renderer.info.memory.textures,
-      camera: { yaw: this.yaw, pitch: this.pitch },
+      camera: {
+        yaw: this.yaw,
+        pitch: this.pitch,
+        kick: this.cameraKick.toArray(),
+        landings: this.cameraLandings,
+      },
       cameraPosition: this.camera.position.toArray(),
       avatarVisible: this.avatar.visible,
       avatarModel: avatarReport(this.avatarModel),
@@ -842,6 +858,9 @@ export class Game {
     this.contacts = 0;
     this.lastDamageBlind = false;
     this.roll = this.shake = this.punch = 0;
+    this.cameraKick.set(0, 0, 0);
+    this.cameraKickRate.set(0, 0, 0);
+    this.cameraLandings = 0;
     this.seenAirRecoveries = { player: 0, boss: 0 };
     this.damageDealt = this.impacts = this.elapsed = 0;
     this.damageTimer = 10;
@@ -1265,8 +1284,11 @@ export class Game {
       this.velocity.y = 0;
       this.flightAcceleration.y = 0;
     }
-    if (!this.flightEnabled && motor.y === 0 && this.verticalVelocity < 0)
+    if (!this.flightEnabled && motor.y === 0 && this.verticalVelocity < 0) {
+      // The one moment a fall's weight should reach the eye, measured before it is zeroed.
+      this.landCamera(-this.verticalVelocity);
       this.verticalVelocity = 0;
+    }
     if (physical && this.playerTumble.grounded) groundFriction(this.impulse, dt);
     else {
       const drag = Math.exp(-dt * (physical ? 0.28 : 0.55 * (1 - recovery) + recovery * 5));
@@ -1577,6 +1599,8 @@ export class Game {
       this.camera.position.copy(desired);
       this.cameraSpringVelocity.set(0, 0, 0);
       this.cameraWasFirst = first;
+      this.cameraKick.set(0, 0, 0);
+      this.cameraKickRate.set(0, 0, 0);
     } else if (first) {
       // The eye follows the body tightly; only a whisper of lag so launches still read.
       springVector(this.camera.position, this.cameraSpringVelocity, desired, 60, dt);
@@ -1612,6 +1636,20 @@ export class Game {
         );
         this.cameraSpringVelocity.multiplyScalar(0.2);
       }
+    }
+    // The shove springs back with a little overshoot, so a hit reads as a body absorbing it
+    // rather than a frame being nudged. Applied after the follow, so the chase spring never
+    // fights it; re-traced, because a view that moves must still not enter a wall.
+    springVector(this.cameraKick, this.cameraKickRate, this.cameraKickZero, 15, dt);
+    if (this.cameraKick.lengthSq() > 1e-8) {
+      this.camera.position.add(this.cameraKick);
+      const escape = this.trace(pivot, this.camera.position, false, 0.1);
+      if (escape)
+        this.camera.position.lerpVectors(
+          pivot,
+          this.camera.position,
+          Math.max(0.08, escape.t - 0.03),
+        );
     }
     this.shake = damp(this.shake, 0, 11, dt);
     const shake = this.settings.reducedEffects ? 0 : this.shake;
@@ -1671,6 +1709,31 @@ export class Game {
    * Zoom punch on heavy contact: the field of view snaps in by a few degrees and eases back
    * while the slow-motion tail plays, with a short rotational jolt in real time.
    */
+  /**
+   * Shove the view along `direction` by `metres`, capped so no single blow can throw the frame.
+   * The first-person eye is nudged less than the chase camera: it sits inside the body, where a
+   * centimetre of travel already reads as a lot. The cap follows the view the player is about to
+   * see, which is why a hammer — which throws the body and so steps the camera back out — is
+   * sized for the chase camera even when the blow lands in first person.
+   */
+  private kickCamera(direction: THREE.Vector3, metres: number) {
+    if (this.settings.reducedEffects || metres <= 0) return;
+    if (direction.lengthSq() < 1e-6) return;
+    const cap = this.cameraMode === 'first' ? 0.035 : 0.06;
+    this.cameraKick.addScaledVector(direction.clone().normalize(), metres).clampLength(0, cap);
+  }
+  /**
+   * Touching down drops the view by the weight of the fall: nothing for a hop, up to eight
+   * centimetres off a long drop. The spring in `updateCamera` lifts it back with a little
+   * overshoot, which is how a body actually arrives.
+   */
+  private landCamera(fall: number) {
+    if (this.settings.reducedEffects) return;
+    const dip = landingDip(fall, this.cameraMode === 'first' ? 0.04 : 0.08);
+    if (dip <= 0) return;
+    this.cameraKick.y = Math.max(-0.08, this.cameraKick.y - dip);
+    this.cameraLandings++;
+  }
   private applyPunch(realDt: number) {
     const punch = this.settings.reducedEffects ? 0 : this.punch;
     this.camera.fov = this.fovBase - punch * 7.5;
@@ -3408,6 +3471,7 @@ export class Game {
     this.knockTime = tuning.stagger;
     this.contactPause('player', incoming, tuning.pause * power, tuning.launch * power, tuning.slow);
     this.shake = 0.018;
+    this.kickCamera(incoming, 0.045 * power);
     if (this.mode !== 'menu') this.audio.damage(this.player);
     this.emit({ type: 'damage', amount });
     if (this.health === 0 && this.mode === 'playing') {

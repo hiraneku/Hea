@@ -286,6 +286,14 @@ export function supportHeight(q: Quaternion, halfSize: Vector3, centerY = 0): nu
   );
 }
 /** Absorb the normal impulse. A steep slam is redirected into a modest skim, never a bounce. */
+/**
+ * How far the view drops when a body lands at `fall` metres per second. Tuned against the jump:
+ * a plain hop lands at 9.6 and gives about 1.5 cm, a fall from nine metres about eight, and
+ * anything slower than 7 m/s is not worth a flinch.
+ */
+export function landingDip(fall: number, cap: number): number {
+  return Math.min(cap, Math.max(0, (fall - 7) * 0.0057));
+}
 export function landingSlide(velocity: Vector3, away: Vector3): Vector3 {
   const speed = Math.hypot(velocity.x, velocity.z),
     normal = Math.max(0, -velocity.y);

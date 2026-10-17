@@ -5,6 +5,7 @@ import {
   AirDash,
   BodyTumble,
   LaunchRelease,
+  landingDip,
   recoveryBlend,
   springVector,
 } from '../../src/game/motion';
@@ -25,6 +26,26 @@ import {
   shieldIntercept,
 } from '../../src/game/combat';
 
+describe('landingDip', () => {
+  const CHASE_CAP = 0.08,
+    EYE_CAP = 0.04;
+  it('ignores the small drops, and a plain hop barely registers', () => {
+    // A hop off level ground lands at GROUND.jump = 9.6 m/s: the view must give a hint of it,
+    // not a lurch, or every bunny-hop in a duel would bounce the frame.
+    expect(landingDip(4, CHASE_CAP)).toBe(0);
+    expect(landingDip(7, CHASE_CAP)).toBe(0);
+    expect(landingDip(9.6, CHASE_CAP)).toBeGreaterThan(0.008);
+    expect(landingDip(9.6, CHASE_CAP)).toBeLessThan(0.02);
+  });
+  it('grows with the fall and then stops at the cap', () => {
+    expect(landingDip(15, CHASE_CAP)).toBeGreaterThan(landingDip(9.6, CHASE_CAP));
+    // A nine-metre drop arrives at about 21 m/s and is as heavy as it gets.
+    expect(landingDip(21, CHASE_CAP)).toBeGreaterThan(CHASE_CAP * 0.97);
+    expect(landingDip(21, CHASE_CAP)).toBeLessThanOrEqual(CHASE_CAP);
+    expect(landingDip(90, CHASE_CAP)).toBe(CHASE_CAP);
+    expect(landingDip(90, EYE_CAP)).toBe(EYE_CAP);
+  });
+});
 describe('continuous flight and dash', () => {
   it('starts without a jolt, carries acceleration through reversal, then settles into hover', () => {
     const v = new Vector3(),

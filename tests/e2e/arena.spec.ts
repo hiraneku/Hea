@@ -1026,6 +1026,72 @@ test('a warmed fire gate cannot shoot after the player moves behind a wall', asy
   expect(d.attacksFired.fire).toBe(0);
 });
 
+test('a blow shoves the view the way it travels, and a heavy landing drops it', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop');
+  // reducedEffects off: the shove is a motion effect and is deliberately silent when they are on.
+  await load(page, false);
+  await scenario(page, 'contact');
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.place([0, 0, 24], [0, 0, -10]);
+    h.face(0, 0);
+    h.step(0.2);
+  });
+  // A hammer thrown in from the player's left: it travels towards +x, so the eye is shoved that
+  // way too — the blow has a direction, not just a size.
+  const blow = await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    const before = window.__HEA_DEBUG__.diagnostics().health;
+    h.incoming('left', 'hammer');
+    const peak = [0, 0, 0];
+    let hit = false;
+    for (let i = 0; i < 180; i++) {
+      h.step(1 / 60);
+      const d = window.__HEA_DEBUG__.diagnostics();
+      if (d.health < before) hit = true;
+      for (let axis = 0; axis < 3; axis++)
+        if (Math.abs(d.camera.kick[axis]) > Math.abs(peak[axis])) peak[axis] = d.camera.kick[axis];
+      if (hit && Math.hypot(...d.camera.kick) < 0.0005) break;
+    }
+    return { peak, settled: window.__HEA_DEBUG__.diagnostics().camera.kick, hit };
+  });
+  expect(blow.hit).toBe(true);
+  expect(blow.peak[0]).toBeGreaterThan(0.02);
+  // Never enough to throw the frame: the chase camera's cap is six centimetres.
+  expect(blow.peak[0]).toBeLessThanOrEqual(0.06 + 1e-6);
+  expect(Math.abs(blow.peak[1])).toBeLessThan(0.02);
+  expect(Math.abs(blow.peak[2])).toBeLessThan(0.02);
+  // And it springs back rather than staying knocked aside.
+  expect(Math.hypot(...blow.settled)).toBeLessThan(0.002);
+
+  // Dropping nine metres must be felt; a step off a kerb must not.
+  const drops = await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    const drop = (height: number) => {
+      h.scenario('walk');
+      h.face(0, 0);
+      h.place([0, height, 24], [0, 0, -10]);
+      let dip = 0;
+      for (let i = 0; i < 300; i++) {
+        h.step(1 / 60);
+        const kick = window.__HEA_DEBUG__.diagnostics().camera.kick;
+        if (kick[1] < dip) dip = kick[1];
+      }
+      const d = window.__HEA_DEBUG__.diagnostics();
+      return { dip, landings: d.camera.landings, settled: Math.abs(d.camera.kick[1]) };
+    };
+    return { high: drop(9), low: drop(0.4) };
+  });
+  expect(drops.high.landings).toBe(1);
+  expect(drops.high.dip).toBeLessThan(-0.06);
+  expect(drops.high.dip).toBeGreaterThanOrEqual(-0.08 - 1e-6);
+  expect(drops.high.settled).toBeLessThan(0.002);
+  expect(drops.low.landings).toBe(0);
+  expect(drops.low.dip).toBe(0);
+});
+
 test('heavy contact freezes briefly, releases in slow motion with a camera punch, then launches', async ({
   page,
 }, info) => {
