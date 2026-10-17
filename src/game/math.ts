@@ -15,6 +15,14 @@ export interface Point3 {
   z: number;
 }
 
+/** The first thing a traced segment meets: the world, the ground, or the boss. */
+export interface TraceHit {
+  t: number;
+  boss?: boolean;
+  obstacle?: Obstacle;
+  ground?: boolean;
+}
+
 export const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));
 export const damp = (current: number, target: number, speed: number, dt: number) =>
   current + (target - current) * (1 - Math.exp(-speed * dt));

@@ -2004,3 +2004,36 @@ test('camera sliders change the field of view and chase distance live, within th
   expect(v.gap).toBeLessThan(CAMERA_RANGES.cameraDistance.max + 0.3);
   expect(v.gap).toBeGreaterThan(CAMERA_RANGES.cameraDistance.max - 0.3);
 });
+
+test('accessibility: remapped keys are stored, and the boss indicator points off-screen', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'keyboard remapping is a desktop concern');
+  await load(page, false);
+  await page.locator('#settings-button').click();
+  await expect(page.locator('#aim-assist')).toBeChecked();
+  await page.locator('#aim-assist').uncheck();
+  // Capture a new dash key; the button listens, the next press becomes the binding.
+  await page.locator('[data-bind="dash"]').click();
+  await expect(page.locator('[data-bind="dash"]')).toHaveText('TEKAN TOMBOL…');
+  await page.keyboard.press('AltLeft');
+  await expect(page.locator('[data-bind="dash"]')).toHaveText('AltLeft');
+  let stored = JSON.parse((await page.evaluate(() => localStorage.getItem('hea-settings')))!);
+  expect(stored.bindings.dash).toBe('AltLeft');
+  expect(stored.aimAssist).toBe(false);
+  // Reset restores the defaults.
+  await page.locator('#bindings-reset').click();
+  await expect(page.locator('[data-bind="dash"]')).toHaveText('SHIFT');
+  stored = JSON.parse((await page.evaluate(() => localStorage.getItem('hea-settings')))!);
+  expect(stored.bindings.dash).toBe('ShiftLeft');
+  await page.locator('#panel-done').click();
+  // The indicator stays hidden while IGNIS is in view and appears, labelled, behind us.
+  await scenario(page, 'flight');
+  await step(page, 0.5);
+  await expect(page.locator('#boss-indicator')).toBeHidden();
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.face(Math.PI));
+  await step(page, 0.5);
+  expect(Math.abs((await state(page)).boss.bearing)).toBeGreaterThan(0.6);
+  await expect(page.locator('#boss-indicator')).toBeVisible();
+  await expect(page.locator('#boss-indicator-label')).toHaveText(/IGNIS · \d+ M/);
+});

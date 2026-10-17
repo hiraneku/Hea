@@ -10,11 +10,16 @@ import reference2Url from '../reference2.mp4?url';
 import { icons } from './icons';
 import { Game } from './game/Game';
 import {
+  BINDING_ACTIONS,
   CAMERA_RANGES,
+  DEFAULT_BINDINGS,
+  HUD_SCALE_RANGE,
+  normalizeBindings,
   readSettings,
   saveSettings,
   SPELLS,
   type GameEvent,
+  type KeyBindings,
   type Mode,
   type Snapshot,
 } from './game/types';
@@ -23,6 +28,40 @@ const app = document.querySelector<HTMLDivElement>('#app')!;
 const settings = readSettings();
 const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
 const spellIcons = [icons.flame, icons.prism, icons.nova];
+
+/** A `KeyboardEvent.code` as a keycap: `KeyW` → `W`, `ShiftLeft` → `SHIFT`. */
+function keyLabel(code: string): string {
+  if (code === 'Space') return 'SPACE';
+  if (code.startsWith('Shift')) return 'SHIFT';
+  if (code.startsWith('Arrow'))
+    return { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→' }[code] ?? code;
+  return code.replace(/^Key/, '').replace(/^Digit/, '');
+}
+
+/** The binding action currently listening for a keypress in the settings panel. */
+let capturingAction: keyof KeyBindings | null = null;
+window.addEventListener(
+  'keydown',
+  (e) => {
+    if (!capturingAction) return;
+    e.preventDefault();
+    e.stopPropagation();
+    const action = capturingAction;
+    capturingAction = null;
+    if (e.code !== 'Escape') {
+      // Claiming a key another action owns swaps the two, so nothing is ever left unbound.
+      const other = BINDING_ACTIONS.find(
+        (a) => a.id !== action && settings.bindings[a.id] === e.code,
+      );
+      const next = { ...settings.bindings, [action]: e.code };
+      if (other) next[other.id] = settings.bindings[action];
+      settings.bindings = normalizeBindings(next);
+      applySettings();
+    }
+    if (panel === 'settings') renderPanel('settings');
+  },
+  true,
+);
 
 app.innerHTML = `
   <div id="experience" data-mode="menu" class="${isTouch ? 'has-touch' : ''}">
@@ -61,7 +100,7 @@ app.innerHTML = `
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.19</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.20</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -71,21 +110,21 @@ app.innerHTML = `
         <div class="meter boss-meter" role="progressbar" aria-label="Kesehatan IGNIS" aria-valuemin="0" aria-valuemax="100" aria-valuenow="100"><i id="boss-health-fill"></i></div>
         <div class="boss-action"><span id="boss-action">MEMBACA GERAKMU</span><b id="boss-distance">16 M</b></div><div class="boss-charge"><i id="boss-charge-fill"></i></div>
       </div>
-      <div class="aegis-hud" id="aegis-hud" data-phase="ready"><div class="aegis-title">${icons.shield}<span>AEGIS <b>∞</b></span><button id="shield-toggle" class="aegis-toggle" aria-label="Perisai otomatis ON" aria-pressed="true"><kbd>G</kbd><strong id="shield-state">ON</strong></button></div><div class="meter aegis-meter"><i id="shield-fill"></i></div><small id="shield-caption">DEPAN + SAMPING · BELAKANG TERBUKA</small></div>
+      <div class="aegis-hud" id="aegis-hud" data-phase="ready"><div class="aegis-title">${icons.shield}<span>AEGIS <b>∞</b></span><button id="shield-toggle" class="aegis-toggle" aria-label="Perisai otomatis ON" aria-pressed="true"><kbd data-hint="shield">G</kbd><strong id="shield-state">ON</strong></button></div><div class="meter aegis-meter"><i id="shield-fill"></i></div><small id="shield-caption">DEPAN + SAMPING · BELAKANG TERBUKA</small></div>
       <div class="duel-stats"><span>DAMAGE</span><strong id="damage-value">0000</strong><small>PROYEKTIL DIBLOKIR <b id="block-count">0</b></small></div>
       <div id="reticle" aria-hidden="true"><i></i><i></i><i></i><i></i><span></span></div>
       <div id="hit-marker" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
       <div id="score-pop" aria-live="polite"></div>
-      <div id="duel-announcement"><span>ONE ON ONE</span><strong>HADAPI <b>IGNIS.</b></strong><small>Aegis aktif otomatis. Baca pola serangannya.</small></div><div id="impact-caption" role="status"></div><div id="block-feedback">AEGIS / INTERSEPSI</div><div id="focus-badge">FOKUS BOSS</div>
+      <div id="duel-announcement"><span>ONE ON ONE</span><strong>HADAPI <b>IGNIS.</b></strong><small>Aegis aktif otomatis. Baca pola serangannya.</small></div><div id="impact-caption" role="status"></div><div id="block-feedback">AEGIS / INTERSEPSI</div><div id="focus-badge">FOKUS BOSS</div><div id="boss-indicator" hidden role="status" aria-label="Arah boss di luar pandangan"><span class="boss-indicator-arrow" aria-hidden="true"></span><span id="boss-indicator-label">IGNIS</span></div>
       <div id="pointer-tip">KLIK ARENA UNTUK MEMBIDIK <span>·</span> ESC UNTUK JEDA</div>
-      <div class="desktop-hints"><div><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd><span>GERAK</span></div><div><kbd>SPACE / C</kbd><span>NAIK / TURUN</span><kbd>F</kbd><span>MODE</span><kbd>E</kbd><span>FOKUS BOSS</span></div><div class="hints-muted"><kbd>V</kbd><span>SUDUT PANDANG</span><kbd>R</kbd><span>ULANGI</span><kbd>Q</kbd><span>GANTI SIHIR</span></div></div>
+      <div class="desktop-hints"><div><kbd data-hint="forward">W</kbd><kbd data-hint="left">A</kbd><kbd data-hint="back">S</kbd><kbd data-hint="right">D</kbd><span>GERAK</span></div><div><kbd><span data-hint="rise">SPACE</span> / <span data-hint="descend">C</span></kbd><span>NAIK / TURUN</span><kbd data-hint="flight">F</kbd><span>MODE</span><kbd data-hint="focus">E</kbd><span>FOKUS BOSS</span></div><div class="hints-muted"><kbd data-hint="view">V</kbd><span>SUDUT PANDANG</span><kbd>R</kbd><span>ULANGI</span><kbd data-hint="cycle">Q</kbd><span>GANTI SIHIR</span></div></div>
       <div class="spell-dock">
         <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span></div>
         <div class="spell-slots">${SPELLS.map((s, i) => `<button class="spell-slot ${i === 0 ? 'selected' : ''}" data-spell="${i}" style="--element:${s.color};--cooldown:0" aria-label="Pilih ${s.name} — ${s.subtitle}" aria-pressed="${i === 0}"><span class="slot-key">${i + 1}</span><span class="slot-icon">${spellIcons[i]}</span><span class="slot-name">${s.name}</span><span class="slot-cost">${s.cost}</span><span class="slot-cooldown"></span></button>`).join('')}</div>
         <div class="energy-row"><span>ENERGI</span><div class="meter energy-meter"><i id="energy-fill"></i></div><b id="energy-value">100</b></div>
       </div>
-      <div class="dash-hud"><div class="dash-symbol">${icons.dash}</div><div><span>DASH <kbd>SHIFT</kbd></span><strong id="dash-value">SIAP</strong><div class="meter dash-meter"><i id="dash-fill"></i></div></div></div>
-      <button class="movement-toggle" id="flight-toggle" aria-label="Ganti mode terbang atau jalan" aria-pressed="true"><span><kbd>F</kbd><b id="movement-mode">TERBANG</b><small>⇄</small></span><span class="flight-telemetry"><span id="flight-state">MELAYANG</span><i>·</i><strong id="flight-altitude">2 M</strong></span></button><div class="session-info"><span id="session-time">00:00</span><i></i><span id="hud-fps">60 FPS</span></div>
+      <div class="dash-hud"><div class="dash-symbol">${icons.dash}</div><div><span>DASH <kbd data-hint="dash">SHIFT</kbd></span><strong id="dash-value">SIAP</strong><div class="meter dash-meter"><i id="dash-fill"></i></div></div></div>
+      <button class="movement-toggle" id="flight-toggle" aria-label="Ganti mode terbang atau jalan" aria-pressed="true"><span><kbd data-hint="flight">F</kbd><b id="movement-mode">TERBANG</b><small>⇄</small></span><span class="flight-telemetry"><span id="flight-state">MELAYANG</span><i>·</i><strong id="flight-altitude">2 M</strong></span></button><div class="session-info"><span id="session-time">00:00</span><i></i><span id="hud-fps">60 FPS</span></div>
     </section>
     <div id="touch-controls" aria-label="Kontrol sentuh" hidden>
       <div id="touch-look" aria-label="Geser untuk menggerakkan kamera"></div>
@@ -301,6 +340,12 @@ function applySettings() {
   );
   $('#sound-button').setAttribute('aria-pressed', String(settings.sound));
   experience.classList.toggle('reduced-effects', settings.reducedEffects);
+  experience.dataset.colorVision = settings.colorVision;
+  experience.style.setProperty('--hud-scale', String(settings.hudScale));
+  document.querySelectorAll<HTMLElement>('[data-hint]').forEach((el) => {
+    const action = el.dataset.hint as keyof KeyBindings;
+    el.textContent = keyLabel(settings.bindings[action]);
+  });
 }
 
 function renderPanel(type: Exclude<typeof panel, null>) {
@@ -321,7 +366,7 @@ function renderPanel(type: Exclude<typeof panel, null>) {
     gameover: 'DUEL / DEFEAT',
     victory: 'DUEL / VICTORY',
   }[type];
-  let content = '';
+  let content: string;
   if (type === 'help') {
     content = `<p class="panel-description">Hadapi satu boss terbang, IGNIS. Ganti antara terbang dan jalan. Di mode jalan, Space/tombol Lompat dapat digunakan dua kali; di mode terbang tahan Naik/Turun. IGNIS berganti posisi serta ketinggian, menembak lewat lingkaran di sekelilingnya, melepas 12 orb homing, dan mengisi bola surya besar. Nova dapat menghempaskan boss; serangan beratnya juga bisa melontarkanmu menembus dinding atau menghantam tanah.</p>
       <div class="control-tabs"><button id="desktop-tab" class="${!isTouch ? 'active' : ''}">KEYBOARD + MOUSE</button><button id="mobile-tab" class="${isTouch ? 'active' : ''}">LAYAR SENTUH</button></div>
@@ -331,6 +376,7 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       <div id="mobile-guide" class="control-guide" ${!isTouch ? 'hidden' : ''}>
         <div><span>Bergerak</span><b>JOYSTICK KIRI</b></div><div><span>Arahkan kamera</span><b>GESER AREA KANAN</b></div><div><span>Serang berulang</span><b>TAHAN TOMBOL SERANG</b></div><div><span>Ganti sihir</span><b>SENTUH SLOT SIHIR</b></div><div><span>Terbang naik / turun</span><b>TAHAN NAIK / TURUN</b></div><div><span>Menghindar / kunci kamera</span><b>DASH / FOKUS</b></div><div><span>Perisai ON / OFF</span><b><kbd>G</kbd> / TOMBOL AEGIS</b></div><div><span>Mode terbang / jalan</span><b><kbd>F</kbd> / TOMBOL MODE</b></div><div><span>Bantuan bidik</span><b>OTOMATIS AKTIF</b></div>
       </div>
+      <p class="panel-note">Semua tombol desktop di atas dapat dipetakan ulang di <b>Pengaturan → Pemetaan tombol</b>; petunjuk tombol di HUD mengikuti pemetaanmu. Bantuan bidik, indikator arah boss, palet aman buta warna, dan skala HUD juga diatur di sana.</p>
       <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${['Proyektil cepat. Ikuti target dengan crosshair.', 'Tap: lingkaran acak di sekitarmu menembakkan sinar yang menyapu proyektil musuh di jalurnya. Tahan: lingkaran besar di depan pandangan mengisi; lepas untuk lancip berat yang membongkar dinding dan memecahkan serangan berat.', 'Ledakan kuat. Hempaskan boss dan hancurkan penghalang.'][i]}</span></div>`).join('')}</div>
       <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; selama masih berdiri, jejak itu ikut menahan tembakan berikutnya pada lintasan yang sama, dan saat OFF jejak lama tidak memblokir serangan baru. Patch yang muncul berdampingan menyusun diri rapat seperti kepingan puzzle, tidak menumpuk. Proyektil benar-benar menghantam permukaannya: tubuhnya gepeng dan memercik di sana, patch terdorong dan beriak. Satu patch hanya kuat menahan lima hit: kepingnya makin menyala dan retak, lalu pecah berhamburan dan menyisakan lubang di arah itu selama sesaat—bergeraklah. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat; hit berat membeku sejenak lalu lepas dalam gerak lambat sebelum hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret: tanah terbelah membentuk alur lurus searah seretan dengan gundukan terangkat di kiri-kanannya, bongkahan tanah berhamburan, lalu tubuh langsung bangkit; bila melayang lama tanpa menyentuh apa pun, ia menegakkan diri di udara. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Pusaran Surya: benih gelap meluncur ke dekatmu lalu membuka sumur gravitasi yang menyedot tubuh dan segala percikan selama hampir dua detik, kemudian meledak menjadi cincin bara mendatar—jangan kabur lurus (punggungmu buta), tapi naik atau menukik keluar dari bidang cincinnya. Sinar Prisma menyapu garis bidikmu: rentetan api dan orb homing pecah begitu melintasinya; bola surya dan inti Pusaran Surya hanya pecah oleh lancip berat. Sinar kecil meninggalkan goresan di permukaan yang dihantamnya (tanpa membongkar dinding), lingkaran besar yang mengisi menarik garis bidik ke arah crosshair sebagai penanda, dan klik yang belum bisa dibayar membuat slot sihir meredup sekejap. Seret kamera untuk melepas fokus.</p>
       <button class="primary-button full-width" id="panel-done"><span>MENGERTI</span>${icons.arrow}</button>`;
@@ -346,7 +392,13 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       <div class="settings-row slider-row"><div><label for="camera-distance">Jarak kamera pengejar</label><b id="camera-distance-label">${settings.cameraDistance.toFixed(1)} m</b></div><input id="camera-distance" type="range" min="${CAMERA_RANGES.cameraDistance.min}" max="${CAMERA_RANGES.cameraDistance.max}" step="0.1" value="${settings.cameraDistance}" /></div>
       <div class="settings-row"><div><label for="comfort">Efek nyaman</label><p>Kurangi kilatan, goyangan kamera,<br>dan perubahan bidang pandang.</p></div><label class="switch"><input id="comfort" type="checkbox" ${settings.reducedEffects ? 'checked' : ''} aria-label="Efek nyaman"/><span></span></label></div>
       <div class="settings-row"><div><label for="perf-hud">Statistik performa</label><p>Waktu frame, draw call, dan skala render<br>di samping jam pertandingan.</p></div><label class="switch"><input id="perf-hud" type="checkbox" ${settings.perfHud ? 'checked' : ''} aria-label="Statistik performa"/><span></span></label></div>
-      <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render. Statistik performa membantu menakar apakah perangkatmu menjaga 60 FPS.</p>
+      <div class="settings-row"><div><label for="aim-assist">Bantuan bidik</label><p>Sihir menempel ke boss dalam bidikan<br>dan Bara memburu sasarannya.</p></div><label class="switch"><input id="aim-assist" type="checkbox" ${settings.aimAssist ? 'checked' : ''} aria-label="Bantuan bidik"/><span></span></label></div>
+      <div class="settings-row"><div><label for="threat-indicator">Indikator arah boss</label><p>Panah berlabel menunjukkan IGNIS<br>saat ia di luar pandangan — tanpa warna.</p></div><label class="switch"><input id="threat-indicator" type="checkbox" ${settings.threatIndicator ? 'checked' : ''} aria-label="Indikator arah boss"/><span></span></label></div>
+      <div class="settings-row"><div><label for="color-vision">Palet aman buta warna</label><p>Rona alternatif + pola garis pada meteran<br>boss, agar telegraf tak bergantung warna.</p></div><select id="color-vision"><option value="standard" ${settings.colorVision === 'standard' ? 'selected' : ''}>Standar</option><option value="deuteranopia" ${settings.colorVision === 'deuteranopia' ? 'selected' : ''}>Deuteranopia</option><option value="protanopia" ${settings.colorVision === 'protanopia' ? 'selected' : ''}>Protanopia</option><option value="tritanopia" ${settings.colorVision === 'tritanopia' ? 'selected' : ''}>Tritanopia</option></select></div>
+      <div class="settings-row slider-row"><div><label for="hud-scale">Skala HUD</label><b id="hud-scale-label">${Math.round(settings.hudScale * 100)}%</b></div><input id="hud-scale" type="range" min="${HUD_SCALE_RANGE.min}" max="${HUD_SCALE_RANGE.max}" step="0.05" value="${settings.hudScale}" /></div>
+      <div class="settings-row bindings-row"><div><label>Pemetaan tombol</label><p>Klik tombol, lalu tekan tombol baru.<br>Menukar otomatis bila sudah dipakai.</p></div><button id="bindings-reset" class="quiet-button">ATUR ULANG</button></div>
+      <div class="bindings">${BINDING_ACTIONS.map((a) => `<div class="binding-row"><span>${a.label}</span><button class="bind-button" data-bind="${a.id}" aria-label="Ubah tombol ${a.label}">${keyLabel(settings.bindings[a.id])}</button></div>`).join('')}</div>
+      <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render. Statistik performa membantu menakar apakah perangkatmu menjaga 60 FPS. Tombol panah, Esc/P (jeda), Tab (ganti sihir) dan 1/2/3 (slot sihir) selalu aktif sebagai cadangan.</p>
       <button class="primary-button full-width" id="panel-done"><span>SIMPAN & KEMBALI</span>${icons.arrow}</button>`;
   } else if (type === 'reference') {
     content = `<div class="control-tabs"><button id="reference-one">REFERENSI 1</button><button id="reference-two" class="active">REFERENSI 2</button></div><video class="reference-video" src="${reference2Url}" controls playsinline autoplay muted loop preload="metadata" aria-label="Video referensi asli dari repositori"></video><p class="panel-note">Referensi 2 dari repo, 11,75 detik: kepingan shield heksagonal dan rentetan api. Referensi 1 tetap tersedia. Pilihan fisika dan timing yang tidak terlihat di video tetap berupa tuning prototipe.</p>`;
@@ -407,6 +459,38 @@ function renderPanel(type: Exclude<typeof panel, null>) {
     $<HTMLInputElement>('#perf-hud').onchange = (e) => {
       settings.perfHud = (e.target as HTMLInputElement).checked;
       applySettings();
+    };
+    $<HTMLInputElement>('#aim-assist').onchange = (e) => {
+      settings.aimAssist = (e.target as HTMLInputElement).checked;
+      applySettings();
+    };
+    $<HTMLInputElement>('#threat-indicator').onchange = (e) => {
+      settings.threatIndicator = (e.target as HTMLInputElement).checked;
+      applySettings();
+    };
+    $<HTMLSelectElement>('#color-vision').onchange = (e) => {
+      settings.colorVision = (e.target as HTMLSelectElement).value as typeof settings.colorVision;
+      applySettings();
+    };
+    $<HTMLInputElement>('#hud-scale').oninput = (e) => {
+      settings.hudScale = Number((e.target as HTMLInputElement).value);
+      $('#hud-scale-label').textContent = `${Math.round(settings.hudScale * 100)}%`;
+      applySettings();
+    };
+    document.querySelectorAll<HTMLButtonElement>('.bind-button').forEach((button) => {
+      button.onclick = () => {
+        capturingAction = button.dataset.bind as keyof KeyBindings;
+        document
+          .querySelectorAll('.bind-button')
+          .forEach((b) => b.classList.toggle('capturing', b === button));
+        button.textContent = 'TEKAN TOMBOL…';
+      };
+    });
+    $('#bindings-reset').onclick = () => {
+      settings.bindings = { ...DEFAULT_BINDINGS };
+      capturingAction = null;
+      applySettings();
+      renderPanel('settings');
     };
     $<HTMLInputElement>('#sound-toggle').onchange = (e) => {
       settings.sound = (e.target as HTMLInputElement).checked;
@@ -523,6 +607,18 @@ function updateHud(s: Snapshot) {
   );
   $('#touch-descend').hidden = !s.flight.enabled;
   $('#focus-badge').classList.toggle('visible', s.lockedOn && s.boss.alive);
+  const indicator = $('#boss-indicator'),
+    showIndicator =
+      settings.threatIndicator &&
+      s.mode === 'playing' &&
+      s.boss.alive &&
+      Math.abs(s.boss.bearing) > 0.6;
+  indicator.hidden = !showIndicator;
+  if (showIndicator) {
+    indicator.querySelector<HTMLElement>('.boss-indicator-arrow')!.style.transform =
+      `rotate(${((s.boss.bearing * 180) / Math.PI).toFixed(0)}deg)`;
+    $('#boss-indicator-label').textContent = `IGNIS · ${Math.round(s.boss.distance)} M`;
+  }
   $('#touch-focus').classList.toggle('held', s.lockedOn);
   $('#touch-focus').setAttribute('aria-pressed', String(s.lockedOn));
   $('#touch-view').classList.toggle('held', settings.camera === 'first');

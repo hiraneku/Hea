@@ -686,3 +686,99 @@
 .aegis-toggle strong {
   font: 600 12px var(--mono);
 }
+
+/* --- Accessibility: boss direction indicator, HUD scale, colour-vision palettes --- */
+#boss-indicator {
+  position: absolute;
+  left: 50%;
+  bottom: 128px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  background: #14242688;
+  backdrop-filter: blur(8px);
+  font: 7px var(--mono);
+  letter-spacing: 1.2px;
+  color: #eef3e6;
+  white-space: nowrap;
+}
+#boss-indicator[hidden] {
+  display: none;
+}
+.boss-indicator-arrow {
+  width: 0;
+  height: 0;
+  border-left: 5px solid transparent;
+  border-right: 5px solid transparent;
+  border-bottom: 9px solid currentColor;
+  transition: transform 0.12s linear;
+}
+/* Every HUD cluster keeps its corner: the CSS `scale` property grows it from that anchor. */
+.vitals {
+  transform-origin: left top;
+}
+.boss-hud {
+  transform-origin: center top;
+}
+.duel-stats {
+  transform-origin: right top;
+}
+.aegis-hud {
+  transform-origin: left top;
+}
+.spell-dock {
+  transform-origin: center bottom;
+}
+.dash-hud {
+  transform-origin: right bottom;
+}
+.desktop-hints {
+  transform-origin: left bottom;
+}
+#hud .vitals,
+#hud .boss-hud,
+#hud .duel-stats,
+#hud .aegis-hud,
+#hud .spell-dock,
+#hud .dash-hud,
+#hud .desktop-hints,
+#hud .movement-toggle,
+#hud .session-info {
+  scale: var(--hud-scale, 1);
+}
+/*
+ * Colour-vision-safe HUD palettes (Wong): the spell hues move apart, and the boss charge
+ * bar gains stripes so a telegraph never reads by colour alone.
+ */
+#experience[data-color-vision='deuteranopia'] .spell-slot[data-spell='0'],
+#experience[data-color-vision='protanopia'] .spell-slot[data-spell='0'] {
+  --element: #e69f00 !important;
+}
+#experience[data-color-vision='deuteranopia'] .spell-slot[data-spell='1'],
+#experience[data-color-vision='protanopia'] .spell-slot[data-spell='1'] {
+  --element: #56b4e9 !important;
+}
+#experience[data-color-vision='deuteranopia'] .spell-slot[data-spell='2'],
+#experience[data-color-vision='protanopia'] .spell-slot[data-spell='2'] {
+  --element: #009e73 !important;
+}
+#experience[data-color-vision='tritanopia'] .spell-slot[data-spell='0'] {
+  --element: #d55e00 !important;
+}
+#experience[data-color-vision='tritanopia'] .spell-slot[data-spell='1'] {
+  --element: #f0e442 !important;
+}
+#experience[data-color-vision='tritanopia'] .spell-slot[data-spell='2'] {
+  --element: #0072b2 !important;
+}
+#experience:not([data-color-vision='standard']) .boss-charge {
+  height: 4px;
+}
+#experience:not([data-color-vision='standard']) .boss-charge i {
+  background: repeating-linear-gradient(-45deg, #ffd76e 0 5px, #8a5a12 5px 10px);
+}
+#experience:not([data-color-vision='standard']) .boss-meter i {
+  background: repeating-linear-gradient(-45deg, #f4f6ee 0 6px, #9fb4a4 6px 12px);
+}

@@ -1,3 +1,5 @@
+import { DEFAULT_BINDINGS, type KeyBindings } from './types';
+
 export class Controls {
   readonly touch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
   enabled = false;
@@ -31,6 +33,8 @@ export class Controls {
   private ignoreMouseUntil = 0;
   private knob: HTMLElement;
   private joystick: HTMLElement;
+  /** The remappable keyboard actions; the settings panel replaces them live. */
+  private bindings: KeyBindings;
   constructor(
     readonly canvas: HTMLCanvasElement,
     private onPause: () => void,
@@ -38,7 +42,9 @@ export class Controls {
     private onCycle: () => void,
     private onLock: (locked: boolean) => void,
     private onLockUnavailable: () => void,
+    bindings: KeyBindings = DEFAULT_BINDINGS,
   ) {
+    this.bindings = { ...bindings };
     this.knob = document.querySelector('#stick-knob')!;
     this.joystick = document.querySelector('#joystick')!;
     window.addEventListener('keydown', (e) => this.keydown(e));
@@ -90,6 +96,12 @@ export class Controls {
     });
     this.bindTouch();
   }
+  /** New bindings take effect at once, including mid-duel. */
+  setBindings(bindings: KeyBindings) {
+    this.bindings = { ...bindings };
+    // A key held under the old map must not stick under the new one.
+    this.keys.clear();
+  }
   setEnabled(value: boolean) {
     this.enabled = value;
     this.reset();
@@ -137,13 +149,14 @@ export class Controls {
     }
   }
   movement() {
+    const b = this.bindings;
     let x =
-      (this.keys.has('KeyD') || this.keys.has('ArrowRight') ? 1 : 0) -
-      (this.keys.has('KeyA') || this.keys.has('ArrowLeft') ? 1 : 0) +
+      (this.keys.has(b.right) || this.keys.has('ArrowRight') ? 1 : 0) -
+      (this.keys.has(b.left) || this.keys.has('ArrowLeft') ? 1 : 0) +
       this.stickX;
     let z =
-      (this.keys.has('KeyW') || this.keys.has('ArrowUp') ? 1 : 0) -
-      (this.keys.has('KeyS') || this.keys.has('ArrowDown') ? 1 : 0) -
+      (this.keys.has(b.forward) || this.keys.has('ArrowUp') ? 1 : 0) -
+      (this.keys.has(b.back) || this.keys.has('ArrowDown') ? 1 : 0) -
       this.stickY;
     const length = Math.hypot(x, z);
     if (length > 1) {
@@ -151,8 +164,8 @@ export class Controls {
       z /= length;
     }
     const lift =
-      (this.keys.has('Space') || this.riseHeld ? 1 : 0) -
-      (this.keys.has('KeyC') || this.descendHeld ? 1 : 0);
+      (this.keys.has(b.rise) || this.riseHeld ? 1 : 0) -
+      (this.keys.has(b.descend) || this.descendHeld ? 1 : 0);
     return { x, z, lift };
   }
   look() {
@@ -167,7 +180,17 @@ export class Controls {
         ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName))
     )
       return;
-    if (['Space', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(e.code))
+    if (
+      [
+        'Space',
+        'ArrowUp',
+        'ArrowDown',
+        'ArrowLeft',
+        'ArrowRight',
+        'Tab',
+        this.bindings.rise,
+      ].includes(e.code)
+    )
       e.preventDefault();
     this.keys.add(e.code);
     if (e.repeat) return;
@@ -175,13 +198,15 @@ export class Controls {
       this.onPause();
       return;
     }
-    if (e.code === 'ShiftLeft' || e.code === 'ShiftRight') this.dashRequested = true;
-    if (e.code === 'KeyE') this.focusRequested = true;
-    if (e.code === 'KeyV') this.viewRequested = true;
-    if (e.code === 'KeyG') this.shieldRequested = true;
-    if (e.code === 'KeyF') this.flightRequested = true;
-    if (e.code === 'Space') this.jumpRequested = true;
-    if (e.code === 'KeyQ' || e.code === 'Tab') this.onCycle();
+    const b = this.bindings;
+    if (e.code === b.dash || e.code === 'ShiftLeft' || e.code === 'ShiftRight')
+      this.dashRequested = true;
+    if (e.code === b.focus) this.focusRequested = true;
+    if (e.code === b.view) this.viewRequested = true;
+    if (e.code === b.shield) this.shieldRequested = true;
+    if (e.code === b.flight) this.flightRequested = true;
+    if (e.code === b.rise) this.jumpRequested = true;
+    if (e.code === b.cycle || e.code === 'Tab') this.onCycle();
     if (['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.onSpell(Number(e.code.at(-1)) - 1);
   }
   private bindTouch() {

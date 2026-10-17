@@ -79,6 +79,8 @@ async function scene(page: Page, name: string) {
 const canvas = (page: Page) => page.locator('#arena');
 
 test.describe('golden frames', () => {
+  // Playwright requires the fixtures object as the first argument, even when unused.
+  // eslint-disable-next-line no-empty-pattern
   test.beforeEach(({}, info) => {
     test.skip(info.project.name !== 'desktop', 'golden frames are rendered once, on desktop');
   });

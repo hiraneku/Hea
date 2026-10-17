@@ -3163,3 +3163,43 @@ input[type='range'] {
     font-size: 6px;
   }
 }
+
+/* --- Settings: key-binding editor --- */
+.bindings {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 18px;
+  margin: 4px 0 14px;
+}
+.binding-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font: 8px var(--mono);
+  letter-spacing: 0.8px;
+}
+.bind-button {
+  font: 7px var(--mono);
+  letter-spacing: 0.8px;
+  min-width: 86px;
+  padding: 6px 8px;
+  border: 1px solid #e7f2e240;
+  background: #16242722;
+  color: inherit;
+  cursor: pointer;
+  border-radius: 2px;
+}
+.bind-button:hover,
+.bind-button:focus-visible {
+  border-color: var(--orange);
+}
+.bind-button.capturing {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+@media (max-width: 640px) {
+  .bindings {
+    grid-template-columns: 1fr;
+  }
+}
