@@ -465,7 +465,7 @@ test('flight holds altitude, descends smoothly, and crosses the old map boundary
   await page.keyboard.up('KeyW');
   expect((await state(page)).position.z).toBeGreaterThan(70);
   const arena = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).arena;
-  expect(arena.size).toBe(400);
+  expect(arena.size).toBe(ARENA.halfSize * 2);
   // 25 monoliths (the slab's floor plate included) plus the low cover that found a clear spot.
   expect(arena.buildings).toBeGreaterThanOrEqual(25 + 10);
   expect(arena.buildings).toBeLessThanOrEqual(25 + 26);
@@ -685,7 +685,8 @@ test('a body launched into open air rights itself before landing; the boss hunts
   expect(d.groundReactions.filter((r) => r.actor === 'player')).toHaveLength(0);
   await scenario(page, 'far-cover');
   const start = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).bossPosition;
-  await step(page, 15);
+  // The map is 600 m now, so the boss starts 204 m out: give the walk the time it needs.
+  await step(page, 26);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   const p = (await state(page)).position;
   expect(Math.hypot(d.bossPosition[0] - start[0], d.bossPosition[2] - start[2])).toBeGreaterThan(
@@ -695,7 +696,8 @@ test('a body launched into open air rights itself before landing; the boss hunts
   expect(d.bossLane.mode).not.toBe('blocked');
   // The same chase from the opposite corner, through the ring gaps and over the low cover.
   await scenario(page, 'far-north');
-  await step(page, 12);
+  // 240 m from the player this time: the same longer walk as far-cover, on a 600 m map.
+  await step(page, 26);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   const q = (await state(page)).position;
   expect(Math.hypot(d.bossPosition[0] - q.x, d.bossPosition[2] - q.z)).toBeLessThan(40);
@@ -955,9 +957,10 @@ test('heavy ragdoll slides without bounce and promptly recovers; walls and sigil
   await step(page, 2.3);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(d.fireGates.some((g) => g.radius >= 1)).toBe(true);
-  // Fewer, broader blocks: every remaining monolith is at least 20 m wide and 15 m tall.
+  // Fewer, broader blocks: v0.19 trades count for scale — 19 monoliths, every one of them at
+  // least 20 m wide and 15 m tall (the widest is 88 m, the tallest 101 m).
   const monoliths = d.walls.filter((w) => w.maxX - w.minX >= 20 && w.top >= 15).length;
-  expect(monoliths).toBeGreaterThanOrEqual(22);
+  expect(monoliths).toBeGreaterThanOrEqual(18);
   expect(monoliths).toBeLessThanOrEqual(d.walls.length);
   // Plus the low cover (1.5–2.6 m walls) in the gaps between the rings.
   expect(d.walls.length).toBeLessThan(52);
@@ -1627,10 +1630,9 @@ test('a Prisma beam sweeps the boss’s fire out of the air: bolts and seekers t
   await step(page, 0.5);
   const swept = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect(swept.strayShots).toBe(0);
-  // And the curtain showed itself doing it: a pane flashed where each shot ran into the light,
-  // with the lance's own thread left standing behind it.
+  // And the curtain showed itself doing it: a pane flashed where each shot ran into the light.
+  // No thread is strung back to the caster — the lance is seen where it lands, not along itself.
   expect(swept.particles.prismPanes).toBeGreaterThanOrEqual(2);
-  expect(swept.particles.lightVeins).toBeGreaterThan(0);
   // A seeker, thrown from the same clear lane: the beam takes it out of the air too. (The
   // previous beam's curtain has to burn out first, or it would break this one on the way in.)
   await step(page, 0.5);

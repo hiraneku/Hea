@@ -544,8 +544,7 @@ export class Effects {
   prismScars = 0;
   /** How many curtains have shown themselves where a shot ran into them. */
   prismPanes = 0;
-  /** How many threads of light have been left standing along a lance. */
-  lightVeins = 0;
+
   private aimLine: {
     group: THREE.Group;
     core: THREE.Mesh;
@@ -595,7 +594,6 @@ export class Effects {
       prismShatters: this.prismShatters,
       prismScars: this.prismScars,
       prismPanes: this.prismPanes,
-      lightVeins: this.lightVeins,
       aimLine: this.aimLine?.group.visible ?? false,
       scorches: this.scorches.count,
       density: this.density,
@@ -1090,49 +1088,6 @@ export class Effects {
       (rim.material as THREE.MeshBasicMaterial).opacity = 0.6 * fade;
     };
     this.flare(at, radius * 0.45 * punch, 0.2, '#ffffff', 1.1);
-  }
-  /**
-   * The thread of light a lance leaves standing along its own length: faint, but enough to show
-   * the corridor a beam is holding open for as long as it lasts.
-   */
-  lightVein(start: THREE.Vector3, end: THREE.Vector3, radius: number, life: number, heavy = false) {
-    const direction = v1.subVectors(end, start),
-      length = direction.length();
-    if (length < 0.5) return;
-    this.lightVeins++;
-    const line = (width: number, tint: string, opacity: number) => {
-      const mesh = new THREE.Mesh(
-        this.tube,
-        new THREE.MeshBasicMaterial({
-          color: new THREE.Color(tint).multiplyScalar(1.6),
-          transparent: true,
-          opacity,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false,
-          toneMapped: false,
-        }),
-      );
-      mesh.userData.keepGeometry = true;
-      mesh.position.y = 0.5;
-      mesh.scale.set(width, 1, width);
-      return mesh;
-    };
-    const core = line(Math.max(0.05, radius * 0.03), '#eafbff', heavy ? 0.34 : 0.26),
-      halo = line(Math.max(0.16, radius * 0.09), '#63d6ff', heavy ? 0.16 : 0.12),
-      group = new THREE.Group();
-    group.add(core, halo);
-    group.position.copy(start);
-    group.quaternion.setFromUnitVectors(UP, direction.normalize());
-    group.scale.set(1, length, 1);
-    group.userData.kind = 'lance-vein';
-    this.add(group, life);
-    const effect = this.timed[this.timed.length - 1];
-    effect.animate = (e) => {
-      // It arrives with the beam and thins away over the lance's life.
-      const fade = Math.min(1, (e.max - e.life) / 0.05) * Math.pow(e.life / e.max, 1.2);
-      (core.material as THREE.MeshBasicMaterial).opacity = 0.27 * (heavy ? 1.25 : 1) * fade;
-      (halo.material as THREE.MeshBasicMaterial).opacity = 0.13 * (heavy ? 1.25 : 1) * fade;
-    };
   }
   /**
    * The sight of a charging heavy lance: a hairline from the circle to wherever the crosshair
@@ -2533,7 +2488,6 @@ export class Effects {
     this.prismShatters = 0;
     this.prismScars = 0;
     this.prismPanes = 0;
-    this.lightVeins = 0;
     this.hideAimTrace();
     this.skidCalls = 0;
     this.clods = 0;

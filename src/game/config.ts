@@ -1,13 +1,14 @@
 /**
- * A 400 × 400 m playable square, with margin for the camera and crater geometry. The terrain
- * grid is warped (see terrainGrid.ts): 176 segments give ~1.2 m cells at the centre and ~4 m
- * at the rim.
+ * A 600 × 600 m playable square, with margin for the camera and crater geometry. The terrain
+ * grid is warped (see terrainGrid.ts): 224 segments give ~1.4 m cells at the centre and ~3.4 m
+ * at the rim. The ceiling clears the tallest monolith with room to spare, so flight can still
+ * pass over the skyline.
  */
 export const ARENA = {
-  halfSize: 200,
-  terrainHalf: 214,
-  terrainSegments: 176,
-  ceiling: 70,
+  halfSize: 300,
+  terrainHalf: 316,
+  terrainSegments: 256,
+  ceiling: 120,
   /** The sun's shadow map follows the player and covers this half-span around them. */
   shadowSpan: 80,
 } as const;

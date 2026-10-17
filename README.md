@@ -45,6 +45,19 @@ npm run build:pages
 
 Jangan memilih folder root: `index.html` di root adalah entry pengembangan TypeScript, bukan build statis yang dapat langsung dijalankan GitHub Pages. `dist/` tetap diabaikan Git; hanya `docs/` yang disertakan untuk publikasi Pages.
 
+## Duel v0.19 — Arena 600 m, Monolit Raksasa, Plaza Kosong, dan Kamera yang Punya Bobot
+
+Poros kamera dan skala dunia. Empat perubahan besar, plus dua cacat yang ketemu sambil jalan.
+
+1. **Monolitnya sekarang monumen.** Lebar 46–88 m (dulu 40–60), tinggi 32–101 m (dulu 20–52), semuanya masih bisa dibongkar. Tinggi langit-langit terbang naik 70 → 120 m supaya rute udara masih bisa melewati puncaknya, dan langit-langit itu kini di atas semua blok sehingga terbang tidak lagi mentok di puncak menara.
+2. **Petanya 400 → 600 m.** Terrain mengikuti (316 m setengah, 224 segmen) dengan lebar sel ~1,4 m di pusat — tetap rapat di tempat pertarungan, kasar di tepi. Kabut dan bidang tanah luar digeser agar ujung peta tidak terlihat. Denahnya juga dirapikan: **satu** cincin seeded 12 blok di belakang cincin tangan, bukan dua, supaya lapangan terasa lapang alih-alih penuh.
+3. **Plaza kosong 210 m.** Radius plaza 39 → 105 m, jadi tidak ada satu pun tembok dalam lingkaran 210 m di tengah peta — tempat bertarung terbuka, tanpa dinding di mana-mana. Penutup rendah (1,5–2,6 m) tetap ada di luar plaza untuk berlindung saat jalan kaki; muka blok terdekat ke pusat 111 m, koridor tersempit 26 m (dua kali lebar boss).
+4. **Garis transparan saat menembak dihapus.** Penyebabnya `lightVein`: tabung cahaya tipis yang digambar sepanjang setiap lance — kecil maupun berat — dari titik tembak sampai ujungnya, jadi garis itu selalu keluar dari tubuh pemain. Sekarang lance hanya terlihat **di tempat ia mendarat**: pane di tiap kontak, percikan, dan bekas. Tidak ada lagi benang yang menggantung dari penembak.
+
+**Dua cacat yang ketemu sambil mengerjakan ini.** (a) Nat lantai dipetakan langsung dari koordinat dunia, sehingga satu nat berat jatuh tepat di x = 0 — dari titik spawn itu membentang lurus dari mata ke titik hilang, tepat di tengah layar, dan terbaca seperti garis sihir. Pemetaan digeser setengah nat. (b) Ada jahitan pucat tipis di lantai pada beberapa resolusi (900×560, tidak pada 1100×700) yang **sudah ada sejak v0.18** dan bukan dari perubahan ini; ia dicatat untuk poros cahaya/atmosfer, bukan dikejar sekarang.
+
+**Kamera yang punya bobot** (mulai v0.19, dua commit pertama). Hantaman tidak lagi hanya menggetarkan sudut pandang dengan skalar: kamera **tergeser searah laju proyektil** sampai 6 cm (3,5 cm di orang-pertama, karena mata ada di dalam tubuh), lalu ditarik kembali oleh pegas dengan sedikit overshoot. Mendarat punya berat: kamera turun menurut kecepatan jatuh — lompatan biasa 1,5 cm, jatuh sembilan meter 7,9 cm, turun di bawah 7 m/s tidak terasa. Penggeseran tetap di-trace ulang ke dunia, jadi kamera yang bergerak tidak bisa masuk tembok, dan semuanya mati saat efek dikurangi. **Mata orang-pertama juga naik** dari 1,18 m ke 1,30 m: tulang `Head` avatar ada di 0,94 m dari tubuh 1,52 m, jadi 1,18 m itu dagu, bukan visor.
+
 ## Duel v0.18 — Resolusi Adaptif, Permukaan Beton & Batu, Ruang Bergema, dan Siluet Avatar
 
 Empat poros sekaligus: performa dulu (agar poros visual punya anggaran piksel), lalu permukaan, suara, dan siluet. Modul baru: `src/game/adaptive.ts` (tangga resolusi), `src/game/pattern.ts` + `src/game/materials.ts` (permukaan prosedural), `src/game/reverb.ts` (ruang), `src/game/Avatar.ts` (siluet), aset CC0 `public/models/avatar.glb`.

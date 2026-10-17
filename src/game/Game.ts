@@ -3172,9 +3172,8 @@ export class Game {
    */
   private lightLance(start: THREE.Vector3, end: THREE.Vector3, radius: number, heavy: boolean) {
     const life = heavy ? 0.45 : PRISMA.beamLife;
-    // The corridor itself is drawn while it lasts: a faint thread along the lance, so the space
-    // a beam is holding open can be seen and not only felt when something runs into it.
-    this.fx.lightVein(start, end, radius, life, heavy);
+    // The lance itself is drawn where it lands, not along its length: it breaks what it touches
+    // and shows a pane at each contact, but it does not leave a thread hanging from the caster.
     this.prismaLights.push({ start: start.clone(), end: end.clone(), radius, heavy, life });
   }
   /** Break a shot against a lance: a flash at the contact, a puff of glass and a chime. */
@@ -3576,6 +3575,7 @@ export class Game {
         this.renderNeeded = true;
       },
       castBoss: (attack: AttackId, index = 0) => this.bossAttack(attack, index),
+      scene: () => this.scene,
       place: (player: number[], boss: number[]) => {
         this.player.fromArray(player);
         this.previousPlayer.copy(this.player);

@@ -116,7 +116,7 @@ export class World {
     private fx: Effects,
   ) {
     scene.background = new THREE.Color('#b4cbd6');
-    scene.fog = new THREE.Fog('#b6c5cf', 175, 520);
+    scene.fog = new THREE.Fog('#b6c5cf', 230, 720);
     this.sky = new THREE.Mesh(
       new THREE.SphereGeometry(540, 32, 20),
       new THREE.MeshBasicMaterial({
@@ -158,7 +158,7 @@ export class World {
     });
     floor.map!.repeat.set(162, 162);
     const outer = new THREE.Shape(),
-      span = 650;
+      span = 900;
     outer.moveTo(-span, -span);
     outer.lineTo(span, -span);
     outer.lineTo(span, span);
@@ -202,7 +202,10 @@ export class World {
         const x = warpAxis(position.getX(i) / half) * half,
           y = warpAxis(position.getY(i) / half) * half;
         position.setXY(i, x, y);
-        uv.setXY(i, (x + half) / (half * 2), (y + half) / (half * 2));
+        // Half a heavy joint off the origin: the floor is textured in world space, and with no
+        // offset a joint lands exactly on x = 0 and z = 0 — which, from the spawn point, runs
+        // away from the eye as one hard line straight through the middle of the screen.
+        uv.setXY(i, (x + half) / (half * 2) + 0.25, (y + half) / (half * 2) + 0.25);
       }
       position.needsUpdate = uv.needsUpdate = true;
     }
