@@ -1,6 +1,6 @@
 node_modules/
 dist/
-# docs/ is intentionally tracked: GitHub Pages publishes this static build.
+# GitHub Pages is deployed by .github/workflows/pages.yml from dist/; nothing built is committed.
 .cache/
 .playwright/
 test-results/

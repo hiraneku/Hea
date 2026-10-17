@@ -1,17 +1,18 @@
 {
   "name": "hea-arcane-arena",
-  "version": "0.19.0",
+  "version": "0.20.0",
   "private": true,
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
-    "build:pages": "tsc --noEmit && vite build --outDir docs",
     "preview": "vite preview --host 0.0.0.0",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "format": "prettier --write src tests *.ts *.json index.html README.md",
-    "format:check": "prettier --check src tests *.ts *.json index.html README.md"
+    "format": "prettier --write src tests *.ts *.json eslint.config.js index.html README.md CHANGELOG.md docs",
+    "format:check": "prettier --check src tests *.ts *.json eslint.config.js index.html README.md CHANGELOG.md docs",
+    "lint": "eslint src tests *.ts eslint.config.js",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@fontsource/barlow-condensed": "^5.2.8",
@@ -19,12 +20,17 @@
     "three": "^0.180.0"
   },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.56.0",
     "@sparticuz/chromium": "^138.0.2",
     "@types/node": "^22.20.5",
     "@types/three": "^0.180.0",
+    "@vitest/coverage-v8": "^5.0.5",
+    "eslint": "^10.13.0",
+    "globals": "^17.13.0",
     "prettier": "^3.9.10",
     "typescript": "^5.9.3",
+    "typescript-eslint": "^8.71.2",
     "vite": "^7.1.9",
     "vitest": "^5.0.4"
   }
