@@ -782,3 +782,54 @@
 #experience:not([data-color-vision='standard']) .boss-meter i {
   background: repeating-linear-gradient(-45deg, #f4f6ee 0 6px, #9fb4a4 6px 12px);
 }
+
+/* FALL's announcement: the spell names itself on every cast, a little above centre,
+   with a thin rule under it — no circle, no ornament. It stays, dimming, while held. */
+#fall-title {
+  position: absolute;
+  left: 50%;
+  top: 36%;
+  transform: translate(-50%, -50%) scale(1.04);
+  z-index: 6;
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity 0.45s ease,
+    transform 0.45s ease;
+  text-align: center;
+}
+#fall-title.show {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+}
+#fall-title span {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-weight: 700;
+  font-size: clamp(44px, 9vw, 96px);
+  letter-spacing: 0.42em;
+  text-indent: 0.42em;
+  color: #e6dbff;
+  text-shadow:
+    0 0 22px rgba(150, 100, 255, 0.75),
+    0 2px 0 rgba(40, 16, 90, 0.8);
+}
+#fall-title i {
+  display: block;
+  height: 2px;
+  margin: 6px 12% 0;
+  background: linear-gradient(90deg, transparent, #b78cff, transparent);
+}
+/* The gravity tint at the edge of the world while FALL holds. */
+#fall-vignette {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(74, 32, 160, 0.5) 100%);
+}
+/* A fourth slot joins the dock: keep the row compact. */
+.spell-slots {
+  grid-template-columns: repeat(4, 1fr);
+}

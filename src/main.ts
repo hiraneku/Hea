@@ -14,7 +14,9 @@ import {
   CAMERA_RANGES,
   DEFAULT_BINDINGS,
   HUD_SCALE_RANGE,
+  MAX_SLOTS,
   normalizeBindings,
+  normalizeLoadout,
   readSettings,
   saveSettings,
   SPELLS,
@@ -22,12 +24,13 @@ import {
   type KeyBindings,
   type Mode,
   type Snapshot,
+  type SpellId,
 } from './game/types';
 
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const settings = readSettings();
 const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
-const spellIcons = [icons.flame, icons.prism, icons.nova];
+const spellIcons = [icons.flame, icons.prism, icons.nova, icons.gravity];
 
 /** A `KeyboardEvent.code` as a keycap: `KeyW` → `W`, `ShiftLeft` → `SHIFT`. */
 function keyLabel(code: string): string {
@@ -94,13 +97,13 @@ app.innerHTML = `
         </div>
         <div class="input-note">${isTouch ? '<span class="small-cross">✦</span> KONTROL SENTUH · BANTUAN BIDIK AKTIF' : `${icons.mouse}<span>KEYBOARD + MOUSE <b>/</b> KONTROL SENTUH</span>`}</div>
       </div>
-      <aside class="element-index" aria-label="Tiga jenis sihir">
+      <aside class="element-index" aria-label="Jenis sihir">
         <div class="index-heading">ONE BOSS.<br>NO SECOND GUESS.</div>
         ${SPELLS.map((s, i) => `<div class="element-row" style="--element:${s.color}"><span class="element-number">0${i + 1}</span><span class="element-icon">${spellIcons[i]}</span><span class="element-name">${s.name}<small>${s.subtitle}</small></span><span class="element-dot"></span></div>`).join('')}
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.20</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.21</span><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -120,7 +123,7 @@ app.innerHTML = `
       <div class="desktop-hints"><div><kbd data-hint="forward">W</kbd><kbd data-hint="left">A</kbd><kbd data-hint="back">S</kbd><kbd data-hint="right">D</kbd><span>GERAK</span></div><div><kbd><span data-hint="rise">SPACE</span> / <span data-hint="descend">C</span></kbd><span>NAIK / TURUN</span><kbd data-hint="flight">F</kbd><span>MODE</span><kbd data-hint="focus">E</kbd><span>FOKUS BOSS</span></div><div class="hints-muted"><kbd data-hint="view">V</kbd><span>SUDUT PANDANG</span><kbd>R</kbd><span>ULANGI</span><kbd data-hint="cycle">Q</kbd><span>GANTI SIHIR</span></div></div>
       <div class="spell-dock">
         <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span></div>
-        <div class="spell-slots">${SPELLS.map((s, i) => `<button class="spell-slot ${i === 0 ? 'selected' : ''}" data-spell="${i}" style="--element:${s.color};--cooldown:0" aria-label="Pilih ${s.name} — ${s.subtitle}" aria-pressed="${i === 0}"><span class="slot-key">${i + 1}</span><span class="slot-icon">${spellIcons[i]}</span><span class="slot-name">${s.name}</span><span class="slot-cost">${s.cost}</span><span class="slot-cooldown"></span></button>`).join('')}</div>
+        <div class="spell-slots" id="spell-slots"></div>
         <div class="energy-row"><span>ENERGI</span><div class="meter energy-meter"><i id="energy-fill"></i></div><b id="energy-value">100</b></div>
       </div>
       <div class="dash-hud"><div class="dash-symbol">${icons.dash}</div><div><span>DASH <kbd data-hint="dash">SHIFT</kbd></span><strong id="dash-value">SIAP</strong><div class="meter dash-meter"><i id="dash-fill"></i></div></div></div>
@@ -139,6 +142,7 @@ app.innerHTML = `
       <span class="look-label">GESER LAYAR UNTUK MELIHAT</span>
     </div>
     <div id="demo-ui" hidden><div class="demo-tag"><i></i><span>DEMONSTRASI LANGSUNG<small>Kamera otomatis · Efek real-time</small></span></div><button id="demo-play" class="primary-button"><span>GILIRANMU</span>${icons.arrow}</button><button id="demo-exit" class="icon-button" aria-label="Keluar dari demo">${icons.close}</button></div>
+    <div id="fall-vignette" aria-hidden="true"></div><div id="fall-title" aria-hidden="true"><span>FALL</span><i></i></div>
     <div id="damage-vignette" aria-hidden="true"></div><div id="speed-lines" aria-hidden="true"></div><div id="boost-vignette" aria-hidden="true"></div><div id="damage-numbers" aria-hidden="true"></div>
     <div id="toast" role="status"></div>
     <dialog id="panel-dialog" aria-labelledby="panel-title"></dialog>
@@ -331,6 +335,7 @@ function event(event: GameEvent) {
 }
 
 function applySettings() {
+  renderSpellSlots();
   saveSettings(settings);
   game?.applySettings(settings);
   $('#sound-button').innerHTML = settings.sound ? icons.volume : icons.mute;
@@ -346,6 +351,106 @@ function applySettings() {
     const action = el.dataset.hint as keyof KeyBindings;
     el.textContent = keyLabel(settings.bindings[action]);
   });
+}
+
+/* ------------------------------------------------------------------ */
+/* Grimoire: the spell book. Four slots on top, the whole library       */
+/* below with school filters, and a detail panel for the focused spell. */
+/* ------------------------------------------------------------------ */
+let grimoireSlot = 0;
+let grimoireSpell: SpellId = 3;
+let grimoireFilter = 'Semua';
+const SCHOOL_FILTERS = ['Semua', 'Api', 'Cahaya', 'Gravitasi'] as const;
+
+function renderSpellSlots() {
+  const dock = document.querySelector<HTMLElement>('#spell-slots');
+  if (!dock) return;
+  const slotKeys = [
+    settings.bindings.slot1,
+    settings.bindings.slot2,
+    settings.bindings.slot3,
+    settings.bindings.slot4,
+  ];
+  dock.innerHTML = settings.loadout
+    .map((id, i) => {
+      const s = SPELLS[id];
+      return `<button class="spell-slot" data-spell="${id}" data-slot="${i}" style="--element:${s.color};--cooldown:0" aria-label="Slot ${i + 1}: ${s.name} — ${s.subtitle}" aria-pressed="false"><span class="slot-key">${keyLabel(slotKeys[i])}</span><span class="slot-icon">${spellIcons[id]}</span><span class="slot-name">${s.name}</span><span class="slot-cost">${s.cost}</span><span class="slot-cooldown"></span></button>`;
+    })
+    .join('');
+  dock.querySelectorAll<HTMLElement>('.spell-slot').forEach((button) => {
+    button.onclick = () => game?.selectSpell(Number(button.dataset.slot));
+  });
+}
+
+function equipSpell(spell: SpellId) {
+  const loadout = [...settings.loadout];
+  const from = loadout.indexOf(spell);
+  if (from === grimoireSlot) return;
+  if (from >= 0) loadout[from] = loadout[grimoireSlot];
+  loadout[grimoireSlot] = spell;
+  settings.loadout = normalizeLoadout(loadout);
+  if (!settings.equipped.includes(spell)) settings.equipped = [...settings.equipped, spell];
+  grimoireSpell = spell;
+  // A spell newly placed in a slot starts on cooldown: swapping never dodges one.
+  game?.noteEquipped(spell);
+  applySettings();
+  renderGrimoire();
+}
+
+function statBar(label: string, value: number, max: number) {
+  const pct = Math.max(4, Math.min(100, (value / max) * 100));
+  return `<div class="grim-stat"><span>${label}</span><i><b style="width:${pct}%"></b></i><em>${value}</em></div>`;
+}
+
+function renderGrimoire() {
+  const root = document.querySelector<HTMLElement>('#grimoire');
+  if (!root) return;
+  const detail = SPELLS[grimoireSpell];
+  const slots = settings.loadout
+    .map(
+      (id, i) =>
+        `<button class="grim-slot ${i === grimoireSlot ? 'armed' : ''}" data-grim-slot="${i}" style="--element:${SPELLS[id].color}" aria-label="Slot ${i + 1}: ${SPELLS[id].name}">${spellIcons[id]}<span>SLOT ${i + 1}</span><strong>${SPELLS[id].name}</strong></button>`,
+    )
+    .join('');
+  const cards = SPELLS.map((s, id) => ({ s, id: id as SpellId }))
+    .filter(({ s }) => grimoireFilter === 'Semua' || s.school === grimoireFilter)
+    .map(({ s, id }) => {
+      const inSlot = settings.loadout.indexOf(id);
+      const isNew = !settings.equipped.includes(id);
+      return `<button class="grim-card ${id === grimoireSpell ? 'focused' : ''}" data-grim-spell="${id}" style="--element:${s.color}" aria-label="Pasang ${s.name} di slot ${grimoireSlot + 1}"><span class="grim-card-icon">${spellIcons[id]}</span><span class="grim-card-name">${s.name}<small>${s.school} · ${s.cast}</small></span>${isNew ? '<span class="grim-new">BARU</span>' : ''}${inSlot >= 0 ? `<span class="grim-in">SLOT ${inSlot + 1}</span>` : ''}</button>`;
+    })
+    .join('');
+  root.innerHTML = `
+    <div class="grim-slots">${slots}</div>
+    <div class="grim-filters">${SCHOOL_FILTERS.map((f) => `<button class="grim-filter ${f === grimoireFilter ? 'active' : ''}" data-grim-filter="${f}">${f.toUpperCase()}</button>`).join('')}</div>
+    <div class="grim-body">
+      <div class="grim-cards">${cards}</div>
+      <div class="grim-detail" style="--element:${detail.color}">
+        <div class="grim-detail-head">${spellIcons[grimoireSpell]}<div><strong>${detail.name}</strong><span>${detail.subtitle}</span></div></div>
+        <div class="grim-tags"><span>${detail.school}</span><span>${detail.cast.toUpperCase()}</span><span>BIAYA ${detail.cost}</span><span>COOLDOWN ${detail.cooldown}S</span></div>
+        ${statBar('Damage', detail.damage, 90)}
+        ${statBar('Kontrol', detail.control, 5)}
+        <p>${detail.description}</p>
+        <button class="grim-equip" id="grim-equip">PASANG DI SLOT ${grimoireSlot + 1}</button>
+      </div>
+    </div>`;
+  root.querySelectorAll<HTMLElement>('[data-grim-slot]').forEach((el) => {
+    el.onclick = () => {
+      grimoireSlot = Number(el.dataset.grimSlot);
+      renderGrimoire();
+    };
+  });
+  root.querySelectorAll<HTMLElement>('[data-grim-filter]').forEach((el) => {
+    el.onclick = () => {
+      grimoireFilter = el.dataset.grimFilter!;
+      renderGrimoire();
+    };
+  });
+  root.querySelectorAll<HTMLElement>('[data-grim-spell]').forEach((el) => {
+    el.onclick = () => equipSpell(Number(el.dataset.grimSpell) as SpellId);
+  });
+  const equip = root.querySelector<HTMLElement>('#grim-equip');
+  if (equip) equip.onclick = () => equipSpell(grimoireSpell);
 }
 
 function renderPanel(type: Exclude<typeof panel, null>) {
@@ -371,13 +476,13 @@ function renderPanel(type: Exclude<typeof panel, null>) {
     content = `<p class="panel-description">Hadapi satu boss terbang, IGNIS. Ganti antara terbang dan jalan. Di mode jalan, Space/tombol Lompat dapat digunakan dua kali; di mode terbang tahan Naik/Turun. IGNIS berganti posisi serta ketinggian, menembak lewat lingkaran di sekelilingnya, melepas 12 orb homing, dan mengisi bola surya besar. Nova dapat menghempaskan boss; serangan beratnya juga bisa melontarkanmu menembus dinding atau menghantam tanah.</p>
       <div class="control-tabs"><button id="desktop-tab" class="${!isTouch ? 'active' : ''}">KEYBOARD + MOUSE</button><button id="mobile-tab" class="${isTouch ? 'active' : ''}">LAYAR SENTUH</button></div>
       <div id="desktop-guide" class="control-guide" ${isTouch ? 'hidden' : ''}>
-        <div><span>Bergerak</span><b><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></b></div><div><span>Arahkan kamera / serang</span><b>MOUSE / KLIK KIRI</b></div><div><span>Terbang naik / turun</span><b>TAHAN <kbd>SPACE</kbd> / <kbd>C</kbd></b></div><div><span>Dash · kebal pada awal luncuran</span><b><kbd>SHIFT</kbd></b></div><div><span>Kunci / lepas pandangan boss</span><b><kbd>E</kbd> / KLIK KANAN</b></div><div><span>Perisai ON / OFF</span><b><kbd>G</kbd> / TOMBOL AEGIS</b></div><div><span>Mode terbang / jalan</span><b><kbd>F</kbd> / TOMBOL MODE</b></div><div><span>Pilih sihir</span><b><kbd>1</kbd><kbd>2</kbd><kbd>3</kbd> / <kbd>Q</kbd></b></div><div><span>Jeda / ulangi arena</span><b><kbd>ESC</kbd> / <kbd>R</kbd></b></div>
+        <div><span>Bergerak</span><b><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></b></div><div><span>Arahkan kamera / serang</span><b>MOUSE / KLIK KIRI</b></div><div><span>Terbang naik / turun</span><b>TAHAN <kbd>SPACE</kbd> / <kbd>C</kbd></b></div><div><span>Dash · kebal pada awal luncuran</span><b><kbd>SHIFT</kbd></b></div><div><span>Kunci / lepas pandangan boss</span><b><kbd>E</kbd> / KLIK KANAN</b></div><div><span>Perisai ON / OFF</span><b><kbd>G</kbd> / TOMBOL AEGIS</b></div><div><span>Mode terbang / jalan</span><b><kbd>F</kbd> / TOMBOL MODE</b></div><div><span>Pilih sihir</span><b><kbd>1</kbd>–<kbd>4</kbd> / <kbd>Q</kbd></b></div><div><span>Jeda / ulangi arena</span><b><kbd>ESC</kbd> / <kbd>R</kbd></b></div>
       </div>
       <div id="mobile-guide" class="control-guide" ${!isTouch ? 'hidden' : ''}>
         <div><span>Bergerak</span><b>JOYSTICK KIRI</b></div><div><span>Arahkan kamera</span><b>GESER AREA KANAN</b></div><div><span>Serang berulang</span><b>TAHAN TOMBOL SERANG</b></div><div><span>Ganti sihir</span><b>SENTUH SLOT SIHIR</b></div><div><span>Terbang naik / turun</span><b>TAHAN NAIK / TURUN</b></div><div><span>Menghindar / kunci kamera</span><b>DASH / FOKUS</b></div><div><span>Perisai ON / OFF</span><b><kbd>G</kbd> / TOMBOL AEGIS</b></div><div><span>Mode terbang / jalan</span><b><kbd>F</kbd> / TOMBOL MODE</b></div><div><span>Bantuan bidik</span><b>OTOMATIS AKTIF</b></div>
       </div>
       <p class="panel-note">Semua tombol desktop di atas dapat dipetakan ulang di <b>Pengaturan → Pemetaan tombol</b>; petunjuk tombol di HUD mengikuti pemetaanmu. Bantuan bidik, indikator arah boss, palet aman buta warna, dan skala HUD juga diatur di sana.</p>
-      <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${['Proyektil cepat. Ikuti target dengan crosshair.', 'Tap: lingkaran acak di sekitarmu menembakkan sinar yang menyapu proyektil musuh di jalurnya. Tahan: lingkaran besar di depan pandangan mengisi; lepas untuk lancip berat yang membongkar dinding dan memecahkan serangan berat.', 'Ledakan kuat. Hempaskan boss dan hancurkan penghalang.'][i]}</span></div>`).join('')}</div>
+      <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${s.description}</span></div>`).join('')}</div>
       <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; selama masih berdiri, jejak itu ikut menahan tembakan berikutnya pada lintasan yang sama, dan saat OFF jejak lama tidak memblokir serangan baru. Patch yang muncul berdampingan menyusun diri rapat seperti kepingan puzzle, tidak menumpuk. Proyektil benar-benar menghantam permukaannya: tubuhnya gepeng dan memercik di sana, patch terdorong dan beriak. Satu patch hanya kuat menahan lima hit: kepingnya makin menyala dan retak, lalu pecah berhamburan dan menyisakan lubang di arah itu selama sesaat—bergeraklah. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat; hit berat membeku sejenak lalu lepas dalam gerak lambat sebelum hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret: tanah terbelah membentuk alur lurus searah seretan dengan gundukan terangkat di kiri-kanannya, bongkahan tanah berhamburan, lalu tubuh langsung bangkit; bila melayang lama tanpa menyentuh apa pun, ia menegakkan diri di udara. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Pusaran Surya: benih gelap meluncur ke dekatmu lalu membuka sumur gravitasi yang menyedot tubuh dan segala percikan selama hampir dua detik, kemudian meledak menjadi cincin bara mendatar—jangan kabur lurus (punggungmu buta), tapi naik atau menukik keluar dari bidang cincinnya. Sinar Prisma menyapu garis bidikmu: rentetan api dan orb homing pecah begitu melintasinya; bola surya dan inti Pusaran Surya hanya pecah oleh lancip berat. Sinar kecil meninggalkan goresan di permukaan yang dihantamnya (tanpa membongkar dinding), lingkaran besar yang mengisi menarik garis bidik ke arah crosshair sebagai penanda, dan klik yang belum bisa dibayar membuat slot sihir meredup sekejap. Seret kamera untuk melepas fokus.</p>
       <button class="primary-button full-width" id="panel-done"><span>MENGERTI</span>${icons.arrow}</button>`;
   } else if (type === 'settings') {
@@ -396,9 +501,11 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       <div class="settings-row"><div><label for="threat-indicator">Indikator arah boss</label><p>Panah berlabel menunjukkan IGNIS<br>saat ia di luar pandangan — tanpa warna.</p></div><label class="switch"><input id="threat-indicator" type="checkbox" ${settings.threatIndicator ? 'checked' : ''} aria-label="Indikator arah boss"/><span></span></label></div>
       <div class="settings-row"><div><label for="color-vision">Palet aman buta warna</label><p>Rona alternatif + pola garis pada meteran<br>boss, agar telegraf tak bergantung warna.</p></div><select id="color-vision"><option value="standard" ${settings.colorVision === 'standard' ? 'selected' : ''}>Standar</option><option value="deuteranopia" ${settings.colorVision === 'deuteranopia' ? 'selected' : ''}>Deuteranopia</option><option value="protanopia" ${settings.colorVision === 'protanopia' ? 'selected' : ''}>Protanopia</option><option value="tritanopia" ${settings.colorVision === 'tritanopia' ? 'selected' : ''}>Tritanopia</option></select></div>
       <div class="settings-row slider-row"><div><label for="hud-scale">Skala HUD</label><b id="hud-scale-label">${Math.round(settings.hudScale * 100)}%</b></div><input id="hud-scale" type="range" min="${HUD_SCALE_RANGE.min}" max="${HUD_SCALE_RANGE.max}" step="0.05" value="${settings.hudScale}" /></div>
+      <div class="settings-row"><div><label>Grimoire — susunan sihir</label><p>Pilih slot, lalu pilih sihir untuk memasangnya.<br>Maksimal ${MAX_SLOTS} sihir aktif; sisanya menunggu di buku ini.</p></div></div>
+      <div id="grimoire"></div>
       <div class="settings-row bindings-row"><div><label>Pemetaan tombol</label><p>Klik tombol, lalu tekan tombol baru.<br>Menukar otomatis bila sudah dipakai.</p></div><button id="bindings-reset" class="quiet-button">ATUR ULANG</button></div>
       <div class="bindings">${BINDING_ACTIONS.map((a) => `<div class="binding-row"><span>${a.label}</span><button class="bind-button" data-bind="${a.id}" aria-label="Ubah tombol ${a.label}">${keyLabel(settings.bindings[a.id])}</button></div>`).join('')}</div>
-      <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render. Statistik performa membantu menakar apakah perangkatmu menjaga 60 FPS. Tombol panah, Esc/P (jeda), Tab (ganti sihir) dan 1/2/3 (slot sihir) selalu aktif sebagai cadangan.</p>
+      <p class="panel-note">Mode Tinggi mengaktifkan bayangan dinamis dan bloom. Mode Ringan mengurangi partikel dan resolusi render. Statistik performa membantu menakar apakah perangkatmu menjaga 60 FPS. Tombol panah, Esc/P (jeda), Tab (ganti sihir) dan 1–4 (slot sihir) selalu aktif sebagai cadangan.</p>
       <button class="primary-button full-width" id="panel-done"><span>SIMPAN & KEMBALI</span>${icons.arrow}</button>`;
   } else if (type === 'reference') {
     content = `<div class="control-tabs"><button id="reference-one">REFERENSI 1</button><button id="reference-two" class="active">REFERENSI 2</button></div><video class="reference-video" src="${reference2Url}" controls playsinline autoplay muted loop preload="metadata" aria-label="Video referensi asli dari repositori"></video><p class="panel-note">Referensi 2 dari repo, 11,75 detik: kepingan shield heksagonal dan rentetan api. Referensi 1 tetap tersedia. Pilihan fisika dan timing yang tidak terlihat di video tetap berupa tuning prototipe.</p>`;
@@ -412,6 +519,7 @@ function renderPanel(type: Exclude<typeof panel, null>) {
   dialog.innerHTML = `<div class="panel-top"><span class="eyebrow">${overline}</span><button id="panel-close" class="icon-button" aria-label="Tutup">${icons.close}</button></div><h2 id="panel-title">${heading}</h2>${content}<div class="panel-corner" aria-hidden="true"></div>`;
   if (!dialog.open) dialog.showModal();
   $('#panel-close').onclick = closePanel;
+  if (type === 'settings') renderGrimoire();
   if (document.querySelector('#panel-done')) $('#panel-done').onclick = closePanel;
   if (type === 'reference') {
     for (const [id, url] of [
@@ -648,16 +756,21 @@ function updateHud(s: Snapshot) {
   $('#speed-lines').classList.toggle('surge', surge > 0.05);
   experience.style.setProperty('--surge', surge.toFixed(3));
   document.querySelectorAll<HTMLElement>('.spell-slot').forEach((button, i) => {
-    button.classList.toggle('selected', i === s.spell);
-    button.classList.toggle('empty', s.energy < SPELLS[i].cost);
-    // A held spell (Prisma's lance, Nova) fills its slot from the bottom; full charge lights it.
-    const held = i === s.spell;
+    const id = s.loadout[i] ?? 0;
+    button.classList.toggle('selected', i === s.slot);
+    button.classList.toggle('empty', s.energy < SPELLS[id].cost);
+    // A held spell (Prisma's lance, Nova, Fall's pressure) fills its slot from the bottom.
+    const held = id === s.spell;
     button.classList.toggle('charging', held && s.charge > 0);
     button.classList.toggle('charged', held && s.charged);
     button.style.setProperty('--charge', held ? s.charge.toFixed(3) : '0');
-    button.setAttribute('aria-pressed', String(i === s.spell));
-    button.style.setProperty('--cooldown', String(s.cooldowns[i]));
+    button.setAttribute('aria-pressed', String(i === s.slot));
+    button.style.setProperty('--cooldown', String(s.cooldowns[id]));
   });
+  // FALL announces itself on every cast and tints the world's edge violet while it holds.
+  const fallActive = s.fall.phase !== 'idle' && s.mode === 'playing';
+  $('#fall-title').classList.toggle('show', fallActive);
+  $('#fall-vignette').style.opacity = fallActive ? String(0.3 + s.fall.pressure * 0.45) : '0';
   if (s.spell !== lastSpell) {
     $('#touch-fire-icon').innerHTML = spellIcons[s.spell];
     $('#touch-fire').style.setProperty('--element', SPELLS[s.spell].color);
@@ -760,9 +873,7 @@ async function boot() {
         toast('Browser tidak mengizinkan layar penuh pada preview ini.');
       }
     };
-    document.querySelectorAll<HTMLElement>('[data-spell]').forEach((button) => {
-      button.onclick = () => game.selectSpell(Number(button.dataset.spell));
-    });
+    renderSpellSlots();
     window.addEventListener('keydown', (e) => {
       if (e.repeat || dialog.open) return;
       if (e.code === 'KeyR' && game.snapshot.mode === 'playing') {

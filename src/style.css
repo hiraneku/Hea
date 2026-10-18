@@ -1355,6 +1355,14 @@ kbd {
     0 0 10px #0a141a,
     0 1px 2px #0a141acc;
 }
+.damage-number.spell-3 {
+  color: #d9c6ff;
+  text-shadow:
+    0 0 14px #8a5cff,
+    0 0 6px #b78cff99,
+    0 0 10px #0a141a,
+    0 1px 2px #0a141acc;
+}
 .damage-number.spell-2 {
   font-size: 26px;
   font-weight: 700;
@@ -3202,4 +3210,221 @@ input[type='range'] {
   .bindings {
     grid-template-columns: 1fr;
   }
+}
+
+/* ---------------- Grimoire (spell loadout) ---------------- */
+#grimoire {
+  margin: 4px 0 18px;
+}
+.grim-slots {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.grim-slot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 10px 4px 8px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-bottom: 3px solid var(--element);
+  color: #e8e6df;
+  cursor: pointer;
+}
+.grim-slot svg {
+  width: 22px;
+  height: 22px;
+  color: var(--element);
+}
+.grim-slot span {
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  opacity: 0.6;
+}
+.grim-slot strong {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.08em;
+}
+.grim-slot.armed {
+  background: rgba(255, 255, 255, 0.1);
+  outline: 2px solid var(--element);
+  outline-offset: -2px;
+}
+.grim-filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.grim-filter {
+  padding: 5px 12px;
+  font-size: 10px;
+  letter-spacing: 0.16em;
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #cfccc2;
+  cursor: pointer;
+}
+.grim-filter.active {
+  background: #e8e6df;
+  color: #172020;
+  font-weight: 600;
+}
+.grim-body {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+@media (max-width: 640px) {
+  .grim-body {
+    grid-template-columns: 1fr;
+  }
+}
+.grim-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.grim-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  text-align: left;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-left: 3px solid var(--element);
+  color: #e8e6df;
+  cursor: pointer;
+}
+.grim-card.focused {
+  background: rgba(255, 255, 255, 0.1);
+  outline: 1px solid var(--element);
+}
+.grim-card-icon svg {
+  width: 22px;
+  height: 22px;
+  color: var(--element);
+  display: block;
+}
+.grim-card-name {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 16px;
+  letter-spacing: 0.06em;
+  line-height: 1.05;
+}
+.grim-card-name small {
+  display: block;
+  font-family: Inter, sans-serif;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  opacity: 0.6;
+}
+.grim-new {
+  margin-left: auto;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  padding: 2px 6px;
+  background: #b78cff;
+  color: #1d1038;
+}
+.grim-in {
+  margin-left: auto;
+  font-size: 8px;
+  letter-spacing: 0.14em;
+  padding: 2px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  opacity: 0.75;
+}
+.grim-new + .grim-in {
+  margin-left: 6px;
+}
+.grim-detail {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-top: 3px solid var(--element);
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.03);
+}
+.grim-detail-head {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.grim-detail-head svg {
+  width: 30px;
+  height: 30px;
+  color: var(--element);
+}
+.grim-detail-head strong {
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 22px;
+  letter-spacing: 0.06em;
+  display: block;
+  line-height: 1;
+}
+.grim-detail-head span {
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  opacity: 0.65;
+}
+.grim-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+.grim-tags span {
+  font-size: 8.5px;
+  letter-spacing: 0.12em;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+}
+.grim-stat {
+  display: grid;
+  grid-template-columns: 52px 1fr 22px;
+  align-items: center;
+  gap: 8px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  margin: 5px 0;
+}
+.grim-stat i {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  display: block;
+}
+.grim-stat i b {
+  display: block;
+  height: 100%;
+  background: var(--element);
+}
+.grim-stat em {
+  font-style: normal;
+  text-align: right;
+  opacity: 0.8;
+}
+.grim-detail p {
+  font-size: 12px;
+  line-height: 1.55;
+  opacity: 0.85;
+  margin: 10px 0;
+}
+.grim-equip {
+  width: 100%;
+  padding: 10px;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 15px;
+  letter-spacing: 0.14em;
+  background: var(--element);
+  border: none;
+  color: #14100a;
+  font-weight: 700;
+  cursor: pointer;
 }

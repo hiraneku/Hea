@@ -19,6 +19,9 @@ export const icons = {
   nova: svg(
     '<circle cx="12" cy="12" r="5"/><path d="M12 1v4m0 14v4M1 12h4m14 0h4M4 4l3 3m10 10 3 3M4 20l3-3M17 7l3-3"/>',
   ),
+  gravity: svg(
+    '<path d="M12 2v11m0 0 4.5-4.5M12 13 7.5 8.5"/><path d="M4 18.5c2.4 1.5 5.1 2.3 8 2.3s5.6-.8 8-2.3M7 15.2c1.6.7 3.3 1 5 1s3.4-.3 5-1"/>',
+  ),
   dash: svg('<path d="m10 5 7 7-7 7m-7-2h5M1 12h6M3 7h5"/>'),
   shield: svg('<path d="m12 2 8 4v6c0 5-8 10-8 10S4 17 4 12V6l8-4Z"/><path d="m8 12 3 3 5-6"/>'),
   jump: svg('<path d="m6 12 6-7 6 7m-6-7v14M5 2h14"/>'),

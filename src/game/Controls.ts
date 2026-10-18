@@ -207,7 +207,12 @@ export class Controls {
     if (e.code === b.flight) this.flightRequested = true;
     if (e.code === b.rise) this.jumpRequested = true;
     if (e.code === b.cycle || e.code === 'Tab') this.onCycle();
-    if (['Digit1', 'Digit2', 'Digit3'].includes(e.code)) this.onSpell(Number(e.code.at(-1)) - 1);
+    // Spell slots: the remappable binding first, the number row as a fixed secondary.
+    const slots = [b.slot1, b.slot2, b.slot3, b.slot4];
+    const bound = slots.indexOf(e.code);
+    if (bound >= 0) this.onSpell(bound);
+    else if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code))
+      this.onSpell(Number(e.code.at(-1)) - 1);
   }
   private bindTouch() {
     const joystick = this.joystick,

@@ -1,14 +1,15 @@
 export type Mode = 'menu' | 'playing' | 'paused' | 'demo' | 'gameover' | 'victory';
 export type Quality = 'auto' | 'low' | 'high';
 export type CameraMode = 'third' | 'first';
-export type SpellId = 0 | 1 | 2;
+export type SpellId = 0 | 1 | 2 | 3;
 /** HUD/telegraph palette: the standard one, or a colour-vision-safe alternative. */
 export type ColorVision = 'standard' | 'deuteranopia' | 'protanopia' | 'tritanopia';
 
 /**
  * The remappable keyboard actions, as `KeyboardEvent.code` values. Movement keeps the arrow
- * keys as a fixed secondary, and Esc/P (pause), Tab (cycle) and 1/2/3 (spell slots) stay
- * fixed so a remap can never lock the player out of the game.
+ * keys as a fixed secondary, and Esc/P (pause) and Tab (cycle) stay fixed so a remap can
+ * never lock the player out of the game. The spell-slot keys are remappable actions of
+ * their own, with the number row kept as a fixed secondary.
  */
 export interface KeyBindings {
   forward: string;
@@ -23,6 +24,10 @@ export interface KeyBindings {
   flight: string;
   view: string;
   cycle: string;
+  slot1: string;
+  slot2: string;
+  slot3: string;
+  slot4: string;
 }
 
 export const DEFAULT_BINDINGS: KeyBindings = {
@@ -38,6 +43,10 @@ export const DEFAULT_BINDINGS: KeyBindings = {
   flight: 'KeyF',
   view: 'KeyV',
   cycle: 'KeyQ',
+  slot1: 'Digit1',
+  slot2: 'Digit2',
+  slot3: 'Digit3',
+  slot4: 'Digit4',
 };
 
 /** The binding actions in the order the settings panel lists them. */
@@ -54,6 +63,10 @@ export const BINDING_ACTIONS: { id: keyof KeyBindings; label: string }[] = [
   { id: 'flight', label: 'Mode terbang / jalan' },
   { id: 'view', label: 'Sudut pandang' },
   { id: 'cycle', label: 'Ganti sihir' },
+  { id: 'slot1', label: 'Slot sihir 1' },
+  { id: 'slot2', label: 'Slot sihir 2' },
+  { id: 'slot3', label: 'Slot sihir 3' },
+  { id: 'slot4', label: 'Slot sihir 4' },
 ];
 
 const KEY_CODE = /^[A-Za-z][A-Za-z0-9]*$/;
@@ -111,6 +124,10 @@ export interface Settings {
   hudScale: number;
   /** Remappable keyboard actions. */
   bindings: KeyBindings;
+  /** The spell loadout: which spell sits in each of the four slots (spell ids, no repeats). */
+  loadout: SpellId[];
+  /** Spells that have been equipped at least once; the rest wear a BARU badge in the Grimoire. */
+  equipped: SpellId[];
 }
 
 /** The ranges the camera sliders cover (also the clamps applied to stored values). */
@@ -136,13 +153,41 @@ export const DEFAULT_SETTINGS: Settings = {
   colorVision: 'standard',
   hudScale: 1,
   bindings: { ...DEFAULT_BINDINGS },
+  loadout: [0, 1, 2, 3],
+  equipped: [0, 1, 2],
 };
 
 /** The range the HUD scale slider covers (also the clamp applied to stored values). */
 export const HUD_SCALE_RANGE = { min: 0.85, max: 1.3 } as const;
 
-export const SPELLS = [
-  { name: 'BARA', subtitle: 'Proyektil api', color: '#ff8b54', cost: 7, cooldown: 0.3, damage: 36 },
+export type SpellSchool = 'Api' | 'Cahaya' | 'Gravitasi';
+export type SpellCast = 'Ketuk' | 'Tahan' | 'Ketuk / tahan';
+
+export const SPELLS: readonly {
+  name: string;
+  subtitle: string;
+  color: string;
+  cost: number;
+  cooldown: number;
+  damage: number;
+  school: SpellSchool;
+  cast: SpellCast;
+  control: number;
+  description: string;
+}[] = [
+  {
+    name: 'BARA',
+    subtitle: 'Proyektil api',
+    color: '#ff8b54',
+    cost: 7,
+    cooldown: 0.3,
+    damage: 36,
+    school: 'Api',
+    cast: 'Ketuk',
+    control: 1,
+    description:
+      'Proyektil cepat. Ikuti target dengan crosshair; dengan bantuan bidik ia memburu boss.',
+  },
   {
     name: 'PRISMA',
     subtitle: 'Lingkaran cahaya',
@@ -150,9 +195,82 @@ export const SPELLS = [
     cost: 2,
     cooldown: 0.3,
     damage: 15,
+    school: 'Cahaya',
+    cast: 'Ketuk / tahan',
+    control: 3,
+    description:
+      'Ketuk: lingkaran cahaya menembakkan sinar yang menyapu proyektil musuh. Tahan: lingkaran besar mengisi; lepas untuk lancip berat yang membongkar dinding.',
   },
-  { name: 'NOVA', subtitle: 'Ledakan area', color: '#e5eacb', cost: 30, cooldown: 1.7, damage: 86 },
-] as const;
+  {
+    name: 'NOVA',
+    subtitle: 'Ledakan area',
+    color: '#e5eacb',
+    cost: 30,
+    cooldown: 1.7,
+    damage: 86,
+    school: 'Api',
+    cast: 'Tahan',
+    control: 4,
+    description:
+      'Ledakan kuat yang menghempaskan boss dan menghancurkan penghalang. Tahan untuk versi terisi yang lebih jauh dan lebih keras.',
+  },
+  {
+    name: 'FALL',
+    subtitle: 'Tekanan gravitasi',
+    color: '#b78cff',
+    cost: 18,
+    cooldown: 12,
+    damage: 46,
+    school: 'Gravitasi',
+    cast: 'Tahan',
+    control: 5,
+    description:
+      'Tahan: kolom gravitasi mengunci boss, menghantamnya ke tanah dan menahannya di sana — ia tidak bisa lolos. Tekanan tersimpan meledak saat dilepas; tanah retak dan amblas selama ia tertahan.',
+  },
+];
+
+/** The default loadout and the most spells the four slots can hold. */
+export const MAX_SLOTS = 4;
+
+/**
+ * A stored loadout, made safe: unknown ids and repeats are dropped, then any spell never
+ * placed fills the remaining slots in registry order, so the dock always shows four
+ * working slots and no spell is ever stranded outside it while the library is small.
+ */
+export function normalizeLoadout(raw: unknown): SpellId[] {
+  const source = Array.isArray(raw) ? raw : [];
+  const result: SpellId[] = [];
+  for (const value of source) {
+    if (
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= 0 &&
+      value < SPELLS.length &&
+      !result.includes(value as SpellId)
+    )
+      result.push(value as SpellId);
+    if (result.length >= MAX_SLOTS) break;
+  }
+  for (let id = 0; id < SPELLS.length && result.length < MAX_SLOTS; id++)
+    if (!result.includes(id as SpellId)) result.push(id as SpellId);
+  return result.slice(0, MAX_SLOTS);
+}
+
+/** Spells the player has equipped at least once (drives the Grimoire's BARU badges). */
+export function normalizeEquipped(raw: unknown): SpellId[] {
+  const source = Array.isArray(raw) ? raw : [];
+  const result: SpellId[] = [];
+  for (const value of source)
+    if (
+      typeof value === 'number' &&
+      Number.isInteger(value) &&
+      value >= 0 &&
+      value < SPELLS.length &&
+      !result.includes(value as SpellId)
+    )
+      result.push(value as SpellId);
+  return result;
+}
 
 export interface Snapshot {
   mode: Mode;
@@ -179,6 +297,12 @@ export interface Snapshot {
   };
   dash: number;
   spell: SpellId;
+  /** Which of the four loadout slots is selected (the spell above is what sits in it). */
+  slot: number;
+  /** The loadout in slot order, for dressing the dock. */
+  loadout: SpellId[];
+  /** FALL's state: idle between casts, then build → slam → press while held. */
+  fall: { phase: 'idle' | 'build' | 'slam' | 'press'; pressure: number };
   /** A held Nova: 0..1 of the way to a charged blast, 0 when nothing is held. */
   charge: number;
   charged: boolean;
@@ -273,6 +397,9 @@ export function readSettings(): Settings {
         : fallback.colorVision,
       hudScale: ranged(raw.hudScale, HUD_SCALE_RANGE, fallback.hudScale),
       bindings: normalizeBindings(raw.bindings),
+      loadout: normalizeLoadout(raw.loadout),
+      equipped:
+        raw.equipped === undefined ? [...fallback.equipped] : normalizeEquipped(raw.equipped),
     };
   } catch {
     return fallback;
