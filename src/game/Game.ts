@@ -8,7 +8,7 @@ import { Controls } from './Controls';
 import { ProjectileSystem, type Projectile } from './ProjectileSystem';
 import { PrismaSystem } from './PrismaSystem';
 import { FallSystem, type FallPhase } from './FallSystem';
-import { MinionSwarm, type MinionHost } from './Minion';
+import { Enemy, type EnemyHost } from './Enemy';
 import { ImpactFrame } from './ImpactFrame';
 import { AudioEngine } from './Audio';
 import { Effects, Ribbon, makeSigil } from './Effects';
@@ -45,6 +45,7 @@ import {
   PROJECTILES,
   novaCharge,
   SUMMON,
+  ENEMY,
   FALL,
   fallPressure,
   fallReleaseDamage,
@@ -201,8 +202,8 @@ export class Game {
   private chargeSigil?: THREE.Group;
   /** Prisma: the circles, beams and standing lances, and the hold that raises them. */
   private prisma!: PrismaSystem;
-  private minions!: MinionSwarm;
-  private minionHost!: MinionHost;
+  private enemies: Enemy[] = [];
+  private enemyHost!: EnemyHost;
   /** Distance walked since the last footfall, metres. */
   private stride = 0;
   /** The articulated silhouette riding the collision box, and whether it has arrived. */
@@ -327,20 +328,19 @@ export class Game {
     this.world = new World(this.scene, this.fx);
     this.fx.setGroundSampler((x, z) => this.world.surfaceHeight(x, z));
     this.boss = new Boss(this.scene, this.fx);
-    this.minions = new MinionSwarm(this.scene);
-    this.minionHost = {
-      playerChest: () => this.player.clone().add(new THREE.Vector3(0, 0.9, 0)),
-      playerVelocity: () => this.velocity.clone().add(this.impulse),
+    this.enemyHost = {
+      targetChest: () => this.player.clone().add(new THREE.Vector3(0, 0.9, 0)),
+      targetVelocity: () => this.velocity.clone().add(this.impulse),
       shoot: (at, velocity) =>
         this.spawn(
           at,
           velocity,
           'fire',
-          SUMMON.shotDamage,
+          ENEMY.shotDamage,
           false,
           null,
-          SUMMON.shotPower,
-          SUMMON.shotRadius,
+          ENEMY.shotPower,
+          ENEMY.shotRadius,
         ),
       collide: (position, radius) => {
         for (const b of this.world.obstaclesNear(position.x, position.z, radius + 0.3)) {
@@ -393,6 +393,7 @@ export class Game {
           this.lastImpact = { surface: ground ? 'ground' : 'wall', actor: 'player' };
         },
         damageBoss: (amount, impulse, source) => this.damageBoss(amount, impulse, source),
+        damageEnemy: (enemy, amount) => this.damageEnemy(enemy, amount),
         time: () => this.time,
       },
     );
@@ -772,13 +773,13 @@ export class Game {
         (o) => o.userData.projectile && !this.projectiles.some((p) => p.mesh === o),
       ).length,
       colliders: this.world.obstacles.length,
-      minions: this.minions.alive,
+      enemies: this.enemies.length,
       lastImpact: this.lastImpact,
     };
   }
   private resetDuel() {
     this.clearProjectiles();
-    this.minions.clear();
+    this.clearEnemies();
     this.fx.clear();
     this.world.reset();
     this.boss.reset();
@@ -1102,8 +1103,8 @@ export class Game {
         this.updateFireGates(dt);
         this.updateWells(dt);
         if (!this.outcome) this.updateProjectiles(dt);
-        if (!this.boss.alive && this.minions.alive > 0) this.minions.clear();
-        else if (!this.outcome) this.minions.update(dt, this.minionHost);
+        if (!this.boss.alive && this.enemies.length > 0) this.clearEnemies();
+        else if (!this.outcome) this.updateEnemies(dt);
         else this.clearProjectiles();
       }
       if (this.mode !== 'playing') this.showcaseCamera(dt);
@@ -2113,11 +2114,21 @@ export class Game {
       this.fx.burst(muzzle, '#ff8a5a', 30, 4, 0.5, 1);
       if (this.mode !== 'menu') this.audio.cast(2);
     } else if (attack === 'summon') {
-      // Three lesser shades unfold from the boss and take up the hunt themselves.
-      const spawned = this.minions.summon(this.boss.position.clone());
-      for (const at of spawned) {
-        this.fx.glyph(at, UP.clone(), '#b78cff', 0.9, 0.45);
-        this.fx.burst(at, '#b78cff', 22, 4, 0.5, 0.9);
+      // Three lesser constructs of the boss's own kind unfold and take up the hunt.
+      const spawned: Enemy[] = [];
+      while (this.enemies.length < SUMMON.count) {
+        const i = this.enemies.length,
+          angle = (i / SUMMON.count) * Math.PI * 2,
+          at = this.boss.position
+            .clone()
+            .add(new THREE.Vector3(Math.cos(angle) * 2.6, 1.6 + i * 0.5, Math.sin(angle) * 2.6));
+        const enemy = new Enemy(this.scene, at);
+        this.enemies.push(enemy);
+        spawned.push(enemy);
+      }
+      for (const enemy of spawned) {
+        this.fx.glyph(enemy.position.clone(), UP.clone(), '#ffb35c', 0.9, 0.45);
+        this.fx.burst(enemy.position.clone(), '#ffb35c', 22, 4, 0.5, 0.9);
       }
       if (this.mode !== 'menu') this.audio.cast(1);
     } else {
@@ -2132,6 +2143,40 @@ export class Game {
       if (this.mode !== 'menu') this.audio.cast(2);
     }
   }
+  /** Advance every lesser construct, and keep wingmates out of each other's space. */
+  private updateEnemies(dt: number) {
+    for (const enemy of this.enemies) enemy.update(dt, this.enemyHost);
+    for (let i = 0; i < this.enemies.length; i++)
+      for (let j = i + 1; j < this.enemies.length; j++) {
+        const a = this.enemies[i].position,
+          b = this.enemies[j].position,
+          apart = a.clone().sub(b),
+          d = apart.length();
+        if (d > 0.001 && d < 1.7) {
+          apart.normalize().multiplyScalar((1.7 - d) * 0.5);
+          a.add(apart);
+          b.sub(apart);
+        }
+      }
+  }
+
+  /** Any player attack lands here: bolts, beams, blasts and gravity alike. */
+  private damageEnemy(enemy: Enemy, amount: number) {
+    const at = enemy.position.clone(),
+      died = enemy.damage(amount);
+    this.fx.burst(at, '#ffb35c', died ? 34 : 12, died ? 5.5 : 3, 0.42, died ? 1 : 0.6);
+    if (died) {
+      const index = this.enemies.indexOf(enemy);
+      if (index >= 0) this.enemies.splice(index, 1);
+      enemy.dispose();
+    }
+  }
+
+  private clearEnemies() {
+    for (const enemy of this.enemies) enemy.dispose();
+    this.enemies = [];
+  }
+
   /** A vortex seed arriving: its body becomes the core of a well that starts to pull. */
   private anchorWell(p: Projectile, at: THREE.Vector3) {
     const core = p.mesh;
@@ -2408,6 +2453,10 @@ export class Game {
             .addScaledVector(UP, 3 * charge.launch),
           { spell: 2, at: this.boss.position.clone(), along: direction },
         );
+      // The blast does not spare the lesser constructs caught in it either.
+      for (const enemy of [...this.enemies])
+        if (enemy.position.distanceTo(end) < 6.5 * grow && this.clearSight(end, enemy.position))
+          this.damageEnemy(enemy, spell.damage);
       this.cameraRig.shake = Math.max(this.cameraRig.shake, charge.charged ? 0.03 : 0.018);
     }
   }
@@ -2428,9 +2477,17 @@ export class Game {
     }
     const ground = this.world.traceGround(start, end, radius);
     if (ground !== null && (!best || ground < best.t)) best = { t: ground, ground: true };
-    if (boss && this.boss.alive) {
-      const t = segmentSphere(start, end, this.boss.position, BOSS.radius + radius);
-      if (t !== null && (!best || t < best.t)) best = { t, boss: true };
+    if (boss) {
+      // Target-inclusive traces meet lesser constructs too, so a beam or bolt stops on
+      // the first body in its lane — theirs or their master's.
+      for (const enemy of this.enemies) {
+        const t = enemy.crossedBy(start, end, radius);
+        if (t !== null && (!best || t < best.t)) best = { t, enemy };
+      }
+      if (this.boss.alive) {
+        const t = segmentSphere(start, end, this.boss.position, BOSS.radius + radius);
+        if (t !== null && (!best || t < best.t)) best = { t, boss: true };
+      }
     }
     return best;
   }
@@ -2646,16 +2703,6 @@ export class Game {
           }
         }
       }
-      if (p.kind === 'player' && this.minions.alive > 0) {
-        const minionHit = this.minions.hitTest(p.last, p.mesh.position, p.radius);
-        if (minionHit && (!worldHit || minionHit.t < worldHit.t)) {
-          const at = p.last.clone().lerp(p.mesh.position, minionHit.t),
-            died = this.minions.damage(minionHit.member, p.damage);
-          this.fx.burst(at, '#b78cff', died ? 34 : 12, died ? 5.5 : 3, 0.42, died ? 1 : 0.6);
-          this.removeProjectile(i);
-          continue;
-        }
-      }
       if (worldHit) {
         p.mesh.position.lerpVectors(p.last, p.mesh.position, worldHit.t);
         this.fx.impact(
@@ -2663,7 +2710,8 @@ export class Game {
           p.kind === 'player' ? '#ffc18a' : '#ff9d58',
           p.kind === 'hammer',
         );
-        if (worldHit.boss)
+        if (worldHit.enemy) this.damageEnemy(worldHit.enemy, p.damage);
+        else if (worldHit.boss)
           this.damageBoss(p.damage, p.velocity.clone().normalize().multiplyScalar(1.7));
         else if (p.kind === 'hammer' || p.kind === 'missile') {
           if (worldHit.obstacle)
@@ -2815,6 +2863,8 @@ export class Game {
           at: this.boss.position.clone(),
           along: new THREE.Vector3(0, -1, 0),
         });
+        for (const enemy of [...this.enemies])
+          if (enemy.held) this.damageEnemy(enemy, FALL.crushDamage);
         this.fallSystem.crushPulse();
         this.audio.fallCrush(fallPressure(this.fallHeld), this.boss.position);
         if (!this.boss.alive) {
@@ -2844,6 +2894,20 @@ export class Game {
     this.boss.clearGates();
     this.pendingFire = [];
     this.firePacket = null;
+    // Gravity takes the whole retinue, not just its master: every lesser construct is
+    // caught where it flies, slammed onto its own ground and held there with him.
+    for (const enemy of [...this.enemies]) {
+      const ground = groundHeight(
+        enemy.position.x,
+        enemy.position.z,
+        enemy.position.y,
+        this.world.obstaclesNear(enemy.position.x, enemy.position.z, 0.3),
+        this.world.surfaceHeight(enemy.position.x, enemy.position.z),
+      );
+      enemy.beginHold(ground);
+      this.damageEnemy(enemy, ENEMY.fallSlam);
+      this.fx.dust(enemy.position.clone().setY(ground + 0.3), 10, 1.6);
+    }
     this.world.crater(feet, 30);
     this.fx.dust(feet, 30, 3.2);
     this.fx.impact(feet.clone().add(new THREE.Vector3(0, 0.4, 0)), '#b78cff', true);
@@ -2867,6 +2931,12 @@ export class Game {
         at: this.boss.position.clone(),
         along: new THREE.Vector3(0, -1, 0),
       });
+    // The held constructs take the same closing crush, then lie a beat before rising.
+    for (const enemy of [...this.enemies]) {
+      if (!enemy.held) continue;
+      enemy.endHold();
+      this.damageEnemy(enemy, fallReleaseDamage(fallPressure(this.fallHeld)));
+    }
     this.audio.fallRelease(false, this.boss.position);
     this.endFallSilent();
     this.fallLinger = FALL.lingerTime;
@@ -2874,6 +2944,7 @@ export class Game {
 
   /** The column collapses without a closing crush (pause, slot change, a kill mid-hold). */
   private endFallSilent() {
+    for (const enemy of this.enemies) enemy.endHold();
     if (this.fallSystem) this.fallSystem.end();
     this.fallPhase = 'idle';
     this.fallHeld = this.fallTick = this.fallTime = 0;

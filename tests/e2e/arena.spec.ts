@@ -1256,13 +1256,16 @@ test('on foot the boss never falls silent: it keeps casting at a grounded player
   });
   const before = fired(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics()));
   let d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  for (let t = 0; t < 6 && fired(d) === before; t += 0.25) {
+  // The boss may first answer with a summon — its constructs hunt in and spit from close
+  // by — so wait for a shot that itself left from the far post: only the boss casts those.
+  let far: number[] | undefined;
+  for (let t = 0; t < 14 && !far; t += 0.25) {
     await step(page, 0.25);
     d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+    far = d.shots.find((s) => Math.hypot(s.origin[0], s.origin[2] - 24) > 40)?.origin;
   }
   expect(fired(d)).toBeGreaterThan(before);
-  const origin = d.shots[d.shots.length - 1].origin;
-  expect(Math.hypot(origin[0], origin[2] - 24)).toBeGreaterThan(40);
+  expect(far).toBeDefined();
 });
 
 test('a dash phases through a shot that would have landed, and the near miss is rewarded', async ({
@@ -2123,7 +2126,7 @@ test('fall: the pinned boss does not turn to track the player', async ({ page },
   await page.mouse.up();
 });
 
-test('summon: the boss calls three shades that hunt and spit straight fire', async ({
+test('summon: the boss calls three lesser constructs that hunt and spit straight fire', async ({
   page,
 }, info) => {
   test.skip(info.project.name !== 'desktop', 'boss casts are driven through the desktop harness');
@@ -2131,13 +2134,34 @@ test('summon: the boss calls three shades that hunt and spit straight fire', asy
   await scenario(page, 'flight');
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([0, 6, 18], [0, 8, 2]));
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('summon'));
-  expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().minions)).toBe(3);
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().enemies)).toBe(3);
   await step(page, 8);
   const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  expect(d.minions).toBe(3);
+  expect(d.enemies).toBe(3);
   // The boss itself never fired (it stands idle in this scenario): every fire shot counted
-  // came out of a shade.
+  // came out of a construct.
   expect(d.attacksFired.fire).toBeGreaterThanOrEqual(3);
+});
+
+test('summon: FALL takes the constructs too, not just their master', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'held casting is driven by mouse on desktop');
+  await load(page);
+  await scenario(page, 'flight');
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([0, 6, 18], [0, 8, 2]));
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('summon'));
+  await step(page, 1);
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().enemies)).toBe(3);
+  // Slot 4 holds FALL by default; hold it down and keep holding.
+  await page.keyboard.press('4');
+  const box = await page.locator('#arena').boundingBox();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await step(page, 1.3); // the word stands alone, then the slam lands on everyone
+  expect((await state(page)).fall.phase).toBe('press');
+  // The slam plus the crush pulses: 26-health constructs do not survive a held FALL.
+  await step(page, 2.2);
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().enemies)).toBe(0);
+  await page.mouse.up();
 });
 
 test('grimoire: spells can be rearranged across the four slots and lose their BARU badge', async ({

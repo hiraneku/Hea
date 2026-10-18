@@ -5,6 +5,7 @@ import { World } from './World';
 import { ProjectileSystem } from './ProjectileSystem';
 import { PRISMA, prismaAngle, shieldScale } from './combat';
 import { segmentDistance, segmentSphere, type TraceHit } from './math';
+import type { Enemy } from './Enemy';
 import { SPELLS, type SpellId } from './types';
 
 const FORWARD = new THREE.Vector3(0, 0, 1);
@@ -85,6 +86,8 @@ export interface PrismaHost {
     impulse: THREE.Vector3,
     source?: { spell: SpellId; at: THREE.Vector3; along: THREE.Vector3 },
   ): void;
+  /** A beam that meets a lesser construct first spends itself on that body instead. */
+  damageEnemy(enemy: Enemy, amount: number): void;
   time(): number;
 }
 
@@ -256,6 +259,7 @@ export class PrismaSystem {
         at: end,
         along,
       });
+    else if (hit?.enemy) this.host.damageEnemy(hit.enemy, SPELLS[1].damage);
     else if (hit) {
       // Where a small beam meets the world it leaves a mark: a glass scar, a puff of dust
       // off the surface, and the record of what the shot met. It does not tear the wall
@@ -400,6 +404,7 @@ export class PrismaSystem {
         along.clone().multiplyScalar(PRISMA.big.impulse).addScaledVector(UP, 2),
         { spell: 1, at: end, along },
       );
+    else if (hit?.enemy) this.host.damageEnemy(hit.enemy, PRISMA.big.damage);
     // The spent circle hangs a moment longer, then breaks like the small ones.
     b.age = 0;
     b.fireAt = null;

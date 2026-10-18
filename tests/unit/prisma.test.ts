@@ -6,9 +6,11 @@ import type { Effects } from '../../src/game/Effects';
 import type { AudioEngine } from '../../src/game/Audio';
 import type { World } from '../../src/game/World';
 import { SPELLS } from '../../src/game/types';
+import type { TraceHit } from '../../src/game/math';
+import type { Enemy } from '../../src/game/Enemy';
 
 /** A Prisma rig with the duel around it stubbed down to what the system actually touches. */
-function makePrisma() {
+function makePrisma(traceHit?: TraceHit) {
   const scene = new Scene();
   const camera = new PerspectiveCamera(74, 1, 0.065, 720);
   camera.position.set(0, 3, 30);
@@ -45,7 +47,11 @@ function makePrisma() {
     damageWall: () => false,
   };
   const projectiles = new ProjectileSystem(scene, new Texture());
-  const calls = { spendBig: 0, damage: [] as { amount: number }[], shakes: [] as number[] };
+  const calls = {
+    spendBig: 0,
+    damage: [] as { amount: number; enemy?: unknown }[],
+    shakes: [] as number[],
+  };
   const host: PrismaHost = {
     camera,
     isFirst: () => false,
@@ -53,13 +59,14 @@ function makePrisma() {
     bossAlive: () => true,
     bossPosition: () => new Vector3(0, 4, 0),
     aimsAtBoss: () => false,
-    trace: (_start, _end, boss) => (boss ? { t: 0.5, boss: true } : null),
+    trace: (_start, _end, boss) => (boss ? (traceHit ?? { t: 0.5, boss: true }) : null),
     spendBig: () => calls.spendBig++,
     heldCharge: () => ({ progress: 1, charged: true }),
     addShake: (amount) => calls.shakes.push(amount),
     noteCast: vi.fn(),
     noteWorldHit: vi.fn(),
     damageBoss: (amount) => calls.damage.push({ amount }),
+    damageEnemy: (enemy, amount) => calls.damage.push({ amount, enemy }),
     time: () => 0,
   };
   const prisma = new PrismaSystem(
@@ -86,6 +93,15 @@ describe('PrismaSystem', () => {
     prisma.update(1);
     expect(prisma.circles).toHaveLength(0);
     expect(fx.shatterPrism).toHaveBeenCalled();
+  });
+
+  it('a beam spends itself on a lesser construct standing in the lane', () => {
+    const enemy = { marker: 'guard' } as unknown as Enemy;
+    const { prisma, calls } = makePrisma({ t: 0.4, enemy });
+    prisma.raiseCircle(true);
+    prisma.update(0.3);
+    expect(prisma.beams).toBe(1);
+    expect(calls.damage).toEqual([{ amount: SPELLS[1].damage, enemy }]);
   });
 
   it('the held circle is paid for once and joins the circles as it is spent', () => {

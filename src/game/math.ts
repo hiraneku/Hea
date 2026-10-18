@@ -1,4 +1,5 @@
 import { ARENA } from './config';
+import type { Enemy } from './Enemy';
 
 export interface Obstacle {
   minX: number;
@@ -17,12 +18,14 @@ export interface Point3 {
   z: number;
 }
 
-/** The first thing a traced segment meets: the world, the ground, or the boss. */
+/** The first thing a traced segment meets: the world, the ground, or a body worth hitting. */
 export interface TraceHit {
   t: number;
   boss?: boolean;
   obstacle?: Obstacle;
   ground?: boolean;
+  /** A lesser construct of the boss's kind, when the segment meets one first. */
+  enemy?: Enemy;
 }
 
 export const clamp = (n: number, min: number, max: number) => Math.max(min, Math.min(max, n));

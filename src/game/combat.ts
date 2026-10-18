@@ -344,13 +344,14 @@ export const ATTACKS = {
     interval: 0.1,
   },
   /**
-   * The boss calls three lesser shades to its side. They are quick, darting things that
-   * spit small straight fireballs — like the boss's own fire, but with no homing in them
-   * and half the bite, so weaving beats them where the boss's salvo would track.
+   * The boss calls three lesser constructs of its own kind to its side: small kin of the
+   * boss itself — stone, ember and sigil — that dart around the player and spit small
+   * straight fireballs, like the boss's own fire but with no homing in them and half the
+   * bite, so weaving beats them where the boss's salvo would track.
    */
   summon: {
-    label: 'TIGA BAYANG',
-    warning: 'BAYANGAN DIPANGGIL',
+    label: 'PENJAGA SURYA',
+    warning: 'PENJAGA DIPANGGIL',
     tell: 1.3,
     duration: 0.6,
     recovery: 1.4,
@@ -359,12 +360,21 @@ export const ATTACKS = {
   },
 } as const;
 
-/** SUMMON — the lesser shades the boss calls with the `summon` pattern. */
+/** SUMMON — how many guards one call raises; a fresh call only tops the retinue back up. */
 export const SUMMON = {
-  /** How many shades answer one call; a fresh call only tops the swarm back up. */
   count: 3,
+} as const;
+
+/**
+ * The lesser constructs the boss calls — a standing enemy kind, not a boss-only trick:
+ * anything that can field enemies (a future world encounter included) fields these. Small
+ * kin of the boss: they hover, circle their quarry, dash to fresh angles, and spit the
+ * fire school straight and weak. Every player attack can hurt them, and FALL's gravity
+ * takes them exactly as it takes their master.
+ */
+export const ENEMY = {
   health: 26,
-  /** Collision radius of one shade, metres. */
+  /** Collision radius of one construct, metres. */
   radius: 0.55,
   /** Their spit: straight fireballs, slower and weaker than the boss's own fire. */
   shotSpeed: 24,
@@ -372,16 +382,20 @@ export const SUMMON = {
   /** Smaller body than the boss's bolts, and a fraction of their shove on a hit. */
   shotRadius: 0.22,
   shotPower: 0.2,
-  /** Seconds between one shade's shots (randomised per shade in this band). */
+  /** Seconds between one construct's shots (randomised per construct in this band). */
   shotInterval: { min: 2.1, max: 3.2 },
-  /** Orbit band around the player, metres. */
+  /** Orbit band around the quarry, metres. */
   orbitRadius: { min: 7.5, max: 11 },
   /** Tangential drift speed while circling, metres per second. */
   strafeSpeed: 7.5,
   /** Burst speed of a repositioning dash, metres per second. */
   dashSpeed: 17,
-  /** Seconds between dashes (randomised per shade in this band). */
+  /** Seconds between dashes (randomised per construct in this band). */
   dashInterval: { min: 1.5, max: 2.7 },
+  /** Slam damage FALL deals them on impact — the crush, not the boss's full weight. */
+  fallSlam: 16,
+  /** Seconds spent grounded after FALL lets go before a construct rises again. */
+  holdStagger: 0.9,
 } as const;
 export interface AttackCommand {
   type: 'tell' | 'shot';

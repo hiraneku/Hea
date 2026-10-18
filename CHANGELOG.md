@@ -7,6 +7,25 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+## [0.23.0] — 2026-10-18
+
+### Diubah — Musuh kecil menjadi tipe musuh baru, serumpun dengan boss
+
+- Yang dipanggil skill **PENJAGA SURYA** bukan lagi bayangan khusus boss: kini tipe
+  musuh yang berdiri sendiri (`Enemy`), dibangun dari bahasa desain boss sendiri —
+  lempeng batu gelap, inti ember emas, cakram sigil berputar di dada, serpihan batu
+  mengorbit — sepertiga ukuran IGNIS. Karena tipe mandiri, musuh yang sama bisa
+  dipakai juga oleh main world nanti; boss hanya salah satu yang bisa memanggilnya.
+- **Semua serangan pemain kini bisa mengenai mereka**: trace proyektil & beam Prisma
+  (kecil maupun tombak besar) berhenti pada tubuh musuh pertama di jalurnya, ledakan
+  Nova menjangkau mereka, dan damage-nya bermuara ke satu jalur `damageEnemy`.
+- **Fall menangkap semuanya, bukan boss saja**: saat hempasan mendarat, setiap musuh
+  ikut terhempas ke tanahnya sendiri dan tertahan (tidak bisa terbang/menembak,
+  embernya meredup, wajah menunduk), menerima pulse remuk yang sama selama ditahan,
+  lalu crush penutup saat dilepas dan terbaring 0,9 detik sebelum bangkit. Hempasan
+  awalnya sendiri lebih ringan dari beban penuh boss (16), jadi Fall sekilas hanya
+  menjatuhkan mereka — menahan/menumpuk tekanan yang membunuh.
+
 ## [0.22.0] — 2026-10-18
 
 ### Ditambahkan — Skill boss baru: TIGA BAYANG

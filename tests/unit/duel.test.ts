@@ -9,6 +9,7 @@ import {
   rangeCorrection,
   steerMissile,
   SUMMON,
+  ENEMY,
   threatTime,
   ATTACK_ORDER,
   PROJECTILES,
@@ -134,7 +135,7 @@ describe('one boss, deliberate attack patterns', () => {
     expect(b.stage).toBe('telegraph');
     expect(b.elapsed).toBe(0);
   });
-  it('closes the rotation by calling three lesser shades', () => {
+  it('closes the rotation by calling three lesser constructs', () => {
     const d = new BossDirector();
     const cycle =
       ATTACKS.fire.tell +
@@ -157,11 +158,11 @@ describe('one boss, deliberate attack patterns', () => {
       .filter((c) => c.type === 'shot');
     expect(shots).toHaveLength(1);
     expect(shots[0].attack).toBe('summon');
-    // The shades spit the fire school: straight shots, no seeker kind of their own.
+    // The guards spit the fire school: straight shots, no seeker kind of their own.
     expect(projectileOf('summon')).toBe('fire');
     expect(SUMMON.count).toBe(3);
-    expect(SUMMON.shotSpeed).toBeLessThan(PROJECTILES.fire.speed);
-    expect(SUMMON.shotDamage).toBeLessThan(9);
+    expect(ENEMY.shotSpeed).toBeLessThan(PROJECTILES.fire.speed);
+    expect(ENEMY.shotDamage).toBeLessThan(9);
   });
   it('telegraphs before attacking and maintains a ranged standoff', () => {
     const d = new BossDirector();
