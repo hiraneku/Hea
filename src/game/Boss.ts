@@ -34,6 +34,8 @@ export class Boss {
   readonly ribbon = new Ribbon(70, 0.034, '#ffd1a0');
   health: number = DUEL.bossHealth;
   knockTime = 0;
+  /** Held down by FALL: the body keeps the facing it was slammed with. */
+  pinned = false;
   flash = 0;
   pendingImpulse: THREE.Vector3 | null = null;
   deathDelay = -1;
@@ -183,6 +185,7 @@ export class Boss {
     this.clearGates();
     this.gateHistory.length = 0;
     this.gateCursor = 0;
+    this.pinned = false;
     this.group.visible = true;
     this.group.scale.setScalar(BOSS.scale);
     this.ribbon.reset(this.position);
@@ -272,7 +275,8 @@ export class Boss {
     this.group.position.copy(this.position);
     // Face the target through a smoothed turn (not a per-frame snap), lean into the motion
     // like something that actually flies, and breathe up and down a little while hovering.
-    this.group.lookAt(target);
+    // Pinned under FALL it does none of that: the facing stays where the slam left it.
+    if (!this.pinned) this.group.lookAt(target);
     if (!this.facingSet || this.tumble.physical || dt > 0.5) {
       this.facingQ.copy(this.group.quaternion);
       this.facingSet = true;

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { FALL, fallPressure, fallReleaseDamage, fallSlamDamage } from '../../src/game/combat';
+import {
+  BossDirector,
+  FALL,
+  fallPressure,
+  fallReleaseDamage,
+  fallSlamDamage,
+} from '../../src/game/combat';
 import { normalizeEquipped, normalizeLoadout, SPELLS } from '../../src/game/types';
 
 describe('FALL pressure', () => {
@@ -37,6 +43,20 @@ describe('FALL pressure', () => {
     expect(fallReleaseDamage(0.5)).toBe(
       Math.round(FALL.releaseBase + FALL.releasePressureDamage * 0.5),
     );
+  });
+
+  it('keeps the boss down a while after the release, and breaks any cast on impact', () => {
+    expect(FALL.lingerTime).toBeGreaterThanOrEqual(2);
+    const director = new BossDirector();
+    expect(director.stage).toBe('telegraph');
+    director.step(0.5);
+    director.interrupt();
+    expect(director.stage).toBe('recover');
+    expect(director.charge).toBe(0);
+    // The interrupted cast itself fires nothing while the director recovers.
+    const during = director.step(0.5);
+    expect(during.filter((c) => c.type === 'shot')).toHaveLength(0);
+    expect(director.stage).toBe('recover');
   });
 
   it('is registered as the fourth spell, a held gravity control', () => {

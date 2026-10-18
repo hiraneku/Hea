@@ -4,28 +4,70 @@ import { clamp, seededRandom } from './math';
 
 export type FallPhase = 'idle' | 'build' | 'slam' | 'press';
 
+interface Ring {
+  mesh: THREE.Mesh;
+  age: number;
+  life: number;
+  speed: number;
+  strength: number;
+}
+
+/** A streaked, flowing energy texture for the column shafts (drawn, never loaded). */
+function shaftTexture(): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 128;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d')!;
+  const random = seededRandom(5150);
+  ctx.clearRect(0, 0, 128, 256);
+  for (let i = 0; i < 46; i++) {
+    const x = random() * 128,
+      y = random() * 256,
+      length = 30 + random() * 90,
+      width = 1 + random() * 2.4;
+    const gradient = ctx.createLinearGradient(0, y, 0, y + length);
+    gradient.addColorStop(0, 'rgba(255,255,255,0)');
+    gradient.addColorStop(0.5, `rgba(255,255,255,${0.25 + random() * 0.5})`);
+    gradient.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x, y, width, length);
+  }
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
+  texture.repeat.set(3, 2);
+  return texture;
+}
+
 /**
- * The visible half of FALL: a column of falling gravity lines over the locked boss, the
- * radial crack that spreads and sinks under it, the loose stones the pressure first lifts
- * and then crushes flat, and the purple light the column throws on the world. The game
- * owns the timings, the energy and the damage; this system only dresses them, following
- * the same host-seam pattern as the Prisma system. No circles anywhere: the column and
- * the crack are the whole signature.
+ * The visible half of FALL, dressed in layers: a dark void hanging at the top of the
+ * column, two flowing energy shafts (a vast outer one and a dense inner one wrapped
+ * tight around the boss), hundreds of falling gravity streaks and motes, a pressing
+ * cap that rides the boss down, the radial crack that spreads and sinks, impact rings
+ * on every landing and crush pulse, and the loose stones the field first crushes flat
+ * and then worries at its rim. Nothing shows while the word FALL stands alone — the
+ * whole apparatus ignites the moment the boss hits the ground. The game owns timings,
+ * energy and damage; this system only dresses them.
  */
 export class FallSystem {
   private group = new THREE.Group();
   private lines!: THREE.LineSegments;
   private lineData: { x: number; z: number; y: number; length: number; speed: number }[] = [];
+  private motes!: THREE.Points;
+  private moteData: { x: number; z: number; y: number; speed: number }[] = [];
   private shaft!: THREE.Mesh;
+  private shaftTexture = shaftTexture();
+  private innerShaft!: THREE.Mesh;
+  private voidDisc!: THREE.Group;
+  private cap!: THREE.Group;
+  private rings: Ring[] = [];
   private crack!: THREE.Mesh;
   private glow!: THREE.Mesh;
   private stones!: THREE.InstancedMesh;
   private stoneData: { x: number; z: number; size: number; seed: number; lift: number }[] = [];
-  private light = new THREE.PointLight('#a678ff', 0, 44, 1.8);
+  private light = new THREE.PointLight('#a678ff', 0, 46, 1.8);
   /** The column's centre on the ground (the boss is locked to its x/z once slammed). */
   readonly center = new THREE.Vector3();
   private fade = 0;
-  private age = 0;
   private pulse = 0;
   private stoneLift = 0;
   private dummy = new THREE.Object3D();
@@ -36,13 +78,40 @@ export class FallSystem {
     private groundHeight: (x: number, z: number) => number,
     reducedEffects: boolean,
   ) {
-    this.buildLines(reducedEffects ? 48 : 110);
+    this.buildLines(reducedEffects ? 60 : 130);
+    this.buildMotes(reducedEffects ? 70 : 170);
     this.buildCrack();
     this.buildStones(reducedEffects ? 18 : 34);
+    const shaftMaterial = (opacity: number) =>
+      new THREE.MeshBasicMaterial({
+        map: this.shaftTexture,
+        color: '#9a6cff',
+        transparent: true,
+        opacity,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
     this.shaft = new THREE.Mesh(
       new THREE.CylinderGeometry(7.6, 9.4, 19, 32, 1, true),
+      shaftMaterial(0),
+    );
+    this.shaft.position.y = 9.5;
+    this.innerShaft = new THREE.Mesh(
+      new THREE.CylinderGeometry(2.5, 2.9, 13, 24, 1, true),
+      shaftMaterial(0),
+    );
+    this.innerShaft.position.y = 6.5;
+    // The void the weight falls from: a dark disc with a lit rim, hanging over the column.
+    this.voidDisc = new THREE.Group();
+    const voidCore = new THREE.Mesh(
+      new THREE.CircleGeometry(3.1, 36),
+      new THREE.MeshBasicMaterial({ color: '#07040f', transparent: true, opacity: 0 }),
+    );
+    const voidRim = new THREE.Mesh(
+      new THREE.RingGeometry(3.1, 3.55, 36),
       new THREE.MeshBasicMaterial({
-        color: '#8a5cff',
+        color: '#c9a6ff',
         transparent: true,
         opacity: 0,
         blending: THREE.AdditiveBlending,
@@ -50,8 +119,57 @@ export class FallSystem {
         depthWrite: false,
       }),
     );
-    this.shaft.position.y = 9.5;
-    this.group.add(this.shaft, this.light);
+    voidCore.rotation.x = voidRim.rotation.x = -Math.PI / 2;
+    this.voidDisc.add(voidCore, voidRim);
+    this.voidDisc.position.y = 13.8;
+    // The cap: a flattened dark mass with a lit rim that rides just over the boss and
+    // bears down a little further with every crush pulse — the weight made visible.
+    this.cap = new THREE.Group();
+    const capMass = new THREE.Mesh(
+      new THREE.SphereGeometry(2, 24, 12),
+      new THREE.MeshStandardMaterial({
+        color: '#17102a',
+        roughness: 0.6,
+        metalness: 0.2,
+        emissive: '#2a1650',
+        emissiveIntensity: 0.7,
+        transparent: true,
+        opacity: 0,
+      }),
+    );
+    capMass.scale.set(1, 0.32, 1);
+    const capRim = new THREE.Mesh(
+      new THREE.TorusGeometry(2, 0.07, 8, 36),
+      new THREE.MeshBasicMaterial({
+        color: '#c9a6ff',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    capRim.rotation.x = Math.PI / 2;
+    this.cap.add(capMass, capRim);
+    this.cap.position.y = 4.6;
+    for (let i = 0; i < 3; i++) {
+      const mesh = new THREE.Mesh(
+        new THREE.RingGeometry(0.92, 1, 48),
+        new THREE.MeshBasicMaterial({
+          color: '#b78cff',
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          side: THREE.DoubleSide,
+          depthWrite: false,
+        }),
+      );
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = 0.12;
+      mesh.visible = false;
+      this.rings.push({ mesh, age: 0, life: 0.7, speed: 16, strength: 1 });
+      this.group.add(mesh);
+    }
+    this.group.add(this.shaft, this.innerShaft, this.voidDisc, this.cap, this.light);
     this.light.position.y = 3;
     this.group.visible = false;
     scene.add(this.group);
@@ -85,6 +203,37 @@ export class FallSystem {
     );
     this.lines.frustumCulled = false;
     this.group.add(this.lines);
+  }
+
+  private buildMotes(count: number) {
+    const random = seededRandom(9973);
+    const positions = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const angle = random() * Math.PI * 2,
+        radius = Math.sqrt(random()) * 8;
+      this.moteData.push({
+        x: Math.cos(angle) * radius,
+        z: Math.sin(angle) * radius,
+        y: random() * 14,
+        speed: 3 + random() * 6,
+      });
+      positions.set([this.moteData[i].x, this.moteData[i].y, this.moteData[i].z], i * 3);
+    }
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    this.motes = new THREE.Points(
+      geometry,
+      new THREE.PointsMaterial({
+        color: '#d9c6ff',
+        size: 0.13,
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    this.motes.frustumCulled = false;
+    this.group.add(this.motes);
   }
 
   private buildCrack() {
@@ -177,20 +326,29 @@ export class FallSystem {
 
   /** The press begins: the column locks onto this ground point. */
   begin(at: THREE.Vector3) {
-    this.age = 0;
     this.center.set(at.x, this.groundHeight(at.x, at.z), at.z);
     this.group.position.set(this.center.x, this.center.y, this.center.z);
     this.fade = 0;
     this.pulse = 0;
     this.stoneLift = 0;
-    this.group.visible = true;
     this.crack.position.y = 0.06;
     this.glow.position.y = 0.04;
   }
 
-  /** One crush pulse while held: the crack flares and the stones shudder. */
+  /** One crush pulse while held: the crack flares, the cap bears down, a ring goes out. */
   crushPulse() {
     this.pulse = 1;
+    this.impactRing(0.55);
+  }
+
+  /** An expanding pressure ring from the impact point (the slam lands at full strength). */
+  impactRing(strength: number) {
+    const ring = this.rings.find((r) => !r.mesh.visible) ?? this.rings[0];
+    ring.age = 0;
+    ring.life = 0.55 + strength * 0.25;
+    ring.speed = 13 + strength * 9;
+    ring.strength = strength;
+    ring.mesh.visible = true;
   }
 
   /** The hold ends: everything settles and fades where it lies. */
@@ -200,54 +358,88 @@ export class FallSystem {
 
   update(dt: number, phase: FallPhase, pressure: number, follow: THREE.Vector3 | null) {
     this.time += dt;
-    this.age += dt;
     if (phase !== 'idle' && follow) {
-      // During the build the column rides the boss — it is locked on, not aimed at a point.
+      // During the build the (still invisible) column rides the boss — locked on, not aimed.
       this.center.set(follow.x, this.groundHeight(follow.x, follow.z), follow.z);
       this.group.position.set(this.center.x, this.center.y, this.center.z);
     }
-    const active = phase !== 'idle';
-    this.fade = clamp(this.fade + (active ? dt * 3.2 : -dt * 0.7), 0, 1);
+    // Nothing of the gravity shows while the word FALL stands alone: the whole apparatus
+    // ignites when the boss hits the ground, and dies away after the release.
+    const target = phase === 'slam' || phase === 'press' ? 1 : 0;
+    this.fade = clamp(this.fade + (target > this.fade ? dt * 6 : -dt * 0.7), 0, 1);
     this.group.visible = this.fade > 0.01;
     if (!this.group.visible) return;
     this.pulse = Math.max(0, this.pulse - dt * 3);
-    const speedScale = phase === 'slam' ? 7 : phase === 'build' ? 0.55 : 1;
-    // The word stands alone first: during the build the column only gathers in the
-    // second half of the wait, so the title and the impact never arrive together.
-    const gather = phase === 'build' ? clamp((this.age - 0.35) / 0.45, 0, 1) : 1;
-    const attribute = this.lines.geometry.getAttribute('position') as THREE.BufferAttribute;
-    const array = attribute.array as Float32Array;
+    this.shaftTexture.offset.y -= dt * 1.5;
+    const speedScale = phase === 'slam' ? 7 : 1;
+    const lineAttribute = this.lines.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const lineArray = lineAttribute.array as Float32Array;
     for (let i = 0; i < this.lineData.length; i++) {
       const line = this.lineData[i];
       line.y -= line.speed * speedScale * dt;
       if (line.y < 0) line.y += 15;
       const o = i * 6;
-      array[o] = line.x;
-      array[o + 1] = line.y;
-      array[o + 2] = line.z;
-      array[o + 3] = line.x;
-      array[o + 4] = Math.max(0, line.y - line.length * (phase === 'press' ? 1 + pressure : 1));
-      array[o + 5] = line.z;
+      lineArray[o] = line.x;
+      lineArray[o + 1] = line.y;
+      lineArray[o + 2] = line.z;
+      lineArray[o + 3] = line.x;
+      lineArray[o + 4] = Math.max(0, line.y - line.length * (phase === 'press' ? 1 + pressure : 1));
+      lineArray[o + 5] = line.z;
     }
-    attribute.needsUpdate = true;
-    (this.lines.material as THREE.LineBasicMaterial).opacity =
-      this.fade * gather * (phase === 'build' ? 0.6 : 0.55 + pressure * 0.4);
+    lineAttribute.needsUpdate = true;
+    (this.lines.material as THREE.LineBasicMaterial).opacity = this.fade * (0.55 + pressure * 0.4);
+    const moteAttribute = this.motes.geometry.getAttribute('position') as THREE.BufferAttribute;
+    const moteArray = moteAttribute.array as Float32Array;
+    for (let i = 0; i < this.moteData.length; i++) {
+      const mote = this.moteData[i];
+      mote.y -= mote.speed * (phase === 'press' ? 1.6 : 3.5) * dt;
+      if (mote.y < 0) mote.y += 14;
+      moteArray[i * 3 + 1] = mote.y;
+    }
+    moteAttribute.needsUpdate = true;
+    (this.motes.material as THREE.PointsMaterial).opacity = this.fade * (0.35 + pressure * 0.35);
     (this.shaft.material as THREE.MeshBasicMaterial).opacity =
-      this.fade * gather * (0.06 + pressure * 0.08 + this.pulse * 0.04);
-    this.light.intensity = this.fade * gather * (40 + pressure * 110 + this.pulse * 40);
+      this.fade * (0.1 + pressure * 0.09 + this.pulse * 0.04);
+    (this.innerShaft.material as THREE.MeshBasicMaterial).opacity =
+      this.fade * (0.13 + pressure * 0.13 + this.pulse * 0.06);
+    this.light.intensity = this.fade * (40 + pressure * 110 + this.pulse * 40);
+    // The void hangs and slowly turns over the column; the cap bears down on the boss.
+    this.voidDisc.rotation.y += dt * 0.4;
+    const voidCore = this.voidDisc.children[0] as THREE.Mesh;
+    (voidCore.material as THREE.MeshBasicMaterial).opacity = this.fade * 0.88;
+    const voidRim = this.voidDisc.children[1] as THREE.Mesh;
+    (voidRim.material as THREE.MeshBasicMaterial).opacity = this.fade * (0.5 + pressure * 0.4);
+    this.cap.position.y = 4.6 - pressure * 0.5 - this.pulse * 0.35;
+    const capMass = this.cap.children[0] as THREE.Mesh;
+    (capMass.material as THREE.MeshStandardMaterial).opacity = this.fade * 0.94;
+    const capRim = this.cap.children[1] as THREE.Mesh;
+    (capRim.material as THREE.MeshBasicMaterial).opacity = this.fade * (0.6 + this.pulse * 0.3);
+    for (const ring of this.rings) {
+      if (!ring.mesh.visible) continue;
+      ring.age += dt;
+      const share = ring.age / ring.life;
+      if (share >= 1) {
+        ring.mesh.visible = false;
+        continue;
+      }
+      const scale = 1 + ring.age * ring.speed;
+      ring.mesh.scale.setScalar(scale);
+      (ring.mesh.material as THREE.MeshBasicMaterial).opacity =
+        this.fade * (1 - share) * 0.55 * ring.strength;
+    }
     // The crack spreads and deepens its glow with stored pressure; after release it keeps
     // its full shape while it fades, a record of how long the boss was held.
     const radius =
       FALL.crackRadius.start + (FALL.crackRadius.full - FALL.crackRadius.start) * pressure;
-    this.crack.scale.setScalar(active ? radius : this.crack.scale.x);
+    if (phase !== 'idle') this.crack.scale.setScalar(radius);
     (this.crack.material as THREE.MeshBasicMaterial).opacity = this.fade * 0.96;
     this.glow.scale.setScalar(radius * (0.55 + this.pulse * 0.15));
     (this.glow.material as THREE.MeshBasicMaterial).opacity =
       this.fade * (0.16 + pressure * 0.3 + this.pulse * 0.2);
-    // Stones: lifted trembling while the pressure builds, crushed flat at the slam, then
-    // shuddering in the ground on every crush pulse for as long as the hold lasts.
+    // Stones: crushed flat at the impact; while the field holds, the ones at its rim
+    // hover and tremble against it — the inner ones stay pressed into the ground.
     this.stoneLift = clamp(
-      this.stoneLift + (phase === 'build' ? dt * 1.6 : phase === 'idle' ? -dt * 2 : -dt * 14),
+      this.stoneLift + (phase === 'press' ? dt * 1.8 : -dt * (phase === 'slam' ? 16 : 2)),
       0,
       1,
     );
@@ -255,15 +447,16 @@ export class FallSystem {
       const stone = this.stoneData[i];
       const ground = this.groundHeight(this.center.x + stone.x, this.center.z + stone.z);
       const trembling = Math.sin(this.time * 31 + stone.seed) * 0.02 * (0.4 + pressure);
+      const rimShare = clamp((Math.hypot(stone.x, stone.z) - 3) / 6, 0, 1);
       const liftY =
-        this.stoneLift * stone.lift * (0.7 + 0.3 * Math.sin(this.time * 7 + stone.seed));
+        this.stoneLift * stone.lift * rimShare * (0.7 + 0.3 * Math.sin(this.time * 7 + stone.seed));
       this.dummy.position.set(
         stone.x,
         ground - this.center.y + 0.05 + liftY + (phase === 'press' ? trembling : 0),
         stone.z,
       );
       this.dummy.rotation.set(stone.seed, stone.seed * 1.7, stone.seed * 0.6);
-      this.dummy.scale.setScalar(stone.size * (phase === 'press' ? 0.92 : 1));
+      this.dummy.scale.setScalar(stone.size * (phase === 'press' && rimShare < 0.3 ? 0.9 : 1));
       this.dummy.updateMatrix();
       this.stones.setMatrixAt(i, this.dummy.matrix);
     }

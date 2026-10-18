@@ -7,6 +7,21 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diubah — Fall disetel ulang dari uji langsung (lanjutan)
+
+- Efek gravitasi kini **menyala saat boss menghantam tanah**, bukan selama ia masih di
+  udara; selama kata "FALL" berdiri, kolom belum tampak.
+- Tekanan pada boss diperbesar: tudung penekan gelap berpinggir cahaya menindih boss,
+  kolom dalam rapat membungkus tubuhnya, squash lebih dalam — dan setelah dilepas boss
+  **tetap terbaring sesaat** (total sisa beban 2,4 detik) sebelum boleh bangkit.
+- Hempasan Fall **membatalkan sihir apa pun yang sedang di-cast boss**: telegrafnya
+  runtuh, gerbangnya padam, dan tidak ada yang ter-cast (director masuk recovery).
+- Selama tertekan boss **membeku menghadap arah terakhirnya** — tidak lagi mengikuti
+  gerak pemain.
+- Lapisan efek diperkaya setara tontonan anime: cakram kekosongan gelap berputar di
+  puncak kolom, dua tabung energi bertekstur garis yang mengalir turun, 170 mote
+  gravitasi, dan cincin tekanan mengembang pada hempasan serta tiap pulse remuk.
+
 ### Diubah — Fall disetel ulang dari uji langsung
 
 - Hempasan Fall kini memicu **impact frame** dan jeda benturan seperti hempasan berat

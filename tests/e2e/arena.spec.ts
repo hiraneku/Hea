@@ -2072,6 +2072,8 @@ test('fall: held gravity slams the boss down, holds it, and bursts on release', 
   );
   const faceY = 2 * (qy * qz - qx * qw);
   expect(faceY).toBeLessThan(-0.5);
+  // The slam broke whatever the boss was winding up: its director is recovering.
+  expect(snap.boss.stage).toBe('recover');
   await expect(page.locator('#fall-title')).toHaveClass(/show/);
   // Holding longer stores pressure and keeps draining health in crush pulses.
   const healthAtSlam = snap.boss.health;
@@ -2082,6 +2084,10 @@ test('fall: held gravity slams the boss down, holds it, and bursts on release', 
   expect(snap.boss.health).toBeLessThan(healthAtSlam);
   // Release: the stored pressure closes the spell; there is no cooldown to wait out.
   await page.mouse.up();
+  await step(page, 0.5);
+  // Nor does the boss spring straight back up: it stays down a while under the weight's wake.
+  const proneY = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().bossPosition[1]);
+  expect(proneY - groundY).toBeLessThan(3.4);
   await step(page, 0.3);
   snap = await state(page);
   expect(snap.fall.phase).toBe('idle');

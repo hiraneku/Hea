@@ -1655,7 +1655,12 @@ export class Game {
     // until its face is toward the ground it was slammed into, eased in as the weight
     // lands and eased back out when the spell lets go. During the descent itself the
     // body stretches along its fall; while held, it squashes and trembles instead.
-    const tiltTarget = this.fallPhase === 'press' && this.boss.alive ? 1.08 : 0;
+    const tiltTarget =
+      (this.fallPhase === 'press' ||
+        (this.fallPhase === 'idle' && this.fallLinger > FALL.lingerTime - 1)) &&
+      this.boss.alive
+        ? 1.25
+        : 0;
     this.fallTilt = damp(this.fallTilt, tiltTarget, tiltTarget > 0 ? 5 : 2.6, dt);
     if (this.fallTilt > 0.01)
       this.boss.group.quaternion.multiply(
@@ -1666,8 +1671,8 @@ export class Game {
       this.boss.group.scale.set(BOSS.scale * 0.94, BOSS.scale * 1.18, BOSS.scale * 0.94);
     } else if (this.fallPhase === 'press' && this.boss.alive) {
       const tremble = (Math.sin(this.time * 47) + Math.sin(this.time * 31 + 1.3)) * 0.5;
-      this.boss.group.scale.set(BOSS.scale * 1.05, BOSS.scale * 0.93, BOSS.scale * 1.05);
-      this.boss.group.position.y -= 0.12;
+      this.boss.group.scale.set(BOSS.scale * 1.12, BOSS.scale * 0.84, BOSS.scale * 1.12);
+      this.boss.group.position.y -= 0.24;
       this.boss.group.position.x += tremble * 0.02;
       this.boss.group.position.z += Math.cos(this.time * 39) * 0.015;
     } else if (this.fallSquash) {
@@ -1728,7 +1733,10 @@ export class Game {
     // FALL holds the boss where it struck: no tactics, no director, no way out while
     // the caster keeps the button down. The descent itself is driven here, so the slam
     // crosses the air at full slam speed inside a frame or two.
-    if ((this.fallPhase === 'slam' || this.fallPhase === 'press') && b.alive) {
+    if (this.fallLinger > 0) this.fallLinger = Math.max(0, this.fallLinger - dt);
+    const fallProne = this.fallPhase === 'idle' && this.fallLinger > FALL.lingerTime - 1 && b.alive;
+    if ((this.fallPhase === 'slam' || this.fallPhase === 'press' || fallProne) && b.alive) {
+      b.pinned = true;
       b.velocity.set(0, 0, 0);
       b.impulse.set(0, 0, 0);
       const floor = groundHeight(
@@ -1747,10 +1755,11 @@ export class Game {
         } else b.position.y = next;
       } else b.position.y = restY;
       b.group.position.copy(b.position);
-      b.group.lookAt(this.player.clone().add(UP));
+      if (this.fallPhase !== 'idle') b.group.lookAt(this.player.clone().add(UP));
       b.group.updateMatrixWorld(true);
       return;
     }
+    b.pinned = false;
     const wasKnocked = b.knockTime > 0;
     b.knockTime = b.tumble.physical
       ? Math.max(0.4, b.knockTime - dt)
@@ -1799,7 +1808,6 @@ export class Game {
     // The weight outlives the spell a little: after a release the boss climbs and moves
     // as if still carrying it, before it is fully itself again.
     if (this.fallLinger > 0) {
-      this.fallLinger = Math.max(0, this.fallLinger - dt);
       motor.multiplyScalar(0.35);
       if (motor.y > 0) motor.y *= 0.3;
     }
@@ -2742,11 +2750,18 @@ export class Game {
       at: at.clone(),
       along: new THREE.Vector3(0, -1, 0),
     });
+    // Whatever the boss was winding up dies with the slam: the tell collapses,
+    // its gates go dark, and nothing it had queued will ever be cast.
+    this.boss.director.interrupt();
+    this.boss.clearGates();
+    this.pendingFire = [];
+    this.firePacket = null;
     this.world.crater(feet, 30);
     this.fx.dust(feet, 30, 3.2);
     this.fx.impact(feet.clone().add(new THREE.Vector3(0, 0.4, 0)), '#b78cff', true);
     this.fx.shock(feet.clone().add(new THREE.Vector3(0, 0.15, 0)), '#a678ff', 6);
     this.fallSystem.crushPulse();
+    this.fallSystem.impactRing(1.6);
     this.audio.fallSlam(at);
     this.cameraRig.shake = Math.max(this.cameraRig.shake, 0.3);
     // The slam is a heavy contact: it earns the graphic cut and the frozen beat,

@@ -188,7 +188,7 @@ export const FALL = {
   /** Extra release damage at full stored pressure. */
   releasePressureDamage: 58,
   /** Seconds after release that the boss still rises and moves as if weighted. */
-  lingerTime: 1.2,
+  lingerTime: 2.4,
   /** Radius of the cracked, sinking ground at first impact, growing with pressure. */
   crackRadius: { start: 7, full: 11 },
   cooldown: 0,
@@ -365,6 +365,18 @@ export class BossDirector {
     this.stage = 'telegraph';
     this.opening = true;
     this.override = null;
+  }
+  /**
+   * A cast broken before it leaves: the tell collapses, nothing is fired, and the
+   * director simply recovers into its next pattern. FALL does this on impact, whatever
+   * the boss was winding up.
+   */
+  interrupt() {
+    if (this.stage === 'recover') return;
+    this.stage = 'recover';
+    this.elapsed = 0;
+    this.fired = 0;
+    this.opening = false;
   }
   redirect(attack: AttackId) {
     if (this.attack === attack) return false;
