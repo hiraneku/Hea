@@ -149,6 +149,78 @@ export function novaCharge(hold: number, energy: number, baseCost: number) {
   };
 }
 
+/**
+ * FALL — the player's gravity spell, and the first of its school. It is *held*, not tapped:
+ * pressing raises the pressure over the boss (a breath of build while the column locks on),
+ * then the boss is driven into the ground at slam speed and kept there for as long as the
+ * button stays down. It cannot break out; the spell ends only when the caster lets go or
+ * runs out of energy. While it holds, pressure accumulates — visible as the cracks glowing
+ * wider — and a deliberate release spends it in one final crush. Holding past full pressure
+ * leaks it away and costs more energy by the second, so the release is a decision, not a
+ * formality.
+ */
+export const FALL = {
+  /** Seconds of build between the press and the slam landing. */
+  build: 0.3,
+  /** Downward speed of the slam, metres per second — a launch, not a fall. */
+  slamSpeed: 150,
+  /** Damage of the slam before the height bonus. */
+  slamDamage: 46,
+  /** Extra slam damage at the greatest height it can be caught from (capped). */
+  slamHeightBonus: 38,
+  /** Height over the ground at which the slam bonus stops growing, metres. */
+  slamHeightCap: 26,
+  /** Energy paid up front; a release before the slam refunds half of it. */
+  cost: 18,
+  /** Energy per second while the boss is held down, before the overload rise. */
+  drainBase: 10,
+  /** Extra drain per second of holding, added each second (the weight gets harder to hold). */
+  drainRise: 1.6,
+  /** Seconds of holding to reach full stored pressure. */
+  pressureTime: 3,
+  /** Fraction of full pressure leaking away per second while held past full. */
+  pressureLeak: 0.12,
+  /** Seconds between crush pulses while the boss is held down. */
+  crushInterval: 0.4,
+  /** Damage of one crush pulse. */
+  crushDamage: 8,
+  /** Release damage before the stored-pressure share. */
+  releaseBase: 22,
+  /** Extra release damage at full stored pressure. */
+  releasePressureDamage: 58,
+  /** Share of the release burst kept when the energy runs out and the spell dies on its own. */
+  forcedReleaseShare: 0.5,
+  /** Seconds after release that the boss still rises and moves as if weighted. */
+  lingerTime: 1.2,
+  /** Radius of the cracked, sinking ground at first impact, growing with pressure. */
+  crackRadius: { start: 4.2, full: 6.8 },
+  cooldown: 12,
+} as const;
+
+/** Stored pressure (0..1) after holding this long: fills over `pressureTime`, then leaks. */
+export function fallPressure(heldSeconds: number): number {
+  const fill = clamp(heldSeconds / FALL.pressureTime, 0, 1);
+  if (heldSeconds <= FALL.pressureTime) return fill;
+  return Math.max(0, 1 - (heldSeconds - FALL.pressureTime) * FALL.pressureLeak);
+}
+
+/** Energy per second the hold costs right now: it grows the longer the weight is held. */
+export function fallDrainRate(heldSeconds: number): number {
+  return FALL.drainBase + FALL.drainRise * Math.max(0, heldSeconds);
+}
+
+/** Slam damage for a boss caught `height` metres over its ground. */
+export function fallSlamDamage(height: number): number {
+  const share = clamp(height / FALL.slamHeightCap, 0, 1);
+  return Math.round(FALL.slamDamage + FALL.slamHeightBonus * share);
+}
+
+/** Damage of the closing crush when the caster lets go (or the energy gives out). */
+export function fallReleaseDamage(pressure: number, forced: boolean): number {
+  const full = FALL.releaseBase + FALL.releasePressureDamage * clamp(pressure, 0, 1);
+  return Math.round(forced ? full * FALL.forcedReleaseShare : full);
+}
+
 export const DUEL = {
   bossHealth: 1440,
   preferredRange: 21,

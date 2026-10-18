@@ -403,6 +403,39 @@ export class AudioEngine {
       this.air(0.6, 3500, 0.4);
     }
   }
+  /** FALL gathering: a descending pressure that rises in pitch as the column locks on. */
+  fallCharge(at?: SoundPoint) {
+    const place = { at, send: SEND.cast };
+    this.tone(90, 220, 0.32, 0.2, 'sine', 0, place);
+    this.tone(45, 70, 0.32, 0.22, 'sine', 0, place);
+    this.air(0.3, 900, 0.1, place);
+  }
+  /** The slam: a sub-bass drop with a stone crack on top, placed where the boss landed. */
+  fallSlam(at?: SoundPoint) {
+    const place = { at, send: SEND.crash };
+    this.tone(120, 26, 0.55, 0.55, 'sine', 0, place);
+    this.tone(52, 24, 0.8, 0.4, 'sine', 0.02, place);
+    this.air(0.4, 1600, 0.4, place);
+    this.tone(300, 90, 0.16, 0.2, 'triangle', 0.01, place);
+  }
+  /** One crush pulse under the held weight; it tightens as the stored pressure grows. */
+  fallCrush(pressure: number, at?: SoundPoint) {
+    const place = { at, send: SEND.impact };
+    this.tone(55 + pressure * 30, 30, 0.22, 0.22 + pressure * 0.16, 'sine', 0, place);
+    this.air(0.14, 700 + pressure * 500, 0.14, place);
+    if (pressure > 0.97) this.tone(1560, 1560, 0.07, 0.07, 'sine', 0, place);
+  }
+  /** The release: the weight lifts — a full one rings, a forced one falls flat. */
+  fallRelease(forced: boolean, at?: SoundPoint) {
+    const place = { at, send: SEND.cast };
+    if (forced) {
+      this.tone(140, 50, 0.3, 0.2, 'sine', 0, place);
+    } else {
+      this.tone(70, 240, 0.35, 0.3, 'sine', 0, place);
+      this.tone(1200, 2400, 0.12, 0.08, 'triangle', 0.02, place);
+      this.air(0.3, 2000, 0.16, place);
+    }
+  }
   hit(kill: boolean, at?: SoundPoint) {
     const place = { at, send: SEND.impact };
     this.tone(kill ? 580 : 320, kill ? 1150 : 120, kill ? 0.18 : 0.08, 0.16, 'triangle', 0, place);

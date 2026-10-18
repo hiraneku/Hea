@@ -7,6 +7,7 @@ import { CameraRig } from './CameraRig';
 import { Controls } from './Controls';
 import { ProjectileSystem, type Projectile } from './ProjectileSystem';
 import { PrismaSystem } from './PrismaSystem';
+import { FallSystem, type FallPhase } from './FallSystem';
 import { ImpactFrame } from './ImpactFrame';
 import { AudioEngine } from './Audio';
 import { Effects, Ribbon, makeSigil } from './Effects';
@@ -42,6 +43,11 @@ import {
   HitPause,
   PROJECTILES,
   novaCharge,
+  FALL,
+  fallDrainRate,
+  fallPressure,
+  fallReleaseDamage,
+  fallSlamDamage,
   PRISMA,
   prismaHold,
   type ProjectileKind,
@@ -59,6 +65,7 @@ import {
   type TraceHit,
 } from './math';
 import {
+  MAX_SLOTS,
   SPELLS,
   type GameEvent,
   type Mode,
@@ -203,6 +210,15 @@ export class Game {
   private onGround = true;
   private prismaHoldTime = 0;
   private prismaChargeStart = 0;
+  /** FALL: the held gravity column over the boss (idle between casts). */
+  private fallSystem!: FallSystem;
+  private fallPhase: FallPhase = 'idle';
+  private fallTime = 0;
+  private fallHeld = 0;
+  private fallTick = 0;
+  private fallHeight = 0;
+  private fallLinger = 0;
+  private fallSquash = false;
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
   private dashBuffer = 0;
@@ -215,8 +231,12 @@ export class Game {
   private lastDamageBlind = false;
   private lastBlock: { scale: number; radius: number; direction: number[] } | null = null;
   private contacts = 0;
-  private spell: SpellId = 0;
-  private cooldowns = [0, 0, 0];
+  private slot = 0;
+  /** The spell in the selected slot; the loadout itself lives in the settings. */
+  private get spell(): SpellId {
+    return this.settings.loadout[this.slot] ?? 0;
+  }
+  private cooldowns = [0, 0, 0, 0];
   private lockedOn = false;
   private damageDealt = 0;
   private impacts = 0;
@@ -282,7 +302,7 @@ export class Game {
       canvas,
       () => this.pause(),
       (slot) => this.selectSpell(slot),
-      () => this.selectSpell((this.spell + 1) % 3),
+      () => this.selectSpell((this.slot + 1) % MAX_SLOTS),
       (locked) => this.emit({ type: 'lock', locked }),
       () => {
         if (this.lockToastShown) return;
@@ -329,6 +349,11 @@ export class Game {
         damageBoss: (amount, impulse, source) => this.damageBoss(amount, impulse, source),
         time: () => this.time,
       },
+    );
+    this.fallSystem = new FallSystem(
+      this.scene,
+      (x, z) => this.world.surfaceHeight(x, z),
+      settings.reducedEffects,
     );
     this.avatar = new THREE.Mesh(
       new THREE.BoxGeometry(0.65, 1.3, 0.65),
@@ -454,6 +479,13 @@ export class Game {
       },
       dash: clamp(1 - this.dashCooldown / 1.65, 0, 1),
       spell: this.spell,
+      slot: this.slot,
+      loadout: [...this.settings.loadout],
+      fall: {
+        phase: this.fallPhase,
+        pressure:
+          this.fallPhase === 'press' || this.fallPhase === 'slam' ? fallPressure(this.fallHeld) : 0,
+      },
       charge: this.heldSpell().progress,
       charged: this.heldSpell().charged,
       cooldowns: this.cooldowns.map((c, i) => clamp(c / SPELLS[i].cooldown, 0, 1)),
@@ -731,8 +763,10 @@ export class Game {
     this.novaHold = 0;
     this.novaHolding = this.novaChimed = false;
     this.clearPrisma();
-    this.spell = 0;
-    this.cooldowns = [0, 0, 0];
+    this.slot = 0;
+    this.endFallSilent();
+    this.fallLinger = 0;
+    this.cooldowns = [0, 0, 0, 0];
     this.pendingPlayerImpulse = null;
     this.lastBlock = null;
     this.contacts = 0;
@@ -785,6 +819,10 @@ export class Game {
   }
   pause() {
     if (this.mode !== 'playing' && this.mode !== 'demo') return;
+    if (this.fallPhase !== 'idle') {
+      this.endFallSilent();
+      this.cooldowns[3] = Math.max(this.cooldowns[3], 2);
+    }
     this.returnMode = this.mode;
     this.changeMode('paused');
   }
@@ -795,14 +833,21 @@ export class Game {
     if (this.returnMode === 'playing' && !this.outcome) this.controls.requestLock();
   }
   selectSpell(slot: number) {
-    if (slot >= 0 && slot <= 2) {
-      if (slot !== this.spell) this.novaHold = 0;
-      if (slot !== this.spell) this.novaHolding = false;
-      if (slot !== this.spell && this.prisma.big) this.prisma.cancelBig();
-      if (slot !== this.spell) this.prismaHoldTime = 0;
-      this.spell = slot as SpellId;
-      this.audio.click();
+    if (slot < 0 || slot >= MAX_SLOTS) return;
+    if (slot !== this.slot) {
+      this.novaHold = 0;
+      this.novaHolding = false;
+      if (this.prisma.big) this.prisma.cancelBig();
+      this.prismaHoldTime = 0;
+      if (this.fallPhase !== 'idle') this.endFallSilent();
     }
+    this.slot = slot;
+    this.audio.click();
+  }
+
+  /** A spell newly placed in a slot starts on cooldown, so swapping can never dodge one. */
+  noteEquipped(spell: SpellId) {
+    this.cooldowns[spell] = SPELLS[spell].cooldown;
   }
   applySettings(settings: Settings) {
     const changed = !this.settingsApplied || this.settings.quality !== settings.quality;
@@ -991,6 +1036,13 @@ export class Game {
       this.previousPlayer.copy(this.player);
       this.updatePlayer(dt, this.mode !== 'playing');
       if (this.hitPause.remaining === 0) this.prisma.update(dt);
+      if (this.hitPause.remaining === 0)
+        this.fallSystem.update(
+          dt,
+          this.fallPhase,
+          this.fallPhase === 'press' || this.fallPhase === 'slam' ? fallPressure(this.fallHeld) : 0,
+          this.fallPhase === 'build' ? this.boss.position : null,
+        );
       if (this.hitPause.remaining === 0) this.updateBoss(dt);
       if (this.hitPause.remaining === 0) {
         this.updateFireGates(dt);
@@ -1019,7 +1071,8 @@ export class Game {
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
 
     this.cooldowns = this.cooldowns.map((c) => Math.max(0, c - dt));
-    this.energy = Math.min(100, this.energy + dt * 12);
+    if (this.fallPhase === 'idle') this.energy = Math.min(100, this.energy + dt * 12);
+    else if (this.fallPhase === 'build') this.energy = Math.min(100, this.energy + dt * 6);
     if (this.damageTimer > 9 && !this.outcome) this.health = Math.min(100, this.health + dt * 3);
     if (this.controls.focusRequested) {
       this.controls.focusRequested = false;
@@ -1235,6 +1288,8 @@ export class Game {
             this.novaHold = 0;
             this.novaHolding = false;
           }
+        } else if (this.spell === 3) {
+          this.updateFallCast(dt, may);
         } else if (this.spell === 1) {
           // Prisma: a tap raises a circle that fires on its own; the button held past a
           // short threshold raises the large circle, which charges and fires on release.
@@ -1585,6 +1640,20 @@ export class Game {
       this.player.clone().add(new THREE.Vector3(0, 0.95, 0)),
       this.camera.position,
     );
+    // Under FALL the construct is pressed low and trembling against the weight: a slight
+    // vertical squash and a fine two-wave shudder, so the hold reads on the body itself.
+    if (this.fallPhase === 'press' && this.boss.alive) {
+      const tremble = (Math.sin(this.time * 47) + Math.sin(this.time * 31 + 1.3)) * 0.5;
+      this.boss.group.scale.set(BOSS.scale * 1.05, BOSS.scale * 0.93, BOSS.scale * 1.05);
+      this.boss.group.position.y -= 0.12;
+      this.boss.group.position.x += tremble * 0.02;
+      this.boss.group.position.z += Math.cos(this.time * 39) * 0.015;
+    } else if (this.fallSquash) {
+      // Undo the squash exactly once: the group scale belongs to the boss (BOSS.scale),
+      // so it is restored to that, never to 1.
+      this.fallSquash = false;
+      this.boss.group.scale.setScalar(BOSS.scale);
+    }
     [this.player, this.boss.position].forEach((p, i) => {
       this.stamp.position.set(p.x, this.world.surfaceHeight(p.x, p.z) + 0.035, p.z);
       this.stamp.rotation.set(-Math.PI / 2, 0, 0);
@@ -1634,6 +1703,32 @@ export class Game {
         return;
       }
     }
+    // FALL holds the boss where it struck: no tactics, no director, no way out while
+    // the caster keeps the button down. The descent itself is driven here, so the slam
+    // crosses the air at full slam speed inside a frame or two.
+    if ((this.fallPhase === 'slam' || this.fallPhase === 'press') && b.alive) {
+      b.velocity.set(0, 0, 0);
+      b.impulse.set(0, 0, 0);
+      const floor = groundHeight(
+        b.position.x,
+        b.position.z,
+        b.position.y - BOSS.extent,
+        this.world.obstacles,
+        this.world.surfaceHeight(b.position.x, b.position.z),
+      );
+      const restY = floor + BOSS.extent;
+      if (this.fallPhase === 'slam') {
+        const next = b.position.y - FALL.slamSpeed * dt;
+        if (next <= restY) {
+          b.position.y = restY;
+          this.fallImpact();
+        } else b.position.y = next;
+      } else b.position.y = restY;
+      b.group.position.copy(b.position);
+      b.group.lookAt(this.player.clone().add(UP));
+      b.group.updateMatrixWorld(true);
+      return;
+    }
     const wasKnocked = b.knockTime > 0;
     b.knockTime = b.tumble.physical
       ? Math.max(0.4, b.knockTime - dt)
@@ -1679,6 +1774,13 @@ export class Game {
     }
     motor.clampLength(0, b.tactics.retreating ? BOSS_MOTOR.retreat : BOSS_MOTOR.max);
     motor.multiplyScalar(0.035 + recovery * 0.965);
+    // The weight outlives the spell a little: after a release the boss climbs and moves
+    // as if still carrying it, before it is fully itself again.
+    if (this.fallLinger > 0) {
+      this.fallLinger = Math.max(0, this.fallLinger - dt);
+      motor.multiplyScalar(0.35);
+      if (motor.y > 0) motor.y *= 0.3;
+    }
     b.impulse.y -= (b.tumble.physical ? HEAVY.gravity : 14 * (1 - recovery)) * dt;
     // The motor's exponential smoothing (time constant ~0.19 s) already rounds waypoint
     // changes off; the banked, slerped presentation in Boss.present() does the rest, so the
@@ -2548,8 +2650,133 @@ export class Game {
     this.fx.debris(this.boss.position, Math.round(35 * BOSS.scale), 8 * BOSS.scale, 3 * BOSS.scale);
     this.fx.dust(this.boss.position, Math.round(15 * BOSS.scale), 2.5 * BOSS.scale);
   }
+  /**
+   * FALL's side of the fire control. The press pays up front and locks the column onto the
+   * boss; the slam lands a breath later; from there the spell lasts exactly as long as the
+   * button does (or the energy). The boss cannot break it — it ends by the caster's hand.
+   */
+  private updateFallCast(dt: number, may: boolean) {
+    if (this.fallPhase === 'idle') {
+      if (!this.controls.shotRequested) return;
+      this.controls.shotRequested = false;
+      if (!may || !this.boss.alive) return;
+      if (this.cooldowns[3] > 0 || this.energy < FALL.cost) {
+        this.emit({ type: 'dry', spell: 3 });
+        return;
+      }
+      this.energy -= FALL.cost;
+      this.fallPhase = 'build';
+      this.fallTime = 0;
+      this.fallSystem.begin(this.boss.position);
+      this.audio.fallCharge(this.boss.position);
+      return;
+    }
+    if (this.fallPhase === 'build') {
+      this.fallTime += dt;
+      if (!this.controls.shooting) {
+        // Let go before the weight landed: half the price back, and no mark left behind.
+        this.energy = Math.min(100, this.energy + FALL.cost / 2);
+        this.cooldowns[3] = 2;
+        this.endFallSilent();
+      } else if (this.fallTime >= FALL.build) {
+        const b = this.boss,
+          floor = groundHeight(
+            b.position.x,
+            b.position.z,
+            b.position.y - BOSS.extent,
+            this.world.obstacles,
+            this.world.surfaceHeight(b.position.x, b.position.z),
+          );
+        this.fallHeight = Math.max(0, b.position.y - (floor + BOSS.extent));
+        this.fallPhase = 'slam';
+      }
+      return;
+    }
+    if (this.fallPhase === 'slam') return; // the descent is driven inside updateBoss
+    // press: the boss is down and stays down.
+    this.fallHeld += dt;
+    this.energy -= fallDrainRate(this.fallHeld) * dt;
+    this.fallTick -= dt;
+    if (this.fallTick <= 0) {
+      this.fallTick = FALL.crushInterval;
+      if (this.boss.alive) {
+        this.damageBoss(FALL.crushDamage, new THREE.Vector3(0, -1, 0), {
+          spell: 3,
+          at: this.boss.position.clone(),
+          along: new THREE.Vector3(0, -1, 0),
+        });
+        this.fallSystem.crushPulse();
+        this.audio.fallCrush(fallPressure(this.fallHeld), this.boss.position);
+        if (!this.boss.alive) {
+          this.endFallSilent();
+          return;
+        }
+      }
+    }
+    if (!this.controls.shooting) this.releaseFall(false);
+    else if (this.energy <= 0) {
+      this.energy = 0;
+      this.releaseFall(true);
+    }
+  }
+
+  /** The slam reaching the ground: damage by height, a crater, and the press begins. */
+  private fallImpact() {
+    this.fallPhase = 'press';
+    this.fallHeld = 0;
+    this.fallTick = FALL.crushInterval;
+    const at = this.boss.position.clone(),
+      feet = new THREE.Vector3(at.x, this.world.surfaceHeight(at.x, at.z), at.z);
+    this.damageBoss(fallSlamDamage(this.fallHeight), new THREE.Vector3(0, -2, 0), {
+      spell: 3,
+      at: at.clone(),
+      along: new THREE.Vector3(0, -1, 0),
+    });
+    this.world.crater(feet, 30);
+    this.fx.dust(feet, 30, 3.2);
+    this.fx.impact(feet.clone().add(new THREE.Vector3(0, 0.4, 0)), '#b78cff', true);
+    this.fx.shock(feet.clone().add(new THREE.Vector3(0, 0.15, 0)), '#a678ff', 6);
+    this.fallSystem.crushPulse();
+    this.audio.fallSlam(at);
+    this.cameraRig.shake = Math.max(this.cameraRig.shake, 0.3);
+    if (!this.boss.alive) this.endFallSilent();
+  }
+
+  /** Letting go (or running dry): the stored pressure closes the spell in one crush. */
+  private releaseFall(forced: boolean) {
+    if (this.boss.alive)
+      this.damageBoss(
+        fallReleaseDamage(fallPressure(this.fallHeld), forced),
+        new THREE.Vector3(0, -1, 0),
+        {
+          spell: 3,
+          at: this.boss.position.clone(),
+          along: new THREE.Vector3(0, -1, 0),
+        },
+      );
+    this.audio.fallRelease(forced, this.boss.position);
+    this.endFallSilent();
+    this.cooldowns[3] = SPELLS[3].cooldown;
+    this.fallLinger = FALL.lingerTime;
+  }
+
+  /** The column collapses without a closing crush (pause, slot change, a kill mid-hold). */
+  private endFallSilent() {
+    if (this.fallSystem) this.fallSystem.end();
+    this.fallPhase = 'idle';
+    this.fallHeld = this.fallTick = this.fallTime = 0;
+  }
+
   /** The charge of whatever the fire control is holding: a Prisma lance or a Nova. */
   private heldSpell() {
+    if (this.spell === 3) {
+      if (this.fallPhase === 'build')
+        return { progress: clamp(this.fallTime / FALL.build, 0, 1) * 0.25, charged: false };
+      if (this.fallPhase === 'slam' || this.fallPhase === 'press') {
+        const pressure = fallPressure(this.fallHeld);
+        return { progress: pressure, charged: pressure >= 1 };
+      }
+    }
     if (this.spell === 1 && this.prisma.big) {
       const hold = prismaHold(this.prismaHoldTime, this.energy, this.prismaChargeStart);
       return { progress: hold.progress, charged: hold.charged };
@@ -2872,7 +3099,10 @@ export class Game {
           this.setFlight(false);
           this.groundJumps = 0;
         }
-        if (scenario.spell !== undefined) this.spell = scenario.spell;
+        if (scenario.spell !== undefined) {
+          const at = this.settings.loadout.indexOf(scenario.spell as SpellId);
+          if (at >= 0) this.slot = at;
+        }
         if (scenario.lockOn) this.lockedOn = true;
         if (scenario.bossHealth !== undefined) this.boss.health = scenario.bossHealth;
         if (scenario.health !== undefined) this.health = scenario.health;
