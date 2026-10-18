@@ -2052,7 +2052,9 @@ test('fall: held gravity slams the boss down, holds it, and bursts on release', 
   const box = await page.locator('#arena').boundingBox();
   await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
   await page.mouse.down();
-  await step(page, 0.5); // build (0.3 s) + the slam itself
+  await step(page, 0.5); // the word FALL stands alone first: still gathering, not yet down
+  expect((await state(page)).fall.phase).toBe('build');
+  await step(page, 0.7); // then the column lands and the slam hits
   let snap = await state(page);
   expect(snap.fall.phase).toBe('press');
   expect(snap.boss.health).toBeLessThan(healthBefore);
@@ -2064,6 +2066,12 @@ test('fall: held gravity slams the boss down, holds it, and bursts on release', 
     ),
   );
   expect(bossY - groundY).toBeLessThan(3.4); // pinned at rest height, not hovering
+  // And it does not get to face its hunter: under the weight its face tips to the ground.
+  const [qx, qy, qz, qw] = await page.evaluate(
+    () => window.__HEA_DEBUG__.diagnostics().ragdoll.bossOrientation,
+  );
+  const faceY = 2 * (qy * qz - qx * qw);
+  expect(faceY).toBeLessThan(-0.5);
   await expect(page.locator('#fall-title')).toHaveClass(/show/);
   // Holding longer stores pressure and keeps draining health in crush pulses.
   const healthAtSlam = snap.boss.health;
@@ -2072,12 +2080,12 @@ test('fall: held gravity slams the boss down, holds it, and bursts on release', 
   expect(snap.fall.phase).toBe('press');
   expect(snap.fall.pressure).toBeGreaterThan(0.4);
   expect(snap.boss.health).toBeLessThan(healthAtSlam);
-  // Release: the stored pressure closes the spell and the cooldown starts.
+  // Release: the stored pressure closes the spell; there is no cooldown to wait out.
   await page.mouse.up();
   await step(page, 0.3);
   snap = await state(page);
   expect(snap.fall.phase).toBe('idle');
-  expect(snap.cooldowns[3]).toBeGreaterThan(0.8);
+  expect(snap.cooldowns[3]).toBe(0);
   expect(snap.boss.health).toBeLessThan(healthAtSlam);
 });
 
@@ -2104,8 +2112,12 @@ test('grimoire: spells can be rearranged across the four slots and lose their BA
   await expect(fallCard.locator('.grim-new')).toHaveCount(0);
   await expect(fallCard.locator('.grim-in')).toHaveText('SLOT 2');
   // A spell newly placed in a slot starts on cooldown, so swapping never dodges one.
-  const snap = await state(page);
+  let snap = await state(page);
   expect(snap.loadout[1]).toBe(3);
-  expect(snap.cooldowns[3]).toBeGreaterThan(0.5);
+  await page.locator('[data-grim-slot="0"]').click();
+  await page.locator('[data-grim-spell="2"]').click();
+  snap = await state(page);
+  expect(snap.loadout[0]).toBe(2);
+  expect(snap.cooldowns[2]).toBeGreaterThan(0.5);
   await page.locator('#panel-done').click();
 });

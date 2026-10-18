@@ -160,22 +160,21 @@ export function novaCharge(hold: number, energy: number, baseCost: number) {
  * formality.
  */
 export const FALL = {
-  /** Seconds of build between the press and the slam landing. */
-  build: 0.3,
+  /**
+   * Seconds between the press and the slam landing. The FALL title stands alone for the
+   * first part of this, then the column gathers, then the weight lands — never all at once.
+   */
+  build: 0.85,
   /** Downward speed of the slam, metres per second — a launch, not a fall. */
-  slamSpeed: 150,
+  slamSpeed: 320,
   /** Damage of the slam before the height bonus. */
   slamDamage: 46,
   /** Extra slam damage at the greatest height it can be caught from (capped). */
   slamHeightBonus: 38,
   /** Height over the ground at which the slam bonus stops growing, metres. */
   slamHeightCap: 26,
-  /** Energy paid up front; a release before the slam refunds half of it. */
-  cost: 18,
-  /** Energy per second while the boss is held down, before the overload rise. */
-  drainBase: 10,
-  /** Extra drain per second of holding, added each second (the weight gets harder to hold). */
-  drainRise: 1.6,
+  /** FALL costs no energy and has no cooldown: the hold itself is the whole price. */
+  cost: 0,
   /** Seconds of holding to reach full stored pressure. */
   pressureTime: 3,
   /** Fraction of full pressure leaking away per second while held past full. */
@@ -188,13 +187,11 @@ export const FALL = {
   releaseBase: 22,
   /** Extra release damage at full stored pressure. */
   releasePressureDamage: 58,
-  /** Share of the release burst kept when the energy runs out and the spell dies on its own. */
-  forcedReleaseShare: 0.5,
   /** Seconds after release that the boss still rises and moves as if weighted. */
   lingerTime: 1.2,
   /** Radius of the cracked, sinking ground at first impact, growing with pressure. */
-  crackRadius: { start: 4.2, full: 6.8 },
-  cooldown: 12,
+  crackRadius: { start: 7, full: 11 },
+  cooldown: 0,
 } as const;
 
 /** Stored pressure (0..1) after holding this long: fills over `pressureTime`, then leaks. */
@@ -204,21 +201,15 @@ export function fallPressure(heldSeconds: number): number {
   return Math.max(0, 1 - (heldSeconds - FALL.pressureTime) * FALL.pressureLeak);
 }
 
-/** Energy per second the hold costs right now: it grows the longer the weight is held. */
-export function fallDrainRate(heldSeconds: number): number {
-  return FALL.drainBase + FALL.drainRise * Math.max(0, heldSeconds);
-}
-
 /** Slam damage for a boss caught `height` metres over its ground. */
 export function fallSlamDamage(height: number): number {
   const share = clamp(height / FALL.slamHeightCap, 0, 1);
   return Math.round(FALL.slamDamage + FALL.slamHeightBonus * share);
 }
 
-/** Damage of the closing crush when the caster lets go (or the energy gives out). */
-export function fallReleaseDamage(pressure: number, forced: boolean): number {
-  const full = FALL.releaseBase + FALL.releasePressureDamage * clamp(pressure, 0, 1);
-  return Math.round(forced ? full * FALL.forcedReleaseShare : full);
+/** Damage of the closing crush when the caster lets go. */
+export function fallReleaseDamage(pressure: number): number {
+  return Math.round(FALL.releaseBase + FALL.releasePressureDamage * clamp(pressure, 0, 1));
 }
 
 export const DUEL = {

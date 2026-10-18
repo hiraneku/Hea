@@ -7,6 +7,17 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diubah — Fall disetel ulang dari uji langsung
+
+- Hempasan Fall kini memicu **impact frame** dan jeda benturan seperti hempasan berat
+  kelas Nova, melesat jauh lebih cepat (320 m/detik, tubuh meregang sepanjang jatuh),
+  dan areanya jauh lebih besar (retakan menyebar 7–11 m, kolom & batu seluas itu).
+- **Tanpa cooldown dan tanpa biaya energi** — menahan tombol adalah satu-satunya harga.
+- Dunia jauh lebih ungu selama Fall (kolom, cahaya, dan vignette diperkuat).
+- Boss yang tertekan **rebah menghadap tanah** (tidak lagi mengunci pandangan ke
+  pemain), dieja masuk-keluar dengan halus; kata "FALL" kini berdiri sendiri sesaat
+  sebelum kolom terkumpul dan hempasan mendarat; kamera bergetar halus selama tekanan.
+
 ### Diperbaiki
 
 - Build GitHub Pages dipulihkan: `npm run build:pages` kembali menulis build produksi

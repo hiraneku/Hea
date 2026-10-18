@@ -44,7 +44,6 @@ import {
   PROJECTILES,
   novaCharge,
   FALL,
-  fallDrainRate,
   fallPressure,
   fallReleaseDamage,
   fallSlamDamage,
@@ -219,6 +218,10 @@ export class Game {
   private fallHeight = 0;
   private fallLinger = 0;
   private fallSquash = false;
+  /** How far the boss is tipped face-down under the weight (radians, eased both ways). */
+  private fallTilt = 0;
+  private tiltQuaternion = new THREE.Quaternion();
+  private tiltEuler = new THREE.Euler();
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
   private dashBuffer = 0;
@@ -488,7 +491,9 @@ export class Game {
       },
       charge: this.heldSpell().progress,
       charged: this.heldSpell().charged,
-      cooldowns: this.cooldowns.map((c, i) => clamp(c / SPELLS[i].cooldown, 0, 1)),
+      cooldowns: this.cooldowns.map((c, i) =>
+        SPELLS[i].cooldown > 0 ? clamp(c / SPELLS[i].cooldown, 0, 1) : 0,
+      ),
       damageDealt: this.damageDealt,
       impacts: this.impacts,
       wallsBroken: this.world.wallsBroken,
@@ -821,7 +826,6 @@ export class Game {
     if (this.mode !== 'playing' && this.mode !== 'demo') return;
     if (this.fallPhase !== 'idle') {
       this.endFallSilent();
-      this.cooldowns[3] = Math.max(this.cooldowns[3], 2);
     }
     this.returnMode = this.mode;
     this.changeMode('paused');
@@ -1042,6 +1046,13 @@ export class Game {
           this.fallPhase,
           this.fallPhase === 'press' || this.fallPhase === 'slam' ? fallPressure(this.fallHeld) : 0,
           this.fallPhase === 'build' ? this.boss.position : null,
+        );
+      // While the weight holds, the camera itself trembles under it: a fine, steady
+      // shudder that grows with the stored pressure (comfort mode sits it out).
+      if (this.fallPhase === 'press' && !this.settings.reducedEffects)
+        this.cameraRig.shake = Math.max(
+          this.cameraRig.shake,
+          0.012 + fallPressure(this.fallHeld) * 0.02,
         );
       if (this.hitPause.remaining === 0) this.updateBoss(dt);
       if (this.hitPause.remaining === 0) {
@@ -1640,9 +1651,20 @@ export class Game {
       this.player.clone().add(new THREE.Vector3(0, 0.95, 0)),
       this.camera.position,
     );
-    // Under FALL the construct is pressed low and trembling against the weight: a slight
-    // vertical squash and a fine two-wave shudder, so the hold reads on the body itself.
-    if (this.fallPhase === 'press' && this.boss.alive) {
+    // Under FALL the construct does not get to face its hunter: it is tipped forward
+    // until its face is toward the ground it was slammed into, eased in as the weight
+    // lands and eased back out when the spell lets go. During the descent itself the
+    // body stretches along its fall; while held, it squashes and trembles instead.
+    const tiltTarget = this.fallPhase === 'press' && this.boss.alive ? 1.08 : 0;
+    this.fallTilt = damp(this.fallTilt, tiltTarget, tiltTarget > 0 ? 5 : 2.6, dt);
+    if (this.fallTilt > 0.01)
+      this.boss.group.quaternion.multiply(
+        this.tiltQuaternion.setFromEuler(this.tiltEuler.set(this.fallTilt, 0, 0)),
+      );
+    if (this.fallPhase === 'slam' && this.boss.alive) {
+      this.fallSquash = true;
+      this.boss.group.scale.set(BOSS.scale * 0.94, BOSS.scale * 1.18, BOSS.scale * 0.94);
+    } else if (this.fallPhase === 'press' && this.boss.alive) {
       const tremble = (Math.sin(this.time * 47) + Math.sin(this.time * 31 + 1.3)) * 0.5;
       this.boss.group.scale.set(BOSS.scale * 1.05, BOSS.scale * 0.93, BOSS.scale * 1.05);
       this.boss.group.position.y -= 0.12;
@@ -2659,26 +2681,19 @@ export class Game {
     if (this.fallPhase === 'idle') {
       if (!this.controls.shotRequested) return;
       this.controls.shotRequested = false;
-      if (!may || !this.boss.alive) return;
-      if (this.cooldowns[3] > 0 || this.energy < FALL.cost) {
-        this.emit({ type: 'dry', spell: 3 });
-        return;
+      // No cost and no cooldown: the press is free, the hold is the commitment.
+      if (may && this.boss.alive) {
+        this.fallPhase = 'build';
+        this.fallTime = 0;
+        this.fallSystem.begin(this.boss.position);
+        this.audio.fallCharge(this.boss.position);
       }
-      this.energy -= FALL.cost;
-      this.fallPhase = 'build';
-      this.fallTime = 0;
-      this.fallSystem.begin(this.boss.position);
-      this.audio.fallCharge(this.boss.position);
       return;
     }
     if (this.fallPhase === 'build') {
       this.fallTime += dt;
-      if (!this.controls.shooting) {
-        // Let go before the weight landed: half the price back, and no mark left behind.
-        this.energy = Math.min(100, this.energy + FALL.cost / 2);
-        this.cooldowns[3] = 2;
-        this.endFallSilent();
-      } else if (this.fallTime >= FALL.build) {
+      if (!this.controls.shooting) this.endFallSilent();
+      else if (this.fallTime >= FALL.build) {
         const b = this.boss,
           floor = groundHeight(
             b.position.x,
@@ -2693,9 +2708,8 @@ export class Game {
       return;
     }
     if (this.fallPhase === 'slam') return; // the descent is driven inside updateBoss
-    // press: the boss is down and stays down.
+    // press: the boss is down and stays down for as long as the button does.
     this.fallHeld += dt;
-    this.energy -= fallDrainRate(this.fallHeld) * dt;
     this.fallTick -= dt;
     if (this.fallTick <= 0) {
       this.fallTick = FALL.crushInterval;
@@ -2713,11 +2727,7 @@ export class Game {
         }
       }
     }
-    if (!this.controls.shooting) this.releaseFall(false);
-    else if (this.energy <= 0) {
-      this.energy = 0;
-      this.releaseFall(true);
-    }
+    if (!this.controls.shooting) this.releaseFall();
   }
 
   /** The slam reaching the ground: damage by height, a crater, and the press begins. */
@@ -2739,24 +2749,23 @@ export class Game {
     this.fallSystem.crushPulse();
     this.audio.fallSlam(at);
     this.cameraRig.shake = Math.max(this.cameraRig.shake, 0.3);
+    // The slam is a heavy contact: it earns the graphic cut and the frozen beat,
+    // exactly like a Nova-class impact.
+    this.hitPause.request(0.05);
+    this.impactCut(feet, new THREE.Vector3(0, -1, 0));
     if (!this.boss.alive) this.endFallSilent();
   }
 
-  /** Letting go (or running dry): the stored pressure closes the spell in one crush. */
-  private releaseFall(forced: boolean) {
+  /** Letting go: the stored pressure closes the spell in one crush. */
+  private releaseFall() {
     if (this.boss.alive)
-      this.damageBoss(
-        fallReleaseDamage(fallPressure(this.fallHeld), forced),
-        new THREE.Vector3(0, -1, 0),
-        {
-          spell: 3,
-          at: this.boss.position.clone(),
-          along: new THREE.Vector3(0, -1, 0),
-        },
-      );
-    this.audio.fallRelease(forced, this.boss.position);
+      this.damageBoss(fallReleaseDamage(fallPressure(this.fallHeld)), new THREE.Vector3(0, -1, 0), {
+        spell: 3,
+        at: this.boss.position.clone(),
+        along: new THREE.Vector3(0, -1, 0),
+      });
+    this.audio.fallRelease(false, this.boss.position);
     this.endFallSilent();
-    this.cooldowns[3] = SPELLS[3].cooldown;
     this.fallLinger = FALL.lingerTime;
   }
 

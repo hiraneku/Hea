@@ -1,11 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  FALL,
-  fallDrainRate,
-  fallPressure,
-  fallReleaseDamage,
-  fallSlamDamage,
-} from '../../src/game/combat';
+import { FALL, fallPressure, fallReleaseDamage, fallSlamDamage } from '../../src/game/combat';
 import { normalizeEquipped, normalizeLoadout, SPELLS } from '../../src/game/types';
 
 describe('FALL pressure', () => {
@@ -17,10 +11,17 @@ describe('FALL pressure', () => {
     expect(fallPressure(60)).toBe(0);
   });
 
-  it('costs more energy the longer the weight is held', () => {
-    expect(fallDrainRate(0)).toBe(FALL.drainBase);
-    expect(fallDrainRate(4)).toBeGreaterThan(fallDrainRate(1));
-    expect(fallDrainRate(1)).toBeGreaterThan(fallDrainRate(0));
+  it('is free: no energy cost and no cooldown, the hold is the price', () => {
+    expect(FALL.cost).toBe(0);
+    expect(FALL.cooldown).toBe(0);
+    expect(SPELLS[3].cost).toBe(0);
+    expect(SPELLS[3].cooldown).toBe(0);
+  });
+
+  it('slams at launch speed over a very large area', () => {
+    expect(FALL.slamSpeed).toBeGreaterThanOrEqual(300);
+    expect(FALL.crackRadius.full).toBeGreaterThanOrEqual(10);
+    expect(FALL.build).toBeGreaterThanOrEqual(0.8);
   });
 
   it('slams harder from height, capped', () => {
@@ -30,11 +31,12 @@ describe('FALL pressure', () => {
     expect(fallSlamDamage(6)).toBeGreaterThan(fallSlamDamage(0));
   });
 
-  it('a deliberate release spends the pressure; a forced one keeps only a share', () => {
-    const full = fallReleaseDamage(1, false);
-    expect(full).toBe(FALL.releaseBase + FALL.releasePressureDamage);
-    expect(fallReleaseDamage(1, true)).toBe(Math.round(full * FALL.forcedReleaseShare));
-    expect(fallReleaseDamage(0, false)).toBe(FALL.releaseBase);
+  it('the release spends the stored pressure in one crush', () => {
+    expect(fallReleaseDamage(1)).toBe(FALL.releaseBase + FALL.releasePressureDamage);
+    expect(fallReleaseDamage(0)).toBe(FALL.releaseBase);
+    expect(fallReleaseDamage(0.5)).toBe(
+      Math.round(FALL.releaseBase + FALL.releasePressureDamage * 0.5),
+    );
   });
 
   it('is registered as the fourth spell, a held gravity control', () => {

@@ -770,7 +770,7 @@ function updateHud(s: Snapshot) {
   // FALL announces itself on every cast and tints the world's edge violet while it holds.
   const fallActive = s.fall.phase !== 'idle' && s.mode === 'playing';
   $('#fall-title').classList.toggle('show', fallActive);
-  $('#fall-vignette').style.opacity = fallActive ? String(0.3 + s.fall.pressure * 0.45) : '0';
+  $('#fall-vignette').style.opacity = fallActive ? String(0.45 + s.fall.pressure * 0.55) : '0';
   if (s.spell !== lastSpell) {
     $('#touch-fire-icon').innerHTML = spellIcons[s.spell];
     $('#touch-fire').style.setProperty('--element', SPELLS[s.spell].color);

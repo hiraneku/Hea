@@ -21,10 +21,11 @@ export class FallSystem {
   private glow!: THREE.Mesh;
   private stones!: THREE.InstancedMesh;
   private stoneData: { x: number; z: number; size: number; seed: number; lift: number }[] = [];
-  private light = new THREE.PointLight('#a678ff', 0, 30, 1.8);
+  private light = new THREE.PointLight('#a678ff', 0, 44, 1.8);
   /** The column's centre on the ground (the boss is locked to its x/z once slammed). */
   readonly center = new THREE.Vector3();
   private fade = 0;
+  private age = 0;
   private pulse = 0;
   private stoneLift = 0;
   private dummy = new THREE.Object3D();
@@ -37,9 +38,9 @@ export class FallSystem {
   ) {
     this.buildLines(reducedEffects ? 48 : 110);
     this.buildCrack();
-    this.buildStones(reducedEffects ? 14 : 26);
+    this.buildStones(reducedEffects ? 18 : 34);
     this.shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.7, 3.5, 17, 24, 1, true),
+      new THREE.CylinderGeometry(7.6, 9.4, 19, 32, 1, true),
       new THREE.MeshBasicMaterial({
         color: '#8a5cff',
         transparent: true,
@@ -49,7 +50,7 @@ export class FallSystem {
         depthWrite: false,
       }),
     );
-    this.shaft.position.y = 8.5;
+    this.shaft.position.y = 9.5;
     this.group.add(this.shaft, this.light);
     this.light.position.y = 3;
     this.group.visible = false;
@@ -61,7 +62,7 @@ export class FallSystem {
     const positions = new Float32Array(count * 6);
     for (let i = 0; i < count; i++) {
       const angle = random() * Math.PI * 2,
-        radius = Math.sqrt(random()) * 3.4;
+        radius = Math.sqrt(random()) * 8.5;
       this.lineData.push({
         x: Math.cos(angle) * radius,
         z: Math.sin(angle) * radius,
@@ -162,7 +163,7 @@ export class FallSystem {
     this.stones.frustumCulled = false;
     for (let i = 0; i < count; i++) {
       const angle = random() * Math.PI * 2,
-        radius = 1 + Math.sqrt(random()) * 5.4;
+        radius = 1.5 + Math.sqrt(random()) * 9;
       this.stoneData.push({
         x: Math.cos(angle) * radius,
         z: Math.sin(angle) * radius,
@@ -176,6 +177,7 @@ export class FallSystem {
 
   /** The press begins: the column locks onto this ground point. */
   begin(at: THREE.Vector3) {
+    this.age = 0;
     this.center.set(at.x, this.groundHeight(at.x, at.z), at.z);
     this.group.position.set(this.center.x, this.center.y, this.center.z);
     this.fade = 0;
@@ -198,6 +200,7 @@ export class FallSystem {
 
   update(dt: number, phase: FallPhase, pressure: number, follow: THREE.Vector3 | null) {
     this.time += dt;
+    this.age += dt;
     if (phase !== 'idle' && follow) {
       // During the build the column rides the boss — it is locked on, not aimed at a point.
       this.center.set(follow.x, this.groundHeight(follow.x, follow.z), follow.z);
@@ -208,7 +211,10 @@ export class FallSystem {
     this.group.visible = this.fade > 0.01;
     if (!this.group.visible) return;
     this.pulse = Math.max(0, this.pulse - dt * 3);
-    const speedScale = phase === 'slam' ? 3.2 : phase === 'build' ? 0.55 : 1;
+    const speedScale = phase === 'slam' ? 7 : phase === 'build' ? 0.55 : 1;
+    // The word stands alone first: during the build the column only gathers in the
+    // second half of the wait, so the title and the impact never arrive together.
+    const gather = phase === 'build' ? clamp((this.age - 0.35) / 0.45, 0, 1) : 1;
     const attribute = this.lines.geometry.getAttribute('position') as THREE.BufferAttribute;
     const array = attribute.array as Float32Array;
     for (let i = 0; i < this.lineData.length; i++) {
@@ -225,10 +231,10 @@ export class FallSystem {
     }
     attribute.needsUpdate = true;
     (this.lines.material as THREE.LineBasicMaterial).opacity =
-      this.fade * (phase === 'build' ? 0.45 : 0.5 + pressure * 0.4);
+      this.fade * gather * (phase === 'build' ? 0.6 : 0.55 + pressure * 0.4);
     (this.shaft.material as THREE.MeshBasicMaterial).opacity =
-      this.fade * (0.035 + pressure * 0.05 + this.pulse * 0.03);
-    this.light.intensity = this.fade * (26 + pressure * 70 + this.pulse * 30);
+      this.fade * gather * (0.06 + pressure * 0.08 + this.pulse * 0.04);
+    this.light.intensity = this.fade * gather * (40 + pressure * 110 + this.pulse * 40);
     // The crack spreads and deepens its glow with stored pressure; after release it keeps
     // its full shape while it fades, a record of how long the boss was held.
     const radius =
@@ -237,11 +243,11 @@ export class FallSystem {
     (this.crack.material as THREE.MeshBasicMaterial).opacity = this.fade * 0.96;
     this.glow.scale.setScalar(radius * (0.55 + this.pulse * 0.15));
     (this.glow.material as THREE.MeshBasicMaterial).opacity =
-      this.fade * (0.1 + pressure * 0.22 + this.pulse * 0.18);
+      this.fade * (0.16 + pressure * 0.3 + this.pulse * 0.2);
     // Stones: lifted trembling while the pressure builds, crushed flat at the slam, then
     // shuddering in the ground on every crush pulse for as long as the hold lasts.
     this.stoneLift = clamp(
-      this.stoneLift + (phase === 'build' ? dt * 3 : phase === 'idle' ? -dt * 2 : -dt * 14),
+      this.stoneLift + (phase === 'build' ? dt * 1.6 : phase === 'idle' ? -dt * 2 : -dt * 14),
       0,
       1,
     );
