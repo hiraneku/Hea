@@ -7,6 +7,35 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki
+
+- Build GitHub Pages dipulihkan: `npm run build:pages` kembali menulis build produksi
+  ke `docs/` yang di-commit (sumber Pages repo ini), setelah penghapusannya sempat
+  membuat situs mengembalikan 404.
+
+## [0.21.0] — 2026-10-18
+
+### Ditambahkan
+
+- **FALL — sihir Gravitasi pertama (tipe tahan):** kolom gravitasi tanpa lingkaran sihir
+  mengunci IGNIS, menghantamnya ke tanah dengan kecepatan hempasan dan menahannya di
+  sana selama tombol ditekan — boss tidak bisa lolos; skill berakhir saat dilepas atau
+  energi habis. Setiap cast mengumumkan dirinya lewat tulisan "FALL". Tekanan tersimpan
+  menutup skill dengan satu remukan saat dilepas (separuh bila energi yang menghabisi),
+  tanah retak radial dan amblas progresif selama tahanan, sisa beban sesaat setelah
+  lepas, garis-garis tekanan vertikal, batu yang terangkat lalu tertekan rata, serta
+  lapisan suara yang menegang mengikuti tekanan.
+- **Grimoire & loadout 4 slot:** semua sihir terdaftar dengan aliran/cara pakai/angka;
+  pemain menyusun maksimal empat slot dari menu Pengaturan (pilih slot → pilih sihir,
+  pertukaran otomatis), dengan panel detail, filter per aliran, lencana BARU untuk sihir
+  yang belum pernah dipasang, dan sihir yang baru dipasang memulai dari cooldown penuh.
+  Slot adalah aksi yang bisa dipetakan ulang (bawaan 1–4, barisan angka tetap cadangan).
+
+### Diubah
+
+- `SPELLS` kini registri sihir (Api/Cahaya/Gravitasi) yang menggerakkan dock HUD,
+  panduan, dan Grimoire; pilihan sihir pemain disimpan sebagai loadout di pengaturan.
+
 ## [0.20.0] — 2026-10-18
 
 ### Ditambahkan

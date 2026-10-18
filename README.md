@@ -3,7 +3,7 @@
 Prototipe game pertarungan sihir 3D **mobile-first** yang bisa langsung dimainkan di
 browser: satu pemain melawan satu boss terbang, **IGNIS**, di arena kota 600 × 600 m
 yang bisa dihancurkan. Terbang bebas, perisai Aegis directional (depan + samping,
-belakang titik buta), tiga sihir, hempasan ragdoll, dan navigasi boss yang sadar
+belakang titik buta), empat sihir yang bisa disusun bebas, hempasan ragdoll, dan navigasi boss yang sadar
 cover. Tanpa backend, akun, atau koneksi eksternal saat bermain.
 
 ▶ **Mainkan:** https://hiraneku.github.io/Hea/
@@ -38,9 +38,11 @@ Semua font, grafis, dan video dilayani dari origin yang sama; tidak membutuhkan 
 Hadapi IGNIS (1440 HP) dengan 100 HP milikmu. Energi hanya dipakai untuk sihir;
 terbang dan Aegis tidak menguras energi.
 
-**Tiga sihir:** **BARA** (proyektil api memburu), **PRISMA** (tap: lingkaran cahaya
-menembakkan sinar penyapu proyektil; tahan: lancip berat pembongkar dinding), dan
-**NOVA** (ledakan penghempas boss; tahan untuk muatan lebih besar).
+**Empat sihir, disusun lewat Grimoire (maks. 4 slot):** **BARA** (proyektil api memburu), **PRISMA** (tap: lingkaran cahaya
+menembakkan sinar penyapu proyektil; tahan: lancip berat pembongkar dinding),
+**NOVA** (ledakan penghempas boss; tahan untuk muatan lebih besar), dan **FALL**
+(gravitasi: tahan untuk menghantam boss ke tanah dan menahannya tertekan di sana —
+ia tidak bisa lolos sampai kamu melepasnya).
 
 **Aegis** aktif otomatis tanpa cooldown dan tanpa biaya, menutupi busur 240° di depan
 dan samping tubuh — **belakang adalah titik buta**. Satu patch perisai menahan 5 hit
@@ -113,11 +115,10 @@ selengkapnya ada di [panduan pengembangan](docs/DEVELOPMENT.md).
 
 ## Deployment
 
-`npm run build` menghasilkan situs statis di `dist/` yang dapat diterbitkan ke host
-statis mana pun — tidak ada artefak build yang di-commit ke repo. Repo ini tidak
-menyertakan workflow otomatisasi; terbitkan `dist/` secara manual (misalnya unggah ke
-hosting pilihanmu, atau arahkan GitHub Pages ke folder build lewat cara yang kamu
-kelola sendiri).
+Situs diterbitkan lewat GitHub Pages dari folder `docs/` di branch ini: jalankan
+`npm run build:pages` (build masuk ke `docs/`), lalu commit & push hasilnya. Repo ini
+tidak memakai workflow otomatisasi, jadi langkah build itu adalah bagian dari rilis.
+Untuk host statis lain, `npm run build` menghasilkan `dist/` yang setara.
 
 ## Lisensi
 

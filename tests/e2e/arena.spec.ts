@@ -2037,3 +2037,75 @@ test('accessibility: remapped keys are stored, and the boss indicator points off
   await expect(page.locator('#boss-indicator')).toBeVisible();
   await expect(page.locator('#boss-indicator-label')).toHaveText(/IGNIS · \d+ M/);
 });
+
+test('fall: held gravity slams the boss down, holds it, and bursts on release', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'held casting is driven by mouse on desktop');
+  await load(page);
+  await scenario(page, 'flight');
+  await step(page, 0.5);
+  const healthBefore = (await state(page)).boss.health;
+  // Slot 4 holds FALL by default; the cast is a hold, not a tap.
+  await page.keyboard.press('4');
+  expect((await state(page)).spell).toBe(3);
+  const box = await page.locator('#arena').boundingBox();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await step(page, 0.5); // build (0.3 s) + the slam itself
+  let snap = await state(page);
+  expect(snap.fall.phase).toBe('press');
+  expect(snap.boss.health).toBeLessThan(healthBefore);
+  const bossY = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().bossPosition[1]);
+  const groundY = await page.evaluate(() =>
+    window.__HEA_DEBUG__.harness!.groundAt(
+      window.__HEA_DEBUG__.diagnostics().bossPosition[0],
+      window.__HEA_DEBUG__.diagnostics().bossPosition[2],
+    ),
+  );
+  expect(bossY - groundY).toBeLessThan(3.4); // pinned at rest height, not hovering
+  await expect(page.locator('#fall-title')).toHaveClass(/show/);
+  // Holding longer stores pressure and keeps draining health in crush pulses.
+  const healthAtSlam = snap.boss.health;
+  await step(page, 1.6);
+  snap = await state(page);
+  expect(snap.fall.phase).toBe('press');
+  expect(snap.fall.pressure).toBeGreaterThan(0.4);
+  expect(snap.boss.health).toBeLessThan(healthAtSlam);
+  // Release: the stored pressure closes the spell and the cooldown starts.
+  await page.mouse.up();
+  await step(page, 0.3);
+  snap = await state(page);
+  expect(snap.fall.phase).toBe('idle');
+  expect(snap.cooldowns[3]).toBeGreaterThan(0.8);
+  expect(snap.boss.health).toBeLessThan(healthAtSlam);
+});
+
+test('grimoire: spells can be rearranged across the four slots and lose their BARU badge', async ({
+  page,
+}) => {
+  await load(page);
+  await scenario(page, 'flight');
+  await step(page, 0.2);
+  await page.locator('#settings-button').click();
+  await expect(page.locator('.grim-card')).toHaveCount(4);
+  // FALL has never been equipped: it wears the badge until it is placed in a slot.
+  const fallCard = page.locator('[data-grim-spell="3"]');
+  await expect(fallCard.locator('.grim-new')).toHaveText('BARU');
+  await page.locator('[data-grim-filter="Gravitasi"]').click();
+  await expect(page.locator('.grim-card')).toHaveCount(1);
+  await page.locator('[data-grim-filter="Semua"]').click();
+  // Arm slot 2 and equip FALL there; the displaced spell swaps into FALL's old slot.
+  await page.locator('[data-grim-slot="1"]').click();
+  await fallCard.click();
+  const stored = JSON.parse((await page.evaluate(() => localStorage.getItem('hea-settings')))!);
+  expect(stored.loadout[1]).toBe(3);
+  expect(stored.equipped).toContain(3);
+  await expect(fallCard.locator('.grim-new')).toHaveCount(0);
+  await expect(fallCard.locator('.grim-in')).toHaveText('SLOT 2');
+  // A spell newly placed in a slot starts on cooldown, so swapping never dodges one.
+  const snap = await state(page);
+  expect(snap.loadout[1]).toBe(3);
+  expect(snap.cooldowns[3]).toBeGreaterThan(0.5);
+  await page.locator('#panel-done').click();
+});

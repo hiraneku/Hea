@@ -1,0 +1,4 @@
+# Build artifacts (dist/ and the committed GitHub Pages build in docs/)
+dist
+docs/*
+!docs/*.md

@@ -32,8 +32,10 @@ npm run build          # tsc + build produksi
 npm run test:e2e       # Playwright melawan dev server (harness __HEA_DEBUG__ hanya dev)
 ```
 
-`npm run build` menghasilkan `dist/` statis untuk diterbitkan manual ke host mana pun;
-folder `docs/` kini hanya berisi dokumentasi, bukan build.
+Penerbitan: GitHub Pages melayani folder `docs/` di branch ini. `npm run build:pages`
+menulis build produksi ke `docs/` (commit & push hasilnya); file Markdown di `docs/`
+ikut tinggal di folder itu, jadi pulihkan mereka bila build membersihkan folder.
+`npm run build` menghasilkan `dist/` yang setara untuk host statis lain.
 
 ## Teknologi dan struktur
 
