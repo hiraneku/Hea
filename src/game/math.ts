@@ -8,6 +8,8 @@ export interface Obstacle {
   top: number;
   bottom?: number;
   owner?: number;
+  /** Broad-phase bookkeeping (World's obstacle grid); not part of the box's meaning. */
+  gridMark?: number;
 }
 export interface Point3 {
   x: number;
@@ -158,20 +160,40 @@ export function segmentDistance(a1: Point3, a2: Point3, b1: Point3, b2: Point3):
 }
 
 export function segmentBox(start: Point3, end: Point3, b: Obstacle, padding = 0): number | null {
+  // Slab test, allocation-free: this runs per candidate box per projectile substep, and a
+  // long duel can have hundreds of live colliders, so it must not allocate on the hot path.
   let near = 0,
     far = 1;
-  const axes = [
-    [start.x, end.x - start.x, b.minX - padding, b.maxX + padding],
-    [start.y, end.y - start.y, (b.bottom ?? 0) - padding, b.top + padding],
-    [start.z, end.z - start.z, b.minZ - padding, b.maxZ + padding],
-  ];
-  for (const [origin, direction, min, max] of axes) {
-    if (Math.abs(direction) < 1e-9) {
-      if (origin < min || origin > max) return null;
-      continue;
-    }
-    let a = (min - origin) / direction,
-      z = (max - origin) / direction;
+  const dx = end.x - start.x,
+    dy = end.y - start.y,
+    dz = end.z - start.z;
+  if (Math.abs(dx) < 1e-9) {
+    if (start.x < b.minX - padding || start.x > b.maxX + padding) return null;
+  } else {
+    let a = (b.minX - padding - start.x) / dx,
+      z = (b.maxX + padding - start.x) / dx;
+    if (a > z) [a, z] = [z, a];
+    near = Math.max(near, a);
+    far = Math.min(far, z);
+    if (near > far) return null;
+  }
+  const bottom = (b.bottom ?? 0) - padding,
+    top = b.top + padding;
+  if (Math.abs(dy) < 1e-9) {
+    if (start.y < bottom || start.y > top) return null;
+  } else {
+    let a = (bottom - start.y) / dy,
+      z = (top - start.y) / dy;
+    if (a > z) [a, z] = [z, a];
+    near = Math.max(near, a);
+    far = Math.min(far, z);
+    if (near > far) return null;
+  }
+  if (Math.abs(dz) < 1e-9) {
+    if (start.z < b.minZ - padding || start.z > b.maxZ + padding) return null;
+  } else {
+    let a = (b.minZ - padding - start.z) / dz,
+      z = (b.maxZ + padding - start.z) / dz;
     if (a > z) [a, z] = [z, a];
     near = Math.max(near, a);
     far = Math.min(far, z);

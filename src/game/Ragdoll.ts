@@ -15,7 +15,8 @@ import { clamp, type Obstacle } from './math';
 
 export interface RagdollSurface {
   height(x: number, z: number): number;
-  obstacles: Obstacle[];
+  /** Broad-phase candidate query, so a body never scans every collider in the arena. */
+  obstaclesNear(x: number, z: number, radius: number): Obstacle[];
 }
 
 const PELVIS = 0,
@@ -307,7 +308,7 @@ export class Ragdoll {
         node.pos.y = floor;
         touching = true;
       }
-      for (const b of surface.obstacles) {
+      for (const b of surface.obstaclesNear(node.pos.x, node.pos.z, r + 0.1)) {
         const bottom = b.bottom ?? -Infinity;
         if (
           node.pos.x < b.minX - r ||

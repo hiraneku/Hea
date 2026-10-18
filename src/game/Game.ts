@@ -8,6 +8,7 @@ import { Controls } from './Controls';
 import { ProjectileSystem, type Projectile } from './ProjectileSystem';
 import { PrismaSystem } from './PrismaSystem';
 import { FallSystem, type FallPhase } from './FallSystem';
+import { MinionSwarm, type MinionHost } from './Minion';
 import { ImpactFrame } from './ImpactFrame';
 import { AudioEngine } from './Audio';
 import { Effects, Ribbon, makeSigil } from './Effects';
@@ -43,6 +44,7 @@ import {
   HitPause,
   PROJECTILES,
   novaCharge,
+  SUMMON,
   FALL,
   fallPressure,
   fallReleaseDamage,
@@ -199,6 +201,8 @@ export class Game {
   private chargeSigil?: THREE.Group;
   /** Prisma: the circles, beams and standing lances, and the hold that raises them. */
   private prisma!: PrismaSystem;
+  private minions!: MinionSwarm;
+  private minionHost!: MinionHost;
   /** Distance walked since the last footfall, metres. */
   private stride = 0;
   /** The articulated silhouette riding the collision box, and whether it has arrived. */
@@ -323,6 +327,45 @@ export class Game {
     this.world = new World(this.scene, this.fx);
     this.fx.setGroundSampler((x, z) => this.world.surfaceHeight(x, z));
     this.boss = new Boss(this.scene, this.fx);
+    this.minions = new MinionSwarm(this.scene);
+    this.minionHost = {
+      playerChest: () => this.player.clone().add(new THREE.Vector3(0, 0.9, 0)),
+      playerVelocity: () => this.velocity.clone().add(this.impulse),
+      shoot: (at, velocity) =>
+        this.spawn(
+          at,
+          velocity,
+          'fire',
+          SUMMON.shotDamage,
+          false,
+          null,
+          SUMMON.shotPower,
+          SUMMON.shotRadius,
+        ),
+      collide: (position, radius) => {
+        for (const b of this.world.obstaclesNear(position.x, position.z, radius + 0.3)) {
+          if (position.y > b.top + radius || position.y < (b.bottom ?? 0) - radius) continue;
+          const resolved = resolveCircle(
+            position.x,
+            position.z,
+            position.y - radius,
+            radius,
+            [b],
+            radius * 2,
+          );
+          position.x = resolved.x;
+          position.z = resolved.z;
+        }
+      },
+      groundHeight: (x, z) =>
+        groundHeight(
+          x,
+          z,
+          this.player.y + 2.5,
+          this.world.obstaclesNear(x, z, 0.3),
+          this.world.surfaceHeight(x, z),
+        ),
+    };
     this.prisma = new PrismaSystem(
       this.scene,
       this.fx,
@@ -382,9 +425,7 @@ export class Game {
     this.ragdollSurface = {
       height: (x, z) => world.surfaceHeight(x, z),
       // Live view: wall damage rebuilds the collider list, so it must not be captured once.
-      get obstacles() {
-        return world.obstacles;
-      },
+      obstaclesNear: (x, z, radius) => world.obstaclesNear(x, z, radius),
     };
     this.shadows = new THREE.InstancedMesh(
       new THREE.PlaneGeometry(1, 1),
@@ -731,11 +772,13 @@ export class Game {
         (o) => o.userData.projectile && !this.projectiles.some((p) => p.mesh === o),
       ).length,
       colliders: this.world.obstacles.length,
+      minions: this.minions.alive,
       lastImpact: this.lastImpact,
     };
   }
   private resetDuel() {
     this.clearProjectiles();
+    this.minions.clear();
     this.fx.clear();
     this.world.reset();
     this.boss.reset();
@@ -1059,6 +1102,8 @@ export class Game {
         this.updateFireGates(dt);
         this.updateWells(dt);
         if (!this.outcome) this.updateProjectiles(dt);
+        if (!this.boss.alive && this.minions.alive > 0) this.minions.clear();
+        else if (!this.outcome) this.minions.update(dt, this.minionHost);
         else this.clearProjectiles();
       }
       if (this.mode !== 'playing') this.showcaseCamera(dt);
@@ -1130,7 +1175,7 @@ export class Game {
       this.player.x,
       this.player.z,
       this.player.y,
-      this.world.obstacles,
+      this.world.obstaclesNear(this.player.x, this.player.z, 0.3),
       this.world.surfaceHeight(this.player.x, this.player.z),
     );
     const grounded = this.player.y <= floor + 0.045;
@@ -1352,12 +1397,14 @@ export class Game {
       let nx = position.x + total.x * sub,
         nz = position.z + total.z * sub;
       const ny = position.y + total.y * sub;
-      const wall = this.world.obstacles.find(
-        (b) =>
-          previousFeet < b.top - 0.06 &&
-          previousFeet + height > (b.bottom ?? 0) + 0.03 &&
-          Math.hypot(nx - clamp(nx, b.minX, b.maxX), nz - clamp(nz, b.minZ, b.maxZ)) < radius,
-      );
+      const wall = this.world
+        .obstaclesNear(nx, nz, radius + 0.35)
+        .find(
+          (b) =>
+            previousFeet < b.top - 0.06 &&
+            previousFeet + height > (b.bottom ?? 0) + 0.03 &&
+            Math.hypot(nx - clamp(nx, b.minX, b.maxX), nz - clamp(nz, b.minZ, b.maxZ)) < radius,
+        );
       if (wall && knocked && Math.hypot(impulse.x, impulse.z) >= DUEL.wallBreakSpeed) {
         const at = new THREE.Vector3(
           clamp(nx, wall.minX, wall.maxX),
@@ -1371,7 +1418,14 @@ export class Game {
           impulse.multiplyScalar(broken ? 0.83 : -0.15);
         }
       }
-      const resolved = resolveCircle(nx, nz, previousFeet, radius, this.world.obstacles, height);
+      const resolved = resolveCircle(
+        nx,
+        nz,
+        previousFeet,
+        radius,
+        this.world.obstaclesNear(nx, nz, radius + 0.35),
+        height,
+      );
       if (Math.abs(nx) > ARENA.halfSize) motor.x = impulse.x = 0;
       if (Math.abs(nz) > ARENA.halfSize) motor.z = impulse.z = 0;
       nx = resolved.x;
@@ -1382,7 +1436,7 @@ export class Game {
         nx,
         nz,
         previousFeet,
-        this.world.obstacles,
+        this.world.obstaclesNear(nx, nz, 0.3),
         this.world.surfaceHeight(nx, nz),
       );
       // A dragged body hugs the ground: on a falling slope it would otherwise lift off in
@@ -1395,14 +1449,16 @@ export class Game {
         let throughRoof = false;
         if (knocked && force >= DUEL.groundBreakSpeed && this.impactGate[actor] <= 0) {
           const at = new THREE.Vector3(nx, floor, nz);
-          const support = this.world.obstacles.find(
-            (b) =>
-              Math.abs(b.top - floor) < 0.1 &&
-              nx >= b.minX - radius &&
-              nx <= b.maxX + radius &&
-              nz >= b.minZ - radius &&
-              nz <= b.maxZ + radius,
-          );
+          const support = this.world
+            .obstaclesNear(nx, nz, radius + 0.35)
+            .find(
+              (b) =>
+                Math.abs(b.top - floor) < 0.1 &&
+                nx >= b.minX - radius &&
+                nx <= b.maxX + radius &&
+                nz >= b.minZ - radius &&
+                nz <= b.maxZ + radius,
+            );
           if (support) this.world.damageWall(support, at, total, 2.8);
           else this.world.crater(at, force);
           this.worldImpact(at, force, support ? 'wall' : 'ground', actor);
@@ -1410,7 +1466,7 @@ export class Game {
             nx,
             nz,
             previousFeet,
-            this.world.obstacles,
+            this.world.obstaclesNear(nx, nz, 0.3),
             this.world.surfaceHeight(nx, nz),
           );
           throughRoof = !!support && floor < contactFloor - 0.4;
@@ -1446,15 +1502,17 @@ export class Game {
         }
       } else {
         // A preserved ceiling above a punched opening still collides when jumping upward.
-        const ceiling = this.world.obstacles.find(
-          (b) =>
-            (b.bottom ?? 0) > previousFeet + height - 0.03 &&
-            ny + height >= (b.bottom ?? 0) &&
-            nx > b.minX - radius &&
-            nx < b.maxX + radius &&
-            nz > b.minZ - radius &&
-            nz < b.maxZ + radius,
-        );
+        const ceiling = this.world
+          .obstaclesNear(nx, nz, radius + 0.35)
+          .find(
+            (b) =>
+              (b.bottom ?? 0) > previousFeet + height - 0.03 &&
+              ny + height >= (b.bottom ?? 0) &&
+              nx > b.minX - radius &&
+              nx < b.maxX + radius &&
+              nz > b.minZ - radius &&
+              nz < b.maxZ + radius,
+          );
         if (ceiling && total.y > 0) {
           position.y = (ceiling.bottom ?? 0) - height;
           motor.y = impulse.y = 0;
@@ -1743,7 +1801,7 @@ export class Game {
         b.position.x,
         b.position.z,
         b.position.y - BOSS.extent,
-        this.world.obstacles,
+        this.world.obstaclesNear(b.position.x, b.position.z, 0.3),
         this.world.surfaceHeight(b.position.x, b.position.z),
       );
       const restY = floor + BOSS.extent;
@@ -1755,7 +1813,8 @@ export class Game {
         } else b.position.y = next;
       } else b.position.y = restY;
       b.group.position.copy(b.position);
-      if (this.fallPhase !== 'idle') b.group.lookAt(this.player.clone().add(UP));
+      // No lookAt here, not even during the descent: the boss keeps the facing it was
+      // caught with (Boss.present honours `pinned`), instead of tracking the player.
       b.group.updateMatrixWorld(true);
       return;
     }
@@ -2053,6 +2112,14 @@ export class Game {
       this.fx.glyph(muzzle, aim, '#ff6a3a', 1.6, 0.5);
       this.fx.burst(muzzle, '#ff8a5a', 30, 4, 0.5, 1);
       if (this.mode !== 'menu') this.audio.cast(2);
+    } else if (attack === 'summon') {
+      // Three lesser shades unfold from the boss and take up the hunt themselves.
+      const spawned = this.minions.summon(this.boss.position.clone());
+      for (const at of spawned) {
+        this.fx.glyph(at, UP.clone(), '#b78cff', 0.9, 0.45);
+        this.fx.burst(at, '#b78cff', 22, 4, 0.5, 0.9);
+      }
+      if (this.mode !== 'menu') this.audio.cast(1);
     } else {
       if (!this.permittedCast('hammer', muzzle, this.boss.lockedTarget)) return;
       const aim = this.boss.lockedTarget.clone().sub(muzzle).normalize();
@@ -2355,7 +2422,7 @@ export class Game {
     radius = 0.02,
   ): TraceHit | null {
     let best: TraceHit | null = null;
-    for (const obstacle of this.world.obstacles) {
+    for (const obstacle of this.world.segmentCandidates(start, end, radius)) {
       const t = segmentBox(start, end, obstacle, radius);
       if (t !== null && (!best || t < best.t)) best = { t, obstacle };
     }
@@ -2374,8 +2441,19 @@ export class Game {
     damage: number,
     homing = false,
     aimOffset: THREE.Vector3 | null = null,
+    power = 1,
+    radiusOverride?: number,
   ) {
-    this.projectileSystem.spawn(at, velocity, kind, damage, homing, aimOffset);
+    this.projectileSystem.spawn(
+      at,
+      velocity,
+      kind,
+      damage,
+      homing,
+      aimOffset,
+      power,
+      radiusOverride,
+    );
     if (kind !== 'player') this.attacksFired[kind]++;
   }
   private updateProjectiles(dt: number) {
@@ -2560,12 +2638,22 @@ export class Game {
               this.perfectDodge(center);
             }
           } else {
-            this.damagePlayer(p.damage, p.velocity, p.kind, !covered);
+            this.damagePlayer(p.damage, p.velocity, p.kind, !covered, p.power);
             this.fx.burst(p.mesh.position, '#ff9a62', 18, 3.5, 0.36);
             this.removeProjectile(i);
             if (this.hitPause.remaining > 0) break;
             continue;
           }
+        }
+      }
+      if (p.kind === 'player' && this.minions.alive > 0) {
+        const minionHit = this.minions.hitTest(p.last, p.mesh.position, p.radius);
+        if (minionHit && (!worldHit || minionHit.t < worldHit.t)) {
+          const at = p.last.clone().lerp(p.mesh.position, minionHit.t),
+            died = this.minions.damage(minionHit.member, p.damage);
+          this.fx.burst(at, '#b78cff', died ? 34 : 12, died ? 5.5 : 3, 0.42, died ? 1 : 0.6);
+          this.removeProjectile(i);
+          continue;
         }
       }
       if (worldHit) {
@@ -2707,7 +2795,7 @@ export class Game {
             b.position.x,
             b.position.z,
             b.position.y - BOSS.extent,
-            this.world.obstacles,
+            this.world.obstaclesNear(b.position.x, b.position.z, 0.3),
             this.world.surfaceHeight(b.position.x, b.position.z),
           );
         this.fallHeight = Math.max(0, b.position.y - (floor + BOSS.extent));

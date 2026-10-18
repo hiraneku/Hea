@@ -14,8 +14,10 @@ import { PROJECTILES, projectileOf, type AttackId } from './combat';
 
 /** How far short of the target (m) a projectile may meet the ground and still count as a hit. */
 const GROUND_MISS = { fire: 0.8, missile: 1, hammer: 3.2, vortex: 3.2, player: 0 } as const;
+/** Broad-phase cell size for the collider grid: near the width of a voxel column run. */
+const OBSTACLE_CELL = 4;
 import { DestructibleVolume, TerrainDeformation, type Cell } from './destruction';
-import { seededRandom, firstSolidSpan, type Obstacle } from './math';
+import { seededRandom, firstSolidSpan, type Obstacle, type Point3 } from './math';
 import { gridCell, warpAxis } from './terrainGrid';
 import { concreteSurface, stoneSurface, triplanarMaterial } from './materials';
 
@@ -88,6 +90,14 @@ export function contactShadowTexture(): THREE.CanvasTexture {
 
 export class World {
   obstacles: Obstacle[] = [];
+  /**
+   * Uniform XZ broad-phase over `obstacles`. Destruction can grow the collider list from
+   * dozens to many hundreds mid-duel; without this, every projectile substep, body resolve
+   * and ground probe scanned the whole list every tick, so a long round got slower the more
+   * of the city had been smashed (a fresh duel always felt fine). Rebuilt with the colliders.
+   */
+  private obstacleCells = new Map<number, Obstacle[]>();
+  private obstacleQueryMark = 0;
   readonly sun: THREE.DirectionalLight;
   readonly terrain = new TerrainDeformation();
   private buildings: {
@@ -439,6 +449,7 @@ export class World {
     this.contactShadows.frustumCulled = false;
     scene.add(this.contactShadows);
     this.updateContactShadows();
+    this.buildObstacleGrid();
   }
   /**
    * A parapet on every monolith and a floor band on every other one: two instanced draws of thin
@@ -644,9 +655,59 @@ export class World {
       ...this.fixedObstacles,
       ...this.buildings.flatMap((b) => b.volume.colliders()),
     ];
+    this.buildObstacleGrid();
     this.updateIntactBatches();
     this.updateContactShadows();
     this.wallLabel.visible = !this.buildings[this.labelBuilding].volume.damaged;
+  }
+  /** (Re)register every collider in the XZ broad-phase grid (4 m cells). */
+  private buildObstacleGrid() {
+    this.obstacleCells.clear();
+    for (const o of this.obstacles) {
+      const x0 = Math.floor(o.minX / OBSTACLE_CELL),
+        x1 = Math.floor(o.maxX / OBSTACLE_CELL),
+        z0 = Math.floor(o.minZ / OBSTACLE_CELL),
+        z1 = Math.floor(o.maxZ / OBSTACLE_CELL);
+      for (let cx = x0; cx <= x1; cx++)
+        for (let cz = z0; cz <= z1; cz++) {
+          const key = (cx + 64) * 256 + (cz + 64),
+            list = this.obstacleCells.get(key);
+          if (list) list.push(o);
+          else this.obstacleCells.set(key, [o]);
+        }
+    }
+  }
+  /** Every collider whose footprint comes within `radius` of (x, z). Small, exact candidate set. */
+  obstaclesNear(x: number, z: number, radius: number): Obstacle[] {
+    return this.obstaclesInRect(x - radius, z - radius, x + radius, z + radius);
+  }
+  /** Every collider whose footprint overlaps the segment's XZ bounds, widened by `padding`. */
+  segmentCandidates(start: Point3, end: Point3, padding: number): Obstacle[] {
+    return this.obstaclesInRect(
+      Math.min(start.x, end.x) - padding,
+      Math.min(start.z, end.z) - padding,
+      Math.max(start.x, end.x) + padding,
+      Math.max(start.z, end.z) + padding,
+    );
+  }
+  private obstaclesInRect(minX: number, minZ: number, maxX: number, maxZ: number): Obstacle[] {
+    const mark = ++this.obstacleQueryMark,
+      out: Obstacle[] = [],
+      x0 = Math.floor(minX / OBSTACLE_CELL),
+      x1 = Math.floor(maxX / OBSTACLE_CELL),
+      z0 = Math.floor(minZ / OBSTACLE_CELL),
+      z1 = Math.floor(maxZ / OBSTACLE_CELL);
+    for (let cx = x0; cx <= x1; cx++)
+      for (let cz = z0; cz <= z1; cz++) {
+        const list = this.obstacleCells.get((cx + 64) * 256 + (cz + 64));
+        if (!list) continue;
+        for (const o of list)
+          if (o.gridMark !== mark) {
+            o.gridMark = mark;
+            out.push(o);
+          }
+      }
+    return out;
   }
   get wallBounds() {
     return this.buildings.map((b) => ({ ...b.volume.bounds }));
@@ -667,7 +728,7 @@ export class World {
     const t = this.traceGround(from, end, radius);
     if (t !== null && (1 - t) * reach > GROUND_MISS[kind])
       return { mode: 'blocked', walls: [], thickness: Infinity };
-    return assessFiringLane(from, target, attack, this.obstacles);
+    return assessFiringLane(from, target, attack, this.segmentCandidates(from, end, radius));
   }
   pierceThin(
     obstacle: Obstacle,

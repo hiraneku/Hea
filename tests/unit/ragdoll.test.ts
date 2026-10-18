@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MeshStandardMaterial, Quaternion, Scene, Vector3 } from 'three';
 import { RAGDOLL_CENTER, Ragdoll } from '../../src/game/Ragdoll';
 
-const flat = { height: () => 0, obstacles: [] };
+const flat = { height: () => 0, obstaclesNear: () => [] };
 const facing = new Quaternion();
 
 function thrown(spin = new Vector3(0, 0, 9)) {

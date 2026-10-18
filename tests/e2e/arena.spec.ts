@@ -2095,6 +2095,51 @@ test('fall: held gravity slams the boss down, holds it, and bursts on release', 
   expect(snap.boss.health).toBeLessThan(healthAtSlam);
 });
 
+test('fall: the pinned boss does not turn to track the player', async ({ page }, info) => {
+  test.skip(info.project.name !== 'desktop', 'held casting is driven by mouse on desktop');
+  await load(page);
+  await scenario(page, 'flight');
+  await step(page, 0.5);
+  await page.keyboard.press('4');
+  const box = await page.locator('#arena').boundingBox();
+  await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+  await page.mouse.down();
+  await step(page, 1.4); // build, slam, press: the boss is flat under the weight
+  expect((await state(page)).fall.phase).toBe('press');
+  await step(page, 0.9); // let the face-down tilt finish settling before taking the bearing
+  const orientation = () =>
+    page.evaluate(() => window.__HEA_DEBUG__.diagnostics().ragdoll.bossOrientation);
+  const before = await orientation();
+  // The hunter reappears a quarter-turn away; a tracking boss would swing to face them.
+  const boss = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().bossPosition);
+  await page.evaluate(
+    (boss) => window.__HEA_DEBUG__.harness!.place([boss[0] + 18, boss[1] + 5, boss[2]], boss),
+    boss,
+  );
+  await step(page, 1.2);
+  const after = await orientation();
+  const dot = Math.min(1, Math.abs(before.reduce((sum, v, i) => sum + v * after[i], 0)));
+  expect(2 * Math.acos(dot)).toBeLessThan(0.15); // frozen: tracking would swing ~1.57 rad
+  await page.mouse.up();
+});
+
+test('summon: the boss calls three shades that hunt and spit straight fire', async ({
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'boss casts are driven through the desktop harness');
+  await load(page);
+  await scenario(page, 'flight');
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.place([0, 6, 18], [0, 8, 2]));
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.castBoss('summon'));
+  expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().minions)).toBe(3);
+  await step(page, 8);
+  const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(d.minions).toBe(3);
+  // The boss itself never fired (it stands idle in this scenario): every fire shot counted
+  // came out of a shade.
+  expect(d.attacksFired.fire).toBeGreaterThanOrEqual(3);
+});
+
 test('grimoire: spells can be rearranged across the four slots and lose their BARU badge', async ({
   page,
 }) => {

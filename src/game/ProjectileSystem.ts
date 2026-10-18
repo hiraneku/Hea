@@ -12,6 +12,8 @@ export interface Projectile {
   life: number;
   age: number;
   damage: number;
+  /** Knockback scale on a player hit: lesser spits shove less than the boss's own fire. */
+  power: number;
   homing: boolean;
   radius: number;
   origin: THREE.Vector3;
@@ -105,6 +107,8 @@ export class ProjectileSystem {
     damage: number,
     homing = false,
     aimOffset: THREE.Vector3 | null = null,
+    power = 1,
+    radiusOverride?: number,
   ): Projectile {
     if (this.list.length >= MAX_LIVE) this.remove(0);
     const mesh = new THREE.Mesh(
@@ -115,7 +119,7 @@ export class ProjectileSystem {
     // Marked as a shot's body while it is one, so a stray left in the scene can be counted
     // rather than noticed by eye (see `diagnostics().strayShots`).
     mesh.userData.projectile = true;
-    const radius = PROJECTILES[kind].radius;
+    const radius = radiusOverride ?? PROJECTILES[kind].radius;
     mesh.scale.setScalar(radius / 0.17);
     if (kind === 'fire') {
       const core = new THREE.Mesh(this.fireGeometry, this.fireCore);
@@ -146,6 +150,7 @@ export class ProjectileSystem {
       last: at.clone(),
       kind,
       damage,
+      power,
       homing,
       life: PROJECTILES[kind].range / PROJECTILES[kind].speed,
       radius,

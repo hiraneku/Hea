@@ -5,8 +5,10 @@ import {
   AutoShield,
   BossDirector,
   DUEL,
+  projectileOf,
   rangeCorrection,
   steerMissile,
+  SUMMON,
   threatTime,
   ATTACK_ORDER,
   PROJECTILES,
@@ -116,7 +118,7 @@ describe('one boss, deliberate attack patterns', () => {
       .filter((c) => c.type === 'shot');
     expect(shots).toHaveLength(1);
     expect(shots[0].attack).toBe('vortex');
-    expect(ATTACK_ORDER).toEqual(['fire', 'missiles', 'hammer', 'vortex']);
+    expect(ATTACK_ORDER).toEqual(['fire', 'missiles', 'hammer', 'vortex', 'summon']);
     expect(PROJECTILES.vortex.speed).toBeLessThan(PROJECTILES.fire.speed);
     expect(DUEL.vortexPull).toBeGreaterThan(1);
     expect(DUEL.vortexCoreRadius).toBeLessThan(DUEL.vortexRadius);
@@ -131,6 +133,35 @@ describe('one boss, deliberate attack patterns', () => {
     expect(b.attack).toBe('fire');
     expect(b.stage).toBe('telegraph');
     expect(b.elapsed).toBe(0);
+  });
+  it('closes the rotation by calling three lesser shades', () => {
+    const d = new BossDirector();
+    const cycle =
+      ATTACKS.fire.tell +
+      1 +
+      ATTACKS.fire.duration +
+      ATTACKS.fire.recovery +
+      ATTACKS.missiles.tell +
+      ATTACKS.missiles.duration +
+      ATTACKS.missiles.recovery +
+      ATTACKS.hammer.tell +
+      ATTACKS.hammer.duration +
+      ATTACKS.hammer.recovery +
+      ATTACKS.vortex.tell +
+      ATTACKS.vortex.duration +
+      ATTACKS.vortex.recovery;
+    d.step(cycle + 1.01);
+    expect(d.attack).toBe('summon');
+    const shots = d
+      .step(ATTACKS.summon.tell + ATTACKS.summon.duration)
+      .filter((c) => c.type === 'shot');
+    expect(shots).toHaveLength(1);
+    expect(shots[0].attack).toBe('summon');
+    // The shades spit the fire school: straight shots, no seeker kind of their own.
+    expect(projectileOf('summon')).toBe('fire');
+    expect(SUMMON.count).toBe(3);
+    expect(SUMMON.shotSpeed).toBeLessThan(PROJECTILES.fire.speed);
+    expect(SUMMON.shotDamage).toBeLessThan(9);
   });
   it('telegraphs before attacking and maintains a ranged standoff', () => {
     const d = new BossDirector();

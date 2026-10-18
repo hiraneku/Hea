@@ -190,7 +190,7 @@ export const FALL = {
   /** Seconds after release that the boss still rises and moves as if weighted. */
   lingerTime: 2.4,
   /** Radius of the cracked, sinking ground at first impact, growing with pressure. */
-  crackRadius: { start: 7, full: 11 },
+  crackRadius: { start: 16, full: 25 },
   cooldown: 0,
 } as const;
 
@@ -298,8 +298,8 @@ export function threatTime(
   return fraction === null ? null : fraction * horizon;
 }
 
-export type AttackId = 'fire' | 'missiles' | 'hammer' | 'vortex';
-export const ATTACK_ORDER: readonly AttackId[] = ['fire', 'missiles', 'hammer', 'vortex'];
+export type AttackId = 'fire' | 'missiles' | 'hammer' | 'vortex' | 'summon';
+export const ATTACK_ORDER: readonly AttackId[] = ['fire', 'missiles', 'hammer', 'vortex', 'summon'];
 export type AttackStage = 'telegraph' | 'attack' | 'recover';
 export const ATTACKS = {
   fire: {
@@ -343,6 +343,45 @@ export const ATTACKS = {
     shots: 1,
     interval: 0.1,
   },
+  /**
+   * The boss calls three lesser shades to its side. They are quick, darting things that
+   * spit small straight fireballs — like the boss's own fire, but with no homing in them
+   * and half the bite, so weaving beats them where the boss's salvo would track.
+   */
+  summon: {
+    label: 'TIGA BAYANG',
+    warning: 'BAYANGAN DIPANGGIL',
+    tell: 1.3,
+    duration: 0.6,
+    recovery: 1.4,
+    shots: 1,
+    interval: 0.1,
+  },
+} as const;
+
+/** SUMMON — the lesser shades the boss calls with the `summon` pattern. */
+export const SUMMON = {
+  /** How many shades answer one call; a fresh call only tops the swarm back up. */
+  count: 3,
+  health: 26,
+  /** Collision radius of one shade, metres. */
+  radius: 0.55,
+  /** Their spit: straight fireballs, slower and weaker than the boss's own fire. */
+  shotSpeed: 24,
+  shotDamage: 6,
+  /** Smaller body than the boss's bolts, and a fraction of their shove on a hit. */
+  shotRadius: 0.22,
+  shotPower: 0.2,
+  /** Seconds between one shade's shots (randomised per shade in this band). */
+  shotInterval: { min: 2.1, max: 3.2 },
+  /** Orbit band around the player, metres. */
+  orbitRadius: { min: 7.5, max: 11 },
+  /** Tangential drift speed while circling, metres per second. */
+  strafeSpeed: 7.5,
+  /** Burst speed of a repositioning dash, metres per second. */
+  dashSpeed: 17,
+  /** Seconds between dashes (randomised per shade in this band). */
+  dashInterval: { min: 1.5, max: 2.7 },
 } as const;
 export interface AttackCommand {
   type: 'tell' | 'shot';
@@ -478,7 +517,7 @@ export type ProjectileKind = 'player' | 'fire' | 'missile' | 'hammer' | 'vortex'
 export function projectileOf(attack: AttackId): Exclude<ProjectileKind, 'player'> {
   return attack === 'missiles'
     ? 'missile'
-    : attack === 'fire'
+    : attack === 'fire' || attack === 'summon'
       ? 'fire'
       : attack === 'vortex'
         ? 'vortex'

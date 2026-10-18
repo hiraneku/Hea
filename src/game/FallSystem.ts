@@ -93,23 +93,23 @@ export class FallSystem {
         depthWrite: false,
       });
     this.shaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(7.6, 9.4, 19, 32, 1, true),
+      new THREE.CylinderGeometry(17, 21, 24, 32, 1, true),
       shaftMaterial(0),
     );
-    this.shaft.position.y = 9.5;
+    this.shaft.position.y = 12;
     this.innerShaft = new THREE.Mesh(
-      new THREE.CylinderGeometry(2.5, 2.9, 13, 24, 1, true),
+      new THREE.CylinderGeometry(5.6, 6.5, 16, 24, 1, true),
       shaftMaterial(0),
     );
-    this.innerShaft.position.y = 6.5;
+    this.innerShaft.position.y = 8;
     // The void the weight falls from: a dark disc with a lit rim, hanging over the column.
     this.voidDisc = new THREE.Group();
     const voidCore = new THREE.Mesh(
-      new THREE.CircleGeometry(3.1, 36),
+      new THREE.CircleGeometry(7, 36),
       new THREE.MeshBasicMaterial({ color: '#07040f', transparent: true, opacity: 0 }),
     );
     const voidRim = new THREE.Mesh(
-      new THREE.RingGeometry(3.1, 3.55, 36),
+      new THREE.RingGeometry(7, 7.9, 36),
       new THREE.MeshBasicMaterial({
         color: '#c9a6ff',
         transparent: true,
@@ -121,7 +121,7 @@ export class FallSystem {
     );
     voidCore.rotation.x = voidRim.rotation.x = -Math.PI / 2;
     this.voidDisc.add(voidCore, voidRim);
-    this.voidDisc.position.y = 13.8;
+    this.voidDisc.position.y = 19;
     // The cap: a flattened dark mass with a lit rim that rides just over the boss and
     // bears down a little further with every crush pulse — the weight made visible.
     this.cap = new THREE.Group();
@@ -166,7 +166,7 @@ export class FallSystem {
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.y = 0.12;
       mesh.visible = false;
-      this.rings.push({ mesh, age: 0, life: 0.7, speed: 16, strength: 1 });
+      this.rings.push({ mesh, age: 0, life: 0.7, speed: 34, strength: 1 });
       this.group.add(mesh);
     }
     this.group.add(this.shaft, this.innerShaft, this.voidDisc, this.cap, this.light);
@@ -180,7 +180,7 @@ export class FallSystem {
     const positions = new Float32Array(count * 6);
     for (let i = 0; i < count; i++) {
       const angle = random() * Math.PI * 2,
-        radius = Math.sqrt(random()) * 8.5;
+        radius = Math.sqrt(random()) * 19;
       this.lineData.push({
         x: Math.cos(angle) * radius,
         z: Math.sin(angle) * radius,
@@ -210,7 +210,7 @@ export class FallSystem {
     const positions = new Float32Array(count * 3);
     for (let i = 0; i < count; i++) {
       const angle = random() * Math.PI * 2,
-        radius = Math.sqrt(random()) * 8;
+        radius = Math.sqrt(random()) * 18;
       this.moteData.push({
         x: Math.cos(angle) * radius,
         z: Math.sin(angle) * radius,
@@ -312,7 +312,7 @@ export class FallSystem {
     this.stones.frustumCulled = false;
     for (let i = 0; i < count; i++) {
       const angle = random() * Math.PI * 2,
-        radius = 1.5 + Math.sqrt(random()) * 9;
+        radius = 3 + Math.sqrt(random()) * 20;
       this.stoneData.push({
         x: Math.cos(angle) * radius,
         z: Math.sin(angle) * radius,
@@ -393,7 +393,7 @@ export class FallSystem {
     for (let i = 0; i < this.moteData.length; i++) {
       const mote = this.moteData[i];
       mote.y -= mote.speed * (phase === 'press' ? 1.6 : 3.5) * dt;
-      if (mote.y < 0) mote.y += 14;
+      if (mote.y < 0) mote.y += 20;
       moteArray[i * 3 + 1] = mote.y;
     }
     moteAttribute.needsUpdate = true;

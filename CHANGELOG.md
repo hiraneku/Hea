@@ -7,6 +7,41 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-10-18
+
+### Ditambahkan — Skill boss baru: TIGA BAYANG
+
+- Boss kini punya pola kelima, **summon**: memanggil **3 musuh kecil (shade)** yang
+  terbang lincah mengitari pemain, berpindah sudut dengan dash cepat, dan meludahkan
+  **fireball kecil lurus** — seperti fireball boss, tapi **tanpa homing** dan jauh lebih
+  lemah (kecepatan 24 vs 36, damage 6). Shade bisa dibunuh (26 HP); panggilan berikutnya
+  hanya melengkapi yang kurang. Mereka tetap bertarung selagi boss tertekan Fall.
+
+### Diubah — Zona gravitasi Fall sangat besar
+
+- Retakan tanah kini menyebar **16–25 m** (dari 7–11 m); kolom luar, kolom dalam,
+  cakram kekosongan, mote, garis jatuh, batu melayang, dan cincin benturan diskalakan
+  mengikuti — zona Fall kini menelan sepotong besar arena.
+
+### Diperbaiki — Boss masih menoleh mengikuti pemain selama Fall
+
+- Penyebabnya bukan di `Boss.present` (yang sudah menghormati `pinned`), melainkan blok
+  pin di `Game.updateBoss` yang tetap memanggil `group.lookAt(player)` tiap langkah
+  simulasi, lalu dikejar quaternion presentasi. lookAt itu dihapus dan `facingQ` kini
+  tidak diperbarui sama sekali selagi pinned; terbukti beku secara empiris (orientasi
+  berubah < 0,15 rad setelah pemain berteleport 90°) dan kini dijaga tes e2e permanen.
+
+### Diperbaiki — FPS runtuh setelah lama dalam satu round
+
+- Akar masalah: setiap langkah simulasi memindai **seluruh** daftar collider untuk tiap
+  proyektil, resolusi tubuh, dan probe tanah. Kehancuran kota menumbuhkan collider dari
+  ~44 menjadi ratusan, jadi biaya per langkah naik ~3,4× seiring round berjalan (restart
+  duel mengosongkannya lagi — karena itu selalu sembuh). Kini ada **broad-phase grid
+  spasial** (sel 4 m) di `World`: trace, `resolveCircle`, `groundHeight`, ragdoll, dan
+  firing lane hanya menguji kandidat di sekitar kueri; `segmentBox` juga bebas alokasi.
+  Dalam duel sibuk yang sama, biaya langkah pada 590 collider turun dari ~2200 ms menjadi
+  ~430–640 ms per 30 detik simulasi — setara duel yang masih segar.
+
 ### Diubah — Fall disetel ulang dari uji langsung (lanjutan)
 
 - Efek gravitasi kini **menyala saat boss menghantam tanah**, bukan selama ia masih di

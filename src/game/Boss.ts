@@ -275,12 +275,14 @@ export class Boss {
     this.group.position.copy(this.position);
     // Face the target through a smoothed turn (not a per-frame snap), lean into the motion
     // like something that actually flies, and breathe up and down a little while hovering.
-    // Pinned under FALL it does none of that: the facing stays where the slam left it.
+    // Pinned under FALL it does none of that: the facing stays where the slam left it,
+    // and facingQ is not even updated — chasing the group quaternion here would feed
+    // the game's face-down tilt back into the base facing and compound it.
     if (!this.pinned) this.group.lookAt(target);
-    if (!this.facingSet || this.tumble.physical || dt > 0.5) {
+    if (!this.pinned && (!this.facingSet || this.tumble.physical || dt > 0.5)) {
       this.facingQ.copy(this.group.quaternion);
       this.facingSet = true;
-    } else this.facingQ.slerp(this.group.quaternion, 1 - Math.exp(-dt * 7));
+    } else if (!this.pinned) this.facingQ.slerp(this.group.quaternion, 1 - Math.exp(-dt * 7));
     const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(this.facingQ),
       right = new THREE.Vector3(-1, 0, 0).applyQuaternion(this.facingQ);
     const lean = hoverLean(this.velocity, forward, right, BOSS_MOTOR.max),
