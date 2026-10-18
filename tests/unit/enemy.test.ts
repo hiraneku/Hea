@@ -36,7 +36,8 @@ describe('the lesser constructs (boss-kin enemies)', () => {
       const ring = Math.hypot(g.position.x, g.position.z - 20);
       expect(ring).toBeGreaterThan(4);
       expect(ring).toBeLessThan(15);
-      expect(g.position.y).toBeGreaterThan(0.6);
+      // A flying kind: it hunts at its quarry's altitude, not along the ground.
+      expect(g.position.y).toBeGreaterThan(1.5);
     });
   });
 
@@ -62,7 +63,7 @@ describe('the lesser constructs (boss-kin enemies)', () => {
     guard.beginHold(0);
     for (let t = 0; t < 2; t += 1 / 60) guard.update(1 / 60, host);
     expect(guard.held).toBe(true);
-    expect(guard.position.y).toBeCloseTo(0.42, 1);
+    expect(guard.position.y).toBeCloseTo(ENEMY.radius * 0.78, 1);
     expect(shots).toHaveLength(0); // pinned things do not spit
     guard.endHold();
     for (let t = 0; t < ENEMY.holdStagger - 0.05; t += 1 / 60) guard.update(1 / 60, host);

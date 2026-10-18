@@ -54,9 +54,10 @@ export const PRISMA = {
   beamRadius: 0.085,
   /**
    * How far off its own line a beam still breaks enemy fire: a lance of light is a defensive
-   * tool, so its corridor is generous rather than a razor's width.
+   * tool, so its corridor is generous rather than a razor's width — wide enough that a rake
+   * of bolts from the boss's (grown) gate ring still flies into it.
    */
-  sweep: 2.4,
+  sweep: 3.0,
   /**
    * Where on the ring the dice prefer to land. The ring stands square to the view, so its own
    * "right" is the screen's right: the flanks (angle 0, or π on the other side) put a circle
@@ -213,7 +214,7 @@ export function fallReleaseDamage(pressure: number): number {
 }
 
 export const DUEL = {
-  bossHealth: 1440,
+  bossHealth: 2400,
   preferredRange: 21,
   nearRange: 15,
   farRange: 27,
@@ -373,9 +374,10 @@ export const SUMMON = {
  * takes them exactly as it takes their master.
  */
 export const ENEMY = {
-  health: 26,
+  /** Sturdy enough to need a few real hits: three Bara bolts, or a Nova and a finisher. */
+  health: 90,
   /** Collision radius of one construct, metres. */
-  radius: 0.55,
+  radius: 0.72,
   /** Their spit: straight fireballs, slower and weaker than the boss's own fire. */
   shotSpeed: 24,
   shotDamage: 6,

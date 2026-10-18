@@ -23,10 +23,10 @@ export const HEIGHT_SCALE = 1.3;
  * drop from its centre to the lowest point when upright, and the lowest hover altitude.
  */
 export const BOSS = {
-  scale: 1.45,
-  radius: 1.48 * 1.45,
-  extent: 2.05 * 1.45,
-  hover: 2.05 * 1.45 + 0.7,
+  scale: 1.75,
+  radius: 1.48 * 1.75,
+  extent: 2.05 * 1.75,
+  hover: 2.05 * 1.75 + 0.7,
 } as const;
 /**
  * Flight tuned against the first reference clip: a brisk 21 m/s cruise that answers the stick

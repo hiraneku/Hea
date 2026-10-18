@@ -7,6 +7,24 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+## [0.24.0] — 2026-10-18
+
+### Diubah — Skala & daya tahan dari uji langsung
+
+- **Boss lebih besar** (skala 1,45 → 1,75; radius, extent, dan hover mengikuti) dan
+  **musuh kecil lebih besar** (skala 1,35, radius 0,55 → 0,72). Golden `boss-cast`
+  diperbarui untuk ukuran barunya.
+- **Darah boss diperbanyak**: 1440 → 2400, duel berlangsung lebih lama.
+- **Musuh kecil tidak lagi sekali kena mati**: darah 26 → 90 — tiga baut Bara, enam
+  beam Prisma, atau satu Nova plus satu pukulan penutup. Fall tetap memusnahkan
+  mereka, tapi kini perlu ditahan ±4 detik.
+- **Musuh kecil benar-benar terbang**, seperti boss-nya: mereka kini menempati
+  ketinggian targetnya di udara dan naik-turun mengikuti pemain yang terbang,
+  bukan merayap 2 meter di atas tanah mengikuti puncak tembok (yang terbaca
+  seperti berjalan/memanjat). Lantai & langit-langit arena tetap membatasi.
+- Koridor sapuan tombak cahaya Prisma dilebarkan (2,4 → 3,0) agar rentetan baut
+  dari ring gerbang boss yang kini lebih besar tetap tersapu bersih.
+
 ## [0.23.0] — 2026-10-18
 
 ### Diubah — Musuh kecil menjadi tipe musuh baru, serumpun dengan boss

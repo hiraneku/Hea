@@ -2152,8 +2152,8 @@ export class Game {
           b = this.enemies[j].position,
           apart = a.clone().sub(b),
           d = apart.length();
-        if (d > 0.001 && d < 1.7) {
-          apart.normalize().multiplyScalar((1.7 - d) * 0.5);
+        if (d > 0.001 && d < 2.2) {
+          apart.normalize().multiplyScalar((2.2 - d) * 0.5);
           a.add(apart);
           b.sub(apart);
         }

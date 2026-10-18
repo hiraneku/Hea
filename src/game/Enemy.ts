@@ -128,6 +128,7 @@ export class Enemy {
       this.group.add(shard);
     }
     this.group.add(this.body, this.ember, this.sigil);
+    this.group.scale.setScalar(1.35);
     this.group.position.copy(at);
     this.angle = this.random() * Math.PI * 2;
     this.orbitRadius =
@@ -163,7 +164,7 @@ export class Enemy {
   /** FALL takes hold: remember the ground it is about to be pressed into. */
   beginHold(groundY: number) {
     this.held = true;
-    this.holdY = groundY + 0.42;
+    this.holdY = groundY + ENEMY.radius * 0.78;
     this.velocity.set(0, 0, 0);
   }
 
@@ -218,17 +219,18 @@ export class Enemy {
     );
     anchor.x = clamp(anchor.x, -ARENA.halfSize + 3, ARENA.halfSize - 3);
     anchor.z = clamp(anchor.z, -ARENA.halfSize + 3, ARENA.halfSize - 3);
-    anchor.y =
-      host.groundHeight(anchor.x, anchor.z) +
-      2.3 +
-      Math.sin(this.elapsed * 1.8 + this.hoverPhase) * 0.55;
+    // A flying kind, like its master: it holds station beside its quarry in the air and
+    // rises and falls with them, instead of hugging the ground far below the fight — or
+    // dragging itself up a wall face because the ground under its anchor was a rooftop.
+    anchor.y = chest.y + 1.1 + Math.sin(this.elapsed * 1.8 + this.hoverPhase) * 0.6;
     anchor.sub(this.position).multiplyScalar(3.2);
     this.velocity.lerp(anchor, 1 - Math.exp(-dt * 2.6));
     if (this.velocity.length() > ENEMY.dashSpeed) this.velocity.setLength(ENEMY.dashSpeed);
     this.position.addScaledVector(this.velocity, dt);
     host.collide(this.position, ENEMY.radius);
-    const floor = host.groundHeight(this.position.x, this.position.z) + 0.7;
+    const floor = host.groundHeight(this.position.x, this.position.z) + 1.1;
     if (this.position.y < floor) this.position.y = floor;
+    if (this.position.y > ARENA.ceiling - 1.2) this.position.y = ARENA.ceiling - 1.2;
     // Face the quarry like its master does, hovering with a slow breath.
     this.scratch.set(chest.x, this.position.y + (chest.y - this.position.y) * 0.25, chest.z);
     this.group.lookAt(this.scratch);

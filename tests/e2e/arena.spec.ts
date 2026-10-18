@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test';
 import { CAMERA_RANGES, SPELLS, type Snapshot } from '../../src/game/types';
 import type { Game } from '../../src/game/Game';
 import { ATTACKS, DUEL, NOVA_CHARGE, PRISMA, ringDistance } from '../../src/game/combat';
-import { ARENA, FLIGHT } from '../../src/game/config';
+import { ARENA, BOSS, FLIGHT } from '../../src/game/config';
 import { beside } from '../../src/game/layout';
 
 declare global {
@@ -2068,7 +2068,7 @@ test('fall: held gravity slams the boss down, holds it, and bursts on release', 
       window.__HEA_DEBUG__.diagnostics().bossPosition[2],
     ),
   );
-  expect(bossY - groundY).toBeLessThan(3.4); // pinned at rest height, not hovering
+  expect(bossY - groundY).toBeLessThan(BOSS.extent + 0.6); // pinned at rest height
   // And it does not get to face its hunter: under the weight its face tips to the ground.
   const [qx, qy, qz, qw] = await page.evaluate(
     () => window.__HEA_DEBUG__.diagnostics().ragdoll.bossOrientation,
@@ -2090,7 +2090,7 @@ test('fall: held gravity slams the boss down, holds it, and bursts on release', 
   await step(page, 0.5);
   // Nor does the boss spring straight back up: it stays down a while under the weight's wake.
   const proneY = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().bossPosition[1]);
-  expect(proneY - groundY).toBeLessThan(3.4);
+  expect(proneY - groundY).toBeLessThan(BOSS.extent + 0.6);
   await step(page, 0.3);
   snap = await state(page);
   expect(snap.fall.phase).toBe('idle');
@@ -2158,8 +2158,8 @@ test('summon: FALL takes the constructs too, not just their master', async ({ pa
   await page.mouse.down();
   await step(page, 1.3); // the word stands alone, then the slam lands on everyone
   expect((await state(page)).fall.phase).toBe('press');
-  // The slam plus the crush pulses: 26-health constructs do not survive a held FALL.
-  await step(page, 2.2);
+  // The slam plus the crush pulses: even 90-health constructs do not survive a held FALL.
+  await step(page, 4.2);
   expect(await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().enemies)).toBe(0);
   await page.mouse.up();
 });
