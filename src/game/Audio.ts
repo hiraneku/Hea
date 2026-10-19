@@ -9,6 +9,27 @@ export interface SoundPoint {
 }
 
 type Actor = 'player' | 'boss';
+
+/**
+ * Recorded garnish over the procedural bank: a hand-picked handful of Kenney's CC0 packs
+ * (see public/sfx/LICENSE.txt), fetched lazily after the first gesture and decoded once.
+ * Every cue below layers its sample *under* the synth voice it already had — if a file is
+ * missing, still loading, or the codec refuses it, the synth simply plays alone.
+ */
+export const SAMPLE_FILES = {
+  'prisma-beam': 'prisma-beam.ogg',
+  'prisma-lance': 'prisma-lance.ogg',
+  'prisma-rise': 'prisma-rise.ogg',
+  'prisma-shatter': 'prisma-shatter.ogg',
+  'nova-ready': 'nova-ready.ogg',
+  'nova-blast': 'nova-blast.ogg',
+  'nova-blast-charged': 'nova-blast-charged.ogg',
+  'sub-boom': 'sub-boom.ogg',
+  'fall-punch': 'fall-punch.ogg',
+  'fall-field': 'fall-field.ogg',
+  'fall-field-lock': 'fall-field-lock.ogg',
+} as const;
+export type SampleName = keyof typeof SAMPLE_FILES;
 interface ScrapeLoop {
   source: AudioBufferSourceNode;
   band: BiquadFilterNode;
@@ -45,6 +66,8 @@ export class AudioEngine {
     fed: number;
   };
   private recent = new Map<string, number[]>();
+  private sampleBank = new Map<SampleName, AudioBuffer>();
+  private samplesStarted = false;
   constructor(settings: Settings) {
     this.settings = settings;
   }
@@ -93,6 +116,7 @@ export class AudioEngine {
         for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
       }
       this.apply(this.settings);
+      void this.loadSamples();
       void this.context.resume().catch(() => {});
     } catch {
       /* WebAudio is optional. */
@@ -195,6 +219,54 @@ export class AudioEngine {
     times.push(now);
     this.recent.set(key, times);
     return 1 / (1 + (times.length - 1) * 0.35);
+  }
+
+  /** Fetch and decode the sample bank once; every failure is silent by design. */
+  private async loadSamples() {
+    if (this.samplesStarted || !this.context) return;
+    this.samplesStarted = true;
+    const ctx = this.context,
+      base = `${import.meta.env.BASE_URL}sfx/`;
+    await Promise.all(
+      (Object.entries(SAMPLE_FILES) as [SampleName, string][]).map(async ([key, file]) => {
+        try {
+          const response = await fetch(`${base}${file}`);
+          if (!response.ok) return;
+          this.sampleBank.set(key, await ctx.decodeAudioData(await response.arrayBuffer()));
+        } catch {
+          /* Samples are garnish: the procedural bank carries the cue alone. */
+        }
+      }),
+    );
+  }
+
+  /**
+   * One recorded sample through the same placement as every synth cue — HRTF panner when
+   * positioned, a share into the room, and a few cents of rate jitter so repeats of the
+   * same beam do not sound stamped out of a mould.
+   */
+  private sample(
+    name: SampleName,
+    volume: number,
+    opts?: { at?: SoundPoint; send?: number; rate?: number },
+  ) {
+    if (!this.live || volume <= 0) return;
+    const buffer = this.sampleBank.get(name);
+    if (!buffer) return;
+    const ctx = this.context!,
+      source = ctx.createBufferSource(),
+      gain = ctx.createGain(),
+      output = this.place(opts?.at, opts?.send ?? 0.3);
+    source.buffer = buffer;
+    source.playbackRate.value = (opts?.rate ?? 1) * (0.96 + Math.random() * 0.08);
+    gain.gain.value = volume;
+    source.connect(gain);
+    gain.connect(output);
+    source.start();
+    source.onended = () => {
+      source.disconnect();
+      gain.disconnect();
+    };
   }
 
   private tone(
@@ -380,11 +452,13 @@ export class AudioEngine {
     this.tone(140, 38, 0.5, 0.4, 'sine');
     this.tone(2400, 900, 0.09, 0.2, 'square');
     this.air(0.4, 1400, 0.3);
+    this.sample('nova-blast-charged', 0.5);
   }
   /** The tick that marks a Nova hold reaching full charge. */
   chargeReady() {
     this.tone(1320, 1760, 0.08, 0.16, 'sine');
     this.tone(2640, 2640, 0.05, 0.06, 'triangle', 0.03);
+    this.sample('nova-ready', 0.28);
   }
   cast(spell: number) {
     if (spell === 0) {
@@ -396,11 +470,14 @@ export class AudioEngine {
       this.tone(1600, 120, 0.28, 0.25, 'sine');
       this.tone(850, 240, 0.2, 0.15, 'triangle');
       this.air(0.16, 7500, 0.18);
+      this.sample('prisma-rise', 0.3);
     }
     if (spell === 2) {
       this.tone(60, 28, 0.75, 0.5);
       this.tone(420, 80, 0.5, 0.2, 'triangle');
       this.air(0.6, 3500, 0.4);
+      this.sample('nova-blast', 0.45);
+      this.sample('sub-boom', 0.4);
     }
   }
   /** FALL gathering: a descending pressure that rises in pitch as the column locks on. */
@@ -409,6 +486,7 @@ export class AudioEngine {
     this.tone(90, 220, 0.32, 0.2, 'sine', 0, place);
     this.tone(45, 70, 0.32, 0.22, 'sine', 0, place);
     this.air(0.3, 900, 0.1, place);
+    this.sample('fall-field-lock', 0.3, place);
   }
   /** The slam: a sub-bass drop with a stone crack on top, placed where the boss landed. */
   fallSlam(at?: SoundPoint) {
@@ -417,12 +495,18 @@ export class AudioEngine {
     this.tone(52, 24, 0.8, 0.4, 'sine', 0.02, place);
     this.air(0.4, 1600, 0.4, place);
     this.tone(300, 90, 0.16, 0.2, 'triangle', 0.01, place);
+    this.sample('sub-boom', 0.55, place);
+    this.sample('fall-punch', 0.45, place);
   }
   /** One crush pulse under the held weight; it tightens as the stored pressure grows. */
   fallCrush(pressure: number, at?: SoundPoint) {
     const place = { at, send: SEND.impact };
     this.tone(55 + pressure * 30, 30, 0.22, 0.22 + pressure * 0.16, 'sine', 0, place);
     this.air(0.14, 700 + pressure * 500, 0.14, place);
+    // The field itself hums under the weight: retriggered at most twice a second, so the
+    // pulses stitch into one held pressure instead of a stutter.
+    const duck = this.crowd('fallfield', 0.45);
+    if (duck > 0) this.sample('fall-field', (0.13 + pressure * 0.17) * duck, place);
     if (pressure > 0.97) this.tone(1560, 1560, 0.07, 0.07, 'sine', 0, place);
   }
   /** The release: the weight lifts — a full one rings, a forced one falls flat. */
@@ -463,9 +547,11 @@ export class AudioEngine {
       this.tone(1180, 260, 0.34, 0.2, 'sine', 0, place);
       this.air(0.5, 5200, 0.34, place);
       this.tone(64, 30, 0.7, 0.3, 'sine', 0.02, place);
+      this.sample('prisma-lance', 0.5, place);
     } else {
       this.tone(980, 180, 0.22, 0.24, 'sine', 0, place);
       this.air(0.24, 6400, 0.2, place);
+      this.sample('prisma-beam', 0.34, place);
     }
   }
 
@@ -524,6 +610,7 @@ export class AudioEngine {
     this.tone(1900, 240, 0.28, 0.22, 'triangle');
     this.tone(2600, 900, 0.14, 0.1);
     this.air(0.22, 3200, 0.3);
+    this.sample('prisma-shatter', 0.42);
   }
   damage(at?: SoundPoint) {
     const place = { at, send: SEND.impact };

@@ -7,6 +7,21 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+## [0.26.0] — 2026-10-19
+
+### Ditambahkan — Lapisan sampel audio CC0 untuk Prisma, Nova, dan Fall
+
+- **Sebelas sampel rekaman** dari pack CC0 karya Kenney (Digital Audio, Sci-Fi
+  Sounds, Impact Sounds; teks lisensi & pemetaan file di `public/sfx/LICENSE.txt`)
+  kini melapisi bank suara prosedural: laser Prisma & lance besarnya, kaca pecah
+  lingkaran, ledakan Nova biasa & charged, sub-boom bersama, serta punch dan dengung
+  force-field Fall yang menjahit denyut crush menjadi satu tekanan yang tertahan.
+- Sampel dimuat malas setelah gestur pertama, didekode sekali, dan dimainkan lewat
+  rantai yang sama dengan suara sintesis — panner HRTF untuk yang berposisi, kiriman
+  ke reverb arena, dan jitter rate tipis agar pengulangan tidak terdengar dicap.
+  Bila file gagal dimuat, cue sintesis lama tetap berbunyi sendiri: audio eksternal
+  adalah hiasan, bukan ketergantungan.
+
 ## [0.25.0] — 2026-10-19
 
 ### Diubah — Efek Prisma, Nova, dan Fall terasa seperti sihir sungguhan

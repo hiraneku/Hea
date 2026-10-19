@@ -1,0 +1,31 @@
+================================================================================
+SFX samples in this folder — Kenney audio packs, CC0 1.0 Universal (public domain)
+================================================================================
+
+The .ogg files in this folder are a hand-picked subset of three sound packs by
+Kenney (https://kenney.nl), fetched from their GitHub ports:
+
+  - "Digital Audio"      -> github.com/Boyquotes/kenney-digital-audio-for-godot
+  - "Sci-Fi Sounds"      -> github.com/Boyquotes/kenney-sci-fi-sounds-for-godot
+  - "Impact Sounds"      -> github.com/Boyquotes/kenney-impact-sounds-for-godot
+
+Kenney releases these packs under CC0 1.0 Universal: they may be used for any
+purpose, including commercial, with no attribution required. The full CC0 legal
+text ships inside each source repository (file "LICENSE"). Attribution is given
+here voluntarily:
+
+  Sound effects: Kenney (kenney.nl), CC0 1.0 Universal.
+  https://creativecommons.org/publicdomain/zero/1.0/
+
+File mapping (this folder <- original pack file):
+  prisma-beam.ogg          <- Digital Audio   laser_3.ogg
+  prisma-lance.ogg         <- Sci-Fi Sounds   laser_large_000.ogg
+  prisma-rise.ogg          <- Digital Audio   phaser_up_3.ogg
+  prisma-shatter.ogg       <- Impact Sounds   impact_glass_medium_000.ogg
+  nova-ready.ogg           <- Digital Audio   power_up_5.ogg
+  nova-blast.ogg           <- Sci-Fi Sounds   explosion_crunch_002.ogg
+  nova-blast-charged.ogg   <- Sci-Fi Sounds   explosion_crunch_004.ogg
+  sub-boom.ogg             <- Sci-Fi Sounds   low_frequency_explosion_000.ogg
+  fall-punch.ogg           <- Impact Sounds   impact_punch_heavy_000.ogg
+  fall-field.ogg           <- Sci-Fi Sounds   force_field_001.ogg
+  fall-field-lock.ogg      <- Sci-Fi Sounds   force_field_003.ogg
