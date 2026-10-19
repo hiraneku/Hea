@@ -7,6 +7,26 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+## [0.25.0] — 2026-10-19
+
+### Diubah — Efek Prisma, Nova, dan Fall terasa seperti sihir sungguhan
+
+- **Dunia kini bereaksi terhadap cahaya sihir**: pool `PointLight` daur ulang
+  (`flashLight`) menyalakan arena sesaat di ujung beam Prisma, di big lance, dan di
+  detonasi Nova — sebelumnya tak satu pun efek punya cahaya dinamis.
+- **Prisma**: partikel energi tersedot berkumpul ke lingkaran saat ia terangkat
+  (`implode`), dan setiap beam kini menutup dengan gelombang kejut kecil + kilat
+  cahaya di titik kena; big lance menambah cangkang energi fresnel yang mengembang.
+- **Nova**: selama ditahan, mote udara mengalir tersedot ke sigil di tangan; saat
+  diledakkan, detonasi kini punya cangkang gelombang kejut, pilar cahaya yang
+  menembak ke langit, dan **bekas kawah bercahaya** di tanah yang mendingin
+  perlahan (putih → biru → padam).
+- **Fall**: kolom gravitasi tak lagi bertekstur gambar datar — shader khusus
+  menuangkan aliran energi ungu ke bawah dengan pita-pita jatuh; **petir ungu**
+  merayap di sekeliling boss selama tekanan ditahan; setiap hempasan dan denyut
+  crush mengembangkan **kubah tekanan** fresnel; batu-batu yang terangkat perlahan
+  mengorbit terseret mengelilingi kolom.
+
 ## [0.24.0] — 2026-10-18
 
 ### Diubah — Skala & daya tahan dari uji langsung

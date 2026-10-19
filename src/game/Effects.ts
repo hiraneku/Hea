@@ -560,6 +560,7 @@ export class Effects {
   private sparks: Particle[] = [];
   private rocks: Debris[] = [];
   private timed: TimedEffect[] = [];
+  private lightPool: { light: THREE.PointLight; life: number; max: number; power: number }[] = [];
   private shieldSerial = 0;
   get shieldEchoes() {
     return this.timed
@@ -1667,6 +1668,157 @@ export class Effects {
     (this.sparkMesh.material as THREE.ShaderMaterial).uniforms.screenScale.value =
       height * pixelRatio * 0.75;
   }
+  /** A pooled point light that flares and dies — the world finally *reacts* to spells. */
+  flashLight(
+    at: THREE.Vector3,
+    tint: THREE.ColorRepresentation,
+    power: number,
+    distance = 18,
+    life = 0.45,
+  ) {
+    let slot = this.lightPool.find((s) => s.life <= 0);
+    if (!slot) {
+      if (this.lightPool.length >= 3) slot = this.lightPool[0];
+      else {
+        const light = new THREE.PointLight(new THREE.Color(tint), 0, distance, 1.9);
+        this.scene.add(light);
+        slot = { light, life: 0, max: 1, power: 0 };
+        this.lightPool.push(slot);
+      }
+    }
+    slot.light.color.set(tint);
+    slot.light.position.copy(at);
+    slot.light.distance = distance;
+    slot.power = power * (this.baseDensity < 1 ? 0.55 : 1);
+    slot.life = slot.max = life;
+  }
+  private updateLights(dt: number) {
+    for (const s of this.lightPool) {
+      if (s.life <= 0) {
+        s.light.intensity = 0;
+        continue;
+      }
+      s.life -= dt;
+      const left = Math.max(0, s.life / s.max);
+      s.light.intensity = s.power * left * left;
+    }
+  }
+  /** Sparks born on a shell that rush inward — charge-ups and prism firings visibly gather power. */
+  implode(
+    at: THREE.Vector3,
+    tint: THREE.ColorRepresentation,
+    count = 16,
+    radius = 1.2,
+    speed = 4,
+    size = 0.32,
+  ) {
+    const color = new THREE.Color(tint);
+    const n = this.emit(count);
+    for (let i = 0; i < n; i++) {
+      const p = this.sparks[this.cursor++ % this.particleBudget];
+      const dir = new THREE.Vector3(
+        Math.random() * 2 - 1,
+        Math.random() * 2 - 1,
+        Math.random() * 2 - 1,
+      );
+      if (dir.lengthSq() < 0.01) dir.set(1, 0, 0);
+      dir.normalize();
+      p.p.copy(at).addScaledVector(dir, radius * (0.7 + Math.random() * 0.5));
+      p.v.copy(dir).multiplyScalar(-speed * (0.75 + Math.random() * 0.5));
+      p.color.copy(color);
+      p.life = p.max = radius / speed + 0.08;
+      p.size = size * (0.5 + Math.random());
+      p.gravity = 0;
+    }
+  }
+  /** A fresnel energy bubble that swells and thins — real magic displaces the air. */
+  energyShell(at: THREE.Vector3, tint: THREE.ColorRepresentation, radius: number, life = 0.55) {
+    const color = new THREE.Color(tint);
+    const material = new THREE.ShaderMaterial({
+      uniforms: { uColor: { value: color }, uFade: { value: 1 } },
+      vertexShader:
+        'varying vec3 vN; varying vec3 vV; void main(){ vec4 mv = modelViewMatrix * vec4(position,1.0); vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz); gl_Position = projectionMatrix * mv; }',
+      fragmentShader:
+        'uniform vec3 uColor; uniform float uFade; varying vec3 vN; varying vec3 vV;' +
+        'void main(){ float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 3.2);' +
+        ' vec3 c = uColor * (f * 1.9 + 0.03) + vec3(1.0) * f * f * 0.6;' +
+        ' gl_FragColor = vec4(c, (f * 1.25 + 0.02) * uFade); }',
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 20), material);
+    mesh.position.copy(at);
+    mesh.scale.setScalar(0.12);
+    this.add(mesh, life);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e, progress) => {
+      const out = 1 - Math.pow(1 - progress, 3);
+      e.object.scale.setScalar(Math.max(0.12, radius * out));
+      material.uniforms.uFade.value = Math.pow(1 - progress, 1.9);
+    };
+  }
+  /** A pillar of light that punches up from a detonation point and burns out. */
+  pillar(
+    at: THREE.Vector3,
+    tint: THREE.ColorRepresentation,
+    radius: number,
+    height: number,
+    life = 0.7,
+  ) {
+    const geometry = new THREE.CylinderGeometry(0.55, 0.9, 1, 20, 1, true);
+    geometry.translate(0, 0.5, 0);
+    const material = new THREE.MeshBasicMaterial({
+      color: new THREE.Color(tint).multiplyScalar(1.7),
+      transparent: true,
+      opacity: 0.5,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.copy(at);
+    mesh.scale.set(0.4, 0.1, 0.4);
+    this.add(mesh, life);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e, progress) => {
+      const grow = 1 - Math.pow(1 - Math.min(1, progress * 2.2), 3);
+      e.object.scale.set(
+        radius * (0.4 + grow * 0.75),
+        Math.max(0.1, height * grow),
+        radius * (0.4 + grow * 0.75),
+      );
+      ((e.object as THREE.Mesh).material as THREE.MeshBasicMaterial).opacity =
+        0.5 * Math.pow(1 - progress, 1.5);
+    };
+  }
+  /** A patch of ground that stays hot after a big hit, cooling white → tint → dark. */
+  craterGlow(at: THREE.Vector3, radius: number, tint: THREE.ColorRepresentation, life = 2.6) {
+    const color = new THREE.Color(tint);
+    const material = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.CircleGeometry(1, 36), material);
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.copy(at);
+    mesh.position.y = Math.max(at.y, this.groundAt(at.x, at.z)) + 0.07;
+    mesh.scale.setScalar(radius * 0.4);
+    this.add(mesh, life);
+    const effect = this.timed[this.timed.length - 1];
+    const white = new THREE.Color('#ffffff');
+    effect.animate = (e, progress) => {
+      e.object.scale.setScalar(radius * (0.4 + 0.6 * (1 - Math.pow(1 - progress, 2))));
+      material.color
+        .copy(white)
+        .lerp(color, Math.min(1, progress * 2.4))
+        .multiplyScalar(2.0 * Math.pow(1 - progress, 1.15));
+      material.opacity = 0.85 * (1 - progress * progress);
+    };
+  }
   burst(
     at: THREE.Vector3,
     tint: THREE.ColorRepresentation,
@@ -2333,6 +2485,7 @@ export class Effects {
   }
   update(dt: number) {
     this.time += dt;
+    this.updateLights(dt);
     this.furrows.update(dt);
     this.scorches.update(this.time);
     const attracting = this.attractors.length > 0;

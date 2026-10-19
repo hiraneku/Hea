@@ -12,32 +12,6 @@ interface Ring {
   strength: number;
 }
 
-/** A streaked, flowing energy texture for the column shafts (drawn, never loaded). */
-function shaftTexture(): THREE.CanvasTexture {
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 256;
-  const ctx = canvas.getContext('2d')!;
-  const random = seededRandom(5150);
-  ctx.clearRect(0, 0, 128, 256);
-  for (let i = 0; i < 46; i++) {
-    const x = random() * 128,
-      y = random() * 256,
-      length = 30 + random() * 90,
-      width = 1 + random() * 2.4;
-    const gradient = ctx.createLinearGradient(0, y, 0, y + length);
-    gradient.addColorStop(0, 'rgba(255,255,255,0)');
-    gradient.addColorStop(0.5, `rgba(255,255,255,${0.25 + random() * 0.5})`);
-    gradient.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(x, y, width, length);
-  }
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 2);
-  return texture;
-}
-
 /**
  * The visible half of FALL, dressed in layers: a dark void hanging at the top of the
  * column, two flowing energy shafts (a vast outer one and a dense inner one wrapped
@@ -55,8 +29,14 @@ export class FallSystem {
   private motes!: THREE.Points;
   private moteData: { x: number; z: number; y: number; speed: number }[] = [];
   private shaft!: THREE.Mesh;
-  private shaftTexture = shaftTexture();
   private innerShaft!: THREE.Mesh;
+  private arcs!: THREE.LineSegments;
+  private arcPositions!: Float32Array;
+  private arcSegments = 22;
+  private arcTimer = 0;
+  private dome!: THREE.Mesh;
+  private domeT = 1;
+  private domePower = 1;
   private voidDisc!: THREE.Group;
   private cap!: THREE.Group;
   private rings: Ring[] = [];
@@ -82,26 +62,87 @@ export class FallSystem {
     this.buildMotes(reducedEffects ? 70 : 170);
     this.buildCrack();
     this.buildStones(reducedEffects ? 18 : 34);
-    const shaftMaterial = (opacity: number) =>
-      new THREE.MeshBasicMaterial({
-        map: this.shaftTexture,
-        color: '#9a6cff',
+    // The column is no longer a painted texture: a shader pours streams of violet energy
+    // downward, brighter where the surface faces you, banded like falling weather.
+    const shaftMaterial = (flow: number, density: number) =>
+      new THREE.ShaderMaterial({
+        uniforms: {
+          uIntensity: { value: 0 },
+          uTime: { value: 0 },
+          uFlow: { value: flow },
+          uDensity: { value: density },
+        },
+        vertexShader:
+          'varying vec2 vUv; varying vec3 vN; varying vec3 vV;' +
+          'void main(){ vUv = uv; vec4 mv = modelViewMatrix * vec4(position, 1.0);' +
+          ' vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);' +
+          ' gl_Position = projectionMatrix * mv; }',
+        fragmentShader:
+          'uniform float uIntensity; uniform float uTime; uniform float uFlow; uniform float uDensity;' +
+          'varying vec2 vUv; varying vec3 vN; varying vec3 vV;' +
+          'void main(){ float facing = abs(dot(normalize(vN), normalize(vV)));' +
+          ' float streams = 0.55 + 0.45 * sin(vUv.x * 6.28318 * uDensity + sin(vUv.y * 3.0 + uTime * 0.7) * 1.2);' +
+          ' float fallP = fract(vUv.y * 2.0 + uTime * uFlow);' +
+          ' float bands = smoothstep(0.0, 0.35, fallP) * smoothstep(1.0, 0.55, fallP);' +
+          ' float energy = (0.32 + streams * 0.38 + bands * 0.9) * pow(facing, 1.35);' +
+          ' vec3 c = mix(vec3(0.34, 0.16, 0.85), vec3(0.86, 0.72, 1.0), bands) * energy * 1.15;' +
+          ' float ends = smoothstep(1.0, 0.72, vUv.y) * smoothstep(0.0, 0.16, vUv.y);' +
+          ' gl_FragColor = vec4(c, energy * uIntensity * ends); }',
         transparent: true,
-        opacity,
         blending: THREE.AdditiveBlending,
         side: THREE.DoubleSide,
         depthWrite: false,
       });
     this.shaft = new THREE.Mesh(
       new THREE.CylinderGeometry(17, 21, 24, 32, 1, true),
-      shaftMaterial(0),
+      shaftMaterial(0.55, 7),
     );
     this.shaft.position.y = 12;
     this.innerShaft = new THREE.Mesh(
       new THREE.CylinderGeometry(5.6, 6.5, 16, 24, 1, true),
-      shaftMaterial(0),
+      shaftMaterial(1.15, 11),
     );
     this.innerShaft.position.y = 8;
+    // Violet lightning crawls down the column while the weight holds — regenerated in
+    // jagged chains a few times a second, never the same shape twice.
+    this.arcSegments = reducedEffects ? 10 : 22;
+    this.arcPositions = new Float32Array(this.arcSegments * 3 * 2 * 3);
+    const arcGeometry = new THREE.BufferGeometry();
+    arcGeometry.setAttribute('position', new THREE.BufferAttribute(this.arcPositions, 3));
+    this.arcs = new THREE.LineSegments(
+      arcGeometry,
+      new THREE.LineBasicMaterial({
+        color: '#dcc6ff',
+        transparent: true,
+        opacity: 0,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      }),
+    );
+    this.arcs.frustumCulled = false;
+    // The impact dome: a hemisphere of compressed gravity that swells at every slam and pulse.
+    this.dome = new THREE.Mesh(
+      new THREE.SphereGeometry(1, 28, 14, 0, Math.PI * 2, 0, Math.PI / 2),
+      new THREE.ShaderMaterial({
+        uniforms: { uFade: { value: 0 } },
+        vertexShader:
+          'varying vec3 vN; varying vec3 vV;' +
+          'void main(){ vec4 mv = modelViewMatrix * vec4(position, 1.0);' +
+          ' vN = normalize(normalMatrix * normal); vV = normalize(-mv.xyz);' +
+          ' gl_Position = projectionMatrix * mv; }',
+        fragmentShader:
+          'uniform float uFade; varying vec3 vN; varying vec3 vV;' +
+          'void main(){ float f = pow(1.0 - abs(dot(normalize(vN), normalize(vV))), 1.8);' +
+          ' vec3 c = vec3(0.62, 0.45, 1.0) * (f * 1.5 + 0.05) + vec3(0.9) * f * f;' +
+          ' gl_FragColor = vec4(c, (f * 0.95 + 0.03) * uFade); }',
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+      }),
+    );
+    this.dome.visible = false;
+    this.dome.position.y = 0.05;
     // The void the weight falls from: a dark disc with a lit rim, hanging over the column.
     this.voidDisc = new THREE.Group();
     const voidCore = new THREE.Mesh(
@@ -169,7 +210,15 @@ export class FallSystem {
       this.rings.push({ mesh, age: 0, life: 0.7, speed: 34, strength: 1 });
       this.group.add(mesh);
     }
-    this.group.add(this.shaft, this.innerShaft, this.voidDisc, this.cap, this.light);
+    this.group.add(
+      this.shaft,
+      this.innerShaft,
+      this.arcs,
+      this.dome,
+      this.voidDisc,
+      this.cap,
+      this.light,
+    );
     this.light.position.y = 3;
     this.group.visible = false;
     scene.add(this.group);
@@ -349,6 +398,8 @@ export class FallSystem {
     ring.speed = 13 + strength * 9;
     ring.strength = strength;
     ring.mesh.visible = true;
+    this.domeT = 0;
+    this.domePower = strength;
   }
 
   /** The hold ends: everything settles and fades where it lies. */
@@ -370,7 +421,6 @@ export class FallSystem {
     this.group.visible = this.fade > 0.01;
     if (!this.group.visible) return;
     this.pulse = Math.max(0, this.pulse - dt * 3);
-    this.shaftTexture.offset.y -= dt * 1.5;
     const speedScale = phase === 'slam' ? 7 : 1;
     const lineAttribute = this.lines.geometry.getAttribute('position') as THREE.BufferAttribute;
     const lineArray = lineAttribute.array as Float32Array;
@@ -398,10 +448,12 @@ export class FallSystem {
     }
     moteAttribute.needsUpdate = true;
     (this.motes.material as THREE.PointsMaterial).opacity = this.fade * (0.35 + pressure * 0.35);
-    (this.shaft.material as THREE.MeshBasicMaterial).opacity =
-      this.fade * (0.1 + pressure * 0.09 + this.pulse * 0.04);
-    (this.innerShaft.material as THREE.MeshBasicMaterial).opacity =
-      this.fade * (0.13 + pressure * 0.13 + this.pulse * 0.06);
+    const shaftUniforms = (this.shaft.material as THREE.ShaderMaterial).uniforms;
+    shaftUniforms.uTime.value = this.time;
+    shaftUniforms.uIntensity.value = this.fade * (0.1 + pressure * 0.1 + this.pulse * 0.05);
+    const innerUniforms = (this.innerShaft.material as THREE.ShaderMaterial).uniforms;
+    innerUniforms.uTime.value = this.time;
+    innerUniforms.uIntensity.value = this.fade * (0.17 + pressure * 0.19 + this.pulse * 0.09);
     this.light.intensity = this.fade * (40 + pressure * 110 + this.pulse * 40);
     // The void hangs and slowly turns over the column; the cap bears down on the boss.
     this.voidDisc.rotation.y += dt * 0.4;
@@ -414,6 +466,49 @@ export class FallSystem {
     (capMass.material as THREE.MeshStandardMaterial).opacity = this.fade * 0.94;
     const capRim = this.cap.children[1] as THREE.Mesh;
     (capRim.material as THREE.MeshBasicMaterial).opacity = this.fade * (0.6 + this.pulse * 0.3);
+    // Lightning: while the weight presses, chains of violet arcs crawl down around the
+    // boss, re-struck several times a second; the dome swells at every impact and pulse.
+    const arcsLive = (phase === 'press' || phase === 'slam') && this.fade > 0.05;
+    (this.arcs.material as THREE.LineBasicMaterial).opacity = arcsLive
+      ? this.fade * (0.3 + pressure * 0.45)
+      : 0;
+    this.arcTimer -= dt;
+    if (arcsLive && this.arcTimer <= 0) {
+      this.arcTimer = 0.07;
+      let cursor = 0;
+      for (let a = 0; a < this.arcSegments; a++) {
+        const angle = Math.random() * Math.PI * 2,
+          radius = 0.8 + Math.random() * 2.8;
+        let px = Math.cos(angle) * radius,
+          pz = Math.sin(angle) * radius,
+          py = 5.5 + Math.random() * 5;
+        const stepsDown = 3;
+        for (let s = 0; s < stepsDown; s++) {
+          const ny = py - (5.5 / stepsDown) * (0.7 + Math.random() * 0.6),
+            nx = px + (Math.random() - 0.5) * 0.8,
+            nz = pz + (Math.random() - 0.5) * 0.8;
+          this.arcPositions[cursor++] = px;
+          this.arcPositions[cursor++] = py;
+          this.arcPositions[cursor++] = pz;
+          this.arcPositions[cursor++] = nx;
+          this.arcPositions[cursor++] = Math.max(0.25, ny);
+          this.arcPositions[cursor++] = nz;
+          px = nx;
+          pz = nz;
+          py = ny;
+        }
+      }
+      (this.arcs.geometry.getAttribute('position') as THREE.BufferAttribute).needsUpdate = true;
+    }
+    if (this.domeT < 1) {
+      this.domeT = Math.min(1, this.domeT + dt / 0.55);
+      const p = this.domeT,
+        out = 1 - Math.pow(1 - p, 3);
+      this.dome.visible = true;
+      this.dome.scale.setScalar(Math.max(0.2, (2.5 + this.domePower * 6.5) * out));
+      ((this.dome.material as THREE.ShaderMaterial).uniforms.uFade as { value: number }).value =
+        Math.pow(1 - p, 1.3) * Math.min(1, this.fade + 0.35);
+    } else this.dome.visible = false;
     for (const ring of this.rings) {
       if (!ring.mesh.visible) continue;
       ring.age += dt;
@@ -445,6 +540,15 @@ export class FallSystem {
     );
     for (let i = 0; i < this.stoneData.length; i++) {
       const stone = this.stoneData[i];
+      // Held stones slowly orbit, dragged around the column like debris in a whirlpool.
+      if (phase === 'press') {
+        const spin = dt * (0.3 + pressure * 0.5) * (i % 2 === 0 ? 1 : -1),
+          c = Math.cos(spin),
+          s = Math.sin(spin),
+          nx = stone.x * c - stone.z * s;
+        stone.z = stone.x * s + stone.z * c;
+        stone.x = nx;
+      }
       const ground = this.groundHeight(this.center.x + stone.x, this.center.z + stone.z);
       const trembling = Math.sin(this.time * 31 + stone.seed) * 0.02 * (0.4 + pressure);
       const rimShare = clamp((Math.hypot(stone.x, stone.z) - 3) / 6, 0, 1);

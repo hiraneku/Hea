@@ -213,6 +213,8 @@ export class PrismaSystem {
     group.quaternion.setFromUnitVectors(FORWARD, normal);
     group.scale.setScalar(0.001);
     group.visible = false;
+    // Power visibly gathers into the circle before it speaks.
+    this.fx.implode(position, '#aee6ff', 14, 1.7, 5, 0.3);
     this.scene.add(group);
     this.circles.push({
       group,
@@ -244,6 +246,9 @@ export class PrismaSystem {
     this.fx.prismBeam(c.position, end, PRISMA.beamRadius, PRISMA.beamLife);
     this.fx.burst(end, '#95f5ff', 14, 3, 0.32, 1);
     this.fx.prismShards(end, along.clone().negate(), 0.55, 6);
+    this.fx.shock(end, '#9fe4ff', 2.4);
+    this.fx.flashLight(end, '#aee9ff', 110, 15, 0.4);
+    this.fx.flashLight(c.position, '#7fd4ff', 36, 9, 0.3);
     this.audio.cast(1);
     this.beams++;
     this.audio.beam(false, this.host.player());
@@ -384,6 +389,9 @@ export class PrismaSystem {
     this.fx.prismBeam(b.position, end, PRISMA.big.radius, 0.45, true);
     // The impact: a real blow, wherever it lands — a shock ring, a plume, stinging debris.
     this.fx.impact(end, '#dff9ff', true, 1.5);
+    this.fx.energyShell(end, '#bfefff', 4.2, 0.5);
+    this.fx.flashLight(end, '#cdefff', 260, 24, 0.55);
+    this.fx.flashLight(b.position, '#9fe0ff', 90, 13, 0.4);
     this.fx.shock(end, '#cdf4ff', 15);
     this.fx.debris(end, 26, 9, 1.5, along);
     this.fx.dust(end, 16, 3.2);

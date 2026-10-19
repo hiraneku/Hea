@@ -32,6 +32,9 @@ function makePrisma(traceHit?: TraceHit) {
     impact: vi.fn(),
     shock: vi.fn(),
     debris: vi.fn(),
+    implode: vi.fn(),
+    flashLight: vi.fn(),
+    energyShell: vi.fn(),
   };
   const audio = {
     cast: vi.fn(),

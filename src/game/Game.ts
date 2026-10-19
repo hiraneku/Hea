@@ -2380,6 +2380,8 @@ export class Game {
     sigil.rotateZ(this.time * (1.5 + 7 * charge.progress));
     const pulse = charge.charged ? 1 + 0.07 * Math.sin(this.time * 18) : 1;
     sigil.scale.setScalar(((first ? 0.07 : 0.14) + (first ? 0.24 : 0.5) * charge.progress) * pulse);
+    // The air itself feeds the charge: motes stream into the sigil as it drinks.
+    this.fx.implode(hand, '#cfefff', 2, 0.35 + charge.progress * 0.95, 3.4, 0.26);
     if (charge.charged && !this.novaChimed) {
       this.novaChimed = true;
       this.audio.chargeReady();
@@ -2432,6 +2434,21 @@ export class Game {
       const grow = charge.radius;
       this.fx.impact(end, '#dff9ff', true, grow);
       this.fx.glyph(end, this.camera.position.clone().sub(end), '#dcf9ff', 1.55 * grow, 0.6);
+      // The detonation is a real event: a shell of displaced air, a pillar of spent light,
+      // the room lit for a heartbeat — and the ground keeps the scar, cooling slowly.
+      this.fx.energyShell(end, '#dff6ff', 4.6 * grow, 0.5);
+      this.fx.flashLight(end, '#cdefff', 300 * grow, 26 * grow, 0.6);
+      const groundY = this.world.surfaceHeight(end.x, end.z);
+      if (end.y - groundY < 4) {
+        this.fx.pillar(
+          new THREE.Vector3(end.x, groundY, end.z),
+          '#bfe9ff',
+          1.6 * grow,
+          (charge.charged ? 13 : 8) * grow,
+          0.75,
+        );
+        this.fx.craterGlow(new THREE.Vector3(end.x, groundY, end.z), 3.4 * grow, '#79cfff');
+      }
       if (charge.charged) this.fx.burst(end, '#fff1c9', 36, 7, 0.5, 2);
       if (hit?.obstacle)
         this.world.damageWall(
