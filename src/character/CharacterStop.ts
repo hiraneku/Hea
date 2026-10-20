@@ -31,6 +31,7 @@ export function makeCharacterStop(
   walk: THREE.AnimationClip,
   phase: number,
   speed: number,
+  incoming?: { clip: THREE.AnimationClip; time: number; joinPhase: number },
 ): StopPlan {
   const scene = clone(model);
   scene.position.set(0, 0, 0);
@@ -70,25 +71,53 @@ export function makeCharacterStop(
   const probe = clone(scene),
     probeMixer = new THREE.AnimationMixer(probe);
   const probeAction = probeMixer.clipAction(walk).play();
-  const samples: THREE.Vector3[] = [];
-  for (const offset of [-0.002, 0.002]) {
-    probeAction.time = (phase * walk.duration + offset + walk.duration) % walk.duration;
+  const incomingAction = incoming ? probeMixer.clipAction(incoming.clip).play() : undefined;
+  if (incomingAction) probeAction.setEffectiveWeight(0);
+  const sampleContinuation = (elapsed: number) => {
+    if (incoming && incomingAction && incoming.time + elapsed < incoming.clip.duration) {
+      incomingAction.setEffectiveWeight(1);
+      probeAction.setEffectiveWeight(0);
+      incomingAction.time = THREE.MathUtils.clamp(
+        incoming.time + elapsed,
+        0,
+        incoming.clip.duration,
+      );
+    } else {
+      incomingAction?.setEffectiveWeight(0);
+      probeAction.setEffectiveWeight(1);
+      const time = incoming
+        ? incoming.joinPhase * walk.duration + incoming.time + elapsed - incoming.clip.duration
+        : phase * walk.duration + elapsed;
+      probeAction.time = ((time % walk.duration) + walk.duration) % walk.duration;
+    }
     probeMixer.update(0);
     probe.updateMatrixWorld(true);
+  };
+  const samples: THREE.Vector3[] = [];
+  for (const offset of [-0.002, 0.002]) {
+    sampleContinuation(offset);
     samples.push(probe.getObjectByName(lead + 'Foot')!.getWorldPosition(new THREE.Vector3()));
   }
   const leadPhase = (phase + (lead === 'Right' ? 0.5 : 0)) % 1;
-  if (leadPhase > data.walkStance) {
+  if (incoming || leadPhase > data.walkStance) {
     start[lead].velocity.copy(samples[1]).sub(samples[0]).divideScalar(0.004);
-    start[lead].velocity.z += speed;
+    if (!incoming) start[lead].velocity.z += speed;
     start[lead].velocity.clampLength(0, 2.5);
   }
-  probeMixer.stopAllAction();
-  probeMixer.uncacheRoot(probe);
+  sampleContinuation(0);
+  const releasePose = new Map(
+    [...bones.keys()].map((name) => [
+      name,
+      {
+        q: probe.getObjectByName(name)!.quaternion.clone(),
+        p: probe.getObjectByName(name)!.position.clone(),
+      },
+    ]),
+  );
   const t1 = THREE.MathUtils.clamp((1 - leadPhase) * walk.duration, 0.18, 0.56);
-  const transfer = 0.08,
-    t2 = 0.42,
-    settle = 0.22;
+  const transfer = 0.04,
+    t2 = walk.duration * 0.43,
+    settle = 0.2;
   const followStart = t1 + transfer,
     secondContact = followStart + t2,
     duration = secondContact + settle;
@@ -148,14 +177,22 @@ export function makeCharacterStop(
       bone.position.copy(rest.get(name)!.p);
       bone.quaternion.copy(rest.get(name)!.q);
     }
-    const relax = smooth(time / duration);
+    const u = time / duration;
+    const cadenceElapsed = duration * (u - u * u * u + 0.5 * u * u * u * u);
+    sampleContinuation(cadenceElapsed);
+    const relax = smooth((time - 0.06) / (duration - 0.06));
     for (const [name, bone] of bones) {
       if (/Thigh|Shin|Foot|Toes|ToeEnd/.test(name)) continue;
       const neutral = new THREE.Quaternion();
       if (name.endsWith('UpperArm'))
         neutral.setFromEuler(new THREE.Euler(-0.015, 0, name.startsWith('Left') ? -0.04 : 0.04));
       if (name.endsWith('ForeArm')) neutral.setFromEuler(new THREE.Euler(-0.1, 0, 0));
-      bone.quaternion.slerp(neutral, relax);
+      // Keep the walking counter-swing and torso cadence alive before damping
+      // them out. Capture correction handles partially blended/interrupted starts.
+      const sampled = probe.getObjectByName(name)!.quaternion.clone();
+      const correction = releasePose.get(name)!.q.clone().invert().multiply(rest.get(name)!.q);
+      correction.slerp(new THREE.Quaternion(), smooth(time / 0.2));
+      bone.quaternion.copy(sampled.multiply(correction)).slerp(neutral, relax);
     }
     if (time <= t1) {
       root.position.z = hermite(0, rootAtContact, incomingSpeed, contactSpeed, time / t1, t1);
@@ -177,6 +214,9 @@ export function makeCharacterStop(
       time < t1
         ? THREE.MathUtils.lerp(hipStart.y, contactY, smooth(time / t1))
         : THREE.MathUtils.lerp(contactY, standingY, smooth((time - t1) / (duration - t1)));
+    const hipWave = probe.getObjectByName('Hips')!.position.clone().sub(releasePose.get('Hips')!.p);
+    hips.position.x += hipWave.x * (1 - relax);
+    hips.position.y += hipWave.y * (1 - smooth(time / 0.24));
     hips.position.z = THREE.MathUtils.lerp(hipStart.z, anatomy.pelvis[2], relax);
     if (frame > 0)
       for (const side of sides) {
@@ -205,7 +245,7 @@ export function makeCharacterStop(
               ending - beginning,
             );
           } else ankle.lerp(targets[side], eased);
-          const lift = (side === lead ? 0.065 : 0.1) * Math.sin(Math.PI * u) ** 3;
+          const lift = (side === lead ? 0.045 : 0.085) * Math.sin(Math.PI * u) ** 3;
           ankle.y = Math.max(ankle.y, floorY(side, q)) + lift;
         }
         solveLeg(side, ankle, bones, scene);
@@ -239,6 +279,8 @@ export function makeCharacterStop(
       values.set(key, array);
     }
   }
+  probeMixer.stopAllAction();
+  probeMixer.uncacheRoot(probe);
   return {
     lead,
     firstContact: t1,

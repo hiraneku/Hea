@@ -242,13 +242,14 @@ bersama rig oleh pipeline glTF. Tidak ada logika berhenti khusus renderer previe
 `CharacterPlayback.setMode('bind')` tetap nama API legacy untuk permintaan stop.
 `setMode('bind', true)` hanya untuk bind inspection awal/reset. `isStopping`
 menandai transisi; `stopPlan` menyediakan clip dan waktu kontak untuk inspeksi.
-Memulai walk lagi membatalkan stop dengan crossfade 0,24 detik. Jeda inspeksi biasa
+Memulai walk lagi membatalkan stop dari pose yang sedang terlihat dan membake
+langkah awal baru, bukan crossfade ke siklus pada fase acak. Jeda inspeksi biasa
 masih tersedia, tetapi permintaan stop menyelesaikan gerak walau `playing=false`.
 
 Untuk motor dunia: aktifkan `rootMotionEnabled`, panggil `update(dt)`, kemudian
 `consumeRootMotion()` sekali per frame; putar delta lokal mengikuti orientasi tubuh,
 kalikan skala tubuh, dan terapkan pada motor. **Jangan tambahkan translasi Walking
-atau damping velocity saat Stopping**: itu menyeret kaki yang sedang dipin.
+atau damping velocity saat Starting / Stopping**: itu menyeret kaki yang sedang dipin.
 `CharacterTestDrive` menerapkan kontrak ini, termasuk ketika pose akhir ditahan.
 Preview inspeksi juga mengonsumsi motion dan mengikuti posisi dengan kamera.
 
@@ -262,3 +263,40 @@ Batasan: ini stop authoring prosedural untuk **lantai datar**, bukan mocap, coll
 solver atau animasi airborne. Di batas arena yang meng-clamp tubuh, foot-lock tidak
 bisa dijamin jika motion ditolak; controller terrain/halangan perlu replanning.
 Gerak tetap perlu review pengguna. Preview tetap ringkas, detail teknis dalam panel lipat.
+
+## Start dan penyatuan ritme Walking → stop
+
+`CharacterStart.ts` membake clip `Starting` dari pose berdiri/pose stop saat ini:
+transfer berat singkat, satu langkah awal dengan clearance, lalu masuk ke pose
+kontak Walking yang sama persis. Kaki tumpuan berputar pada patch telapak tetap;
+Root bergerak dari kecepatan nol dan menyerahkan kecepatan akhir ke cadence Walking.
+Jika pijakan sudah jauh di belakang ketika start diinterupsi, fase join digeser
+sedikit dalam double support agar tubuh tidak ditarik mundur.
+
+`setMode('walk')` dari diam memakai start ini; `isStarting` dan `startPlan` tersedia
+untuk controller. `seek()` tetap inspeksi Walking langsung dan membatalkan start.
+Start mengikuti pause/speed; stop tetap menuntaskan langkah penutup. Starting dan
+Stopping dibuat runtime, **bukan tambahan clip di GLB v6 unduhan**. File sumber,
+mesh/rig v6, Walking, dan pemain game default tidak diganti.
+
+Stop tidak lagi membekukan torso/lengan lalu menariknya langsung ke netral.
+Helper mengambil kelanjutan Walking dengan cadence yang melambat, mempertahankan
+counter-swing lengan dan gerak pelvis pada awal release, lalu meredakannya. Jeda
+transfer antarlangkah dipersingkat, waktu langkah penutup mengikuti durasi Walking,
+dan tinggi langkah disesuaikan agar terasa sebagai lanjutan jalan yang memendek.
+
+**Kontrak motor:** `rootMotionEnabled=true` dan konsumsi delta tepat sekali saat
+Starting maupun Stopping; jangan tambahkan gerak jalan biasa di frame tersebut.
+Saat start selesai di tengah frame, playback memasukkan sisa waktu frame ke fase
+Walking dan delta root, sehingga motor tidak boleh menghitungnya dua kali. Sesudah
+handoff, gerak biasa mengikuti `playback.speed`, bukan kecepatan input instan.
+`CharacterTestDrive` adalah contoh lengkap. Arah hadap ditetapkan sebelum start dan
+ditahan selama langkah pertama agar pijakan tidak terseret oleh yaw. Ini belum
+turn-in-place/turn-aware IK; perubahan arah diterapkan kembali setelah kontak awal.
+
+Regresi tambahan mengukur first-step clearance, kontak telapak, drift XZ, batas
+perubahan sendi hingga join, pose akhir identik Walking, release/restart cepat,
+kelanjutan counter-swing saat stop, dan leftover frame pada tubuh diskalakan.
+`npm run character:stop-review` kini juga merender tujuh tahap start sampai masuk
+Walking dari depan/samping/tiga-perempat. PNG di cache hanya untuk QA; kelulusan
+teknis tidak menggantikan penilaian gerak oleh pengguna.

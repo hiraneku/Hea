@@ -1,8 +1,9 @@
 import * as THREE from 'three';
+import { makeCharacterStart, type StartPlan } from './CharacterStart';
 import { makeCharacterStop, type StopPlan } from './CharacterStop';
 
-/** DOM-independent mixer controller. Stop tracks are baked from the current
- * phase and pose, then played like an ordinary AnimationClip (no runtime IK).
+/** DOM-independent mixer controller. Start/stop tracks are baked from the current
+ * phase and pose, then played like ordinary AnimationClips (no runtime IK).
  */
 export class CharacterPlayback {
   readonly mixer: THREE.AnimationMixer;
@@ -13,9 +14,17 @@ export class CharacterPlayback {
   private targetWeight = 1;
   private weight = 1;
   private stopAction?: THREE.AnimationAction;
+  private startAction?: THREE.AnimationAction;
+  private launch?: StartPlan;
+  private startTime = 0;
+  get isStarting() {
+    return this.targetWeight === 1 && !!this.launch;
+  }
+  get startPlan() {
+    return this.launch;
+  }
   private plan?: StopPlan;
   private stopTime = 0;
-  private fadeTime = 0;
   private rootCurve?: THREE.LinearInterpolant;
   private readonly root?: THREE.Object3D;
   private readonly previousRoot = new THREE.Vector3();
@@ -31,6 +40,7 @@ export class CharacterPlayback {
     return this.action.getClip().duration;
   }
   get phase() {
+    if (this.isStarting) return this.startTime / this.launch!.clip.duration;
     return this.targetWeight === 0 && this.plan
       ? Math.min(1, this.stopTime / this.plan.clip.duration)
       : this.action.time / this.duration;
@@ -60,12 +70,29 @@ export class CharacterPlayback {
     this.stopAction = undefined;
     this.plan = undefined;
     this.stopTime = 0;
-    this.fadeTime = 0;
+  }
+  private discardStart() {
+    if (this.startAction) {
+      const clip = this.startAction.getClip();
+      this.startAction.stop();
+      this.mixer.uncacheClip(clip);
+    }
+    this.startAction = undefined;
+    this.launch = undefined;
+    this.startTime = 0;
+  }
+  private rootSample(time: number) {
+    if (this.rootMotionEnabled && this.root && this.rootCurve) {
+      const authored = new THREE.Vector3().fromArray(this.rootCurve.evaluate(time));
+      this.motion.add(authored.clone().sub(this.previousRoot));
+      this.previousRoot.copy(authored);
+    }
   }
   /** immediate=true is ONLY for initial bind inspection/reset, never locomotion stop. */
   setMode(mode: 'walk' | 'bind', immediate = false) {
     const target = mode === 'walk' ? 1 : 0;
     if (immediate) {
+      this.discardStart();
       this.discardStop();
       this.targetWeight = target;
       this.weight = target;
@@ -81,21 +108,49 @@ export class CharacterPlayback {
     if (target === this.targetWeight) return;
     this.targetWeight = target;
     if (target === 1) {
-      if (this.stopAction) {
-        this.stopAction.fadeOut(0.24);
-        this.fadeTime = 0.26;
-        this.action.setEffectiveWeight(1).fadeIn(0.24);
-        this.weight = 1;
+      const launch = makeCharacterStart(this.model, this.action.getClip());
+      this.discardStop();
+      this.discardStart();
+      this.launch = launch;
+      this.startTime = 0;
+      const track = launch.clip.tracks.find((t) => t.name === 'Root.position')!;
+      this.rootCurve = new THREE.LinearInterpolant(track.times, track.values, 3);
+      this.previousRoot.set(0, 0, 0);
+      this.action.setEffectiveWeight(0);
+      this.action.paused = true;
+      this.weight = 0;
+      this.startAction = this.mixer.clipAction(launch.clip).setLoop(THREE.LoopOnce, 1);
+      this.startAction.clampWhenFinished = true;
+      this.startAction.play();
+      this.startAction.paused = true;
+      this.mixer.update(0);
+    } else if (this.weight > 0.001 || this.startAction) {
+      const incoming = this.launch
+        ? { clip: this.launch.clip, time: this.startTime, joinPhase: this.launch.joinPhase }
+        : undefined;
+      const phase = this.launch
+        ? (this.launch.joinPhase + 0.5 + (0.5 * this.startTime) / this.launch.clip.duration) % 1
+        : this.action.time / this.duration;
+      let incomingSpeed =
+        this.model.getObjectByName('HEA_101172')!.userData.heaCharacter.walkSpeed *
+        THREE.MathUtils.clamp(this.speed, 0.35, 1.8);
+      if (this.launch && this.rootCurve) {
+        const before = new THREE.Vector3().fromArray(
+          this.rootCurve.evaluate(Math.max(0, this.startTime - 0.002)),
+        );
+        const after = new THREE.Vector3().fromArray(
+          this.rootCurve.evaluate(Math.min(this.launch.clip.duration, this.startTime + 0.002)),
+        );
+        incomingSpeed = Math.max(0, (after.z - before.z) / 0.004) * this.speed;
       }
-    } else if (this.weight > 0.001) {
-      // Capture before disabling any action: sample zero of Stopping is identical.
       const plan = makeCharacterStop(
         this.model,
         this.action.getClip(),
-        this.action.time / this.duration,
-        this.model.getObjectByName('HEA_101172')!.userData.heaCharacter.walkSpeed *
-          THREE.MathUtils.clamp(this.speed, 0.35, 1.8),
+        phase,
+        incomingSpeed,
+        incoming,
       );
+      this.discardStart();
       this.discardStop();
       this.plan = plan;
       const rootTrack = plan.clip.tracks.find((t) => t.name === 'Root.position')!;
@@ -113,6 +168,15 @@ export class CharacterPlayback {
     }
   }
   seek(phase: number) {
+    if (this.launch) {
+      this.discardStart();
+      this.targetWeight = 1;
+      this.weight = 1;
+      this.action.setEffectiveWeight(1);
+      this.action.paused = !this.playing;
+      this.rootCurve = undefined;
+      this.previousRoot.set(0, 0, 0);
+    }
     this.action.time = THREE.MathUtils.clamp(phase, 0, 0.999999) * this.duration;
     this.mixer.update(0);
     this.model.updateMatrixWorld(true);
@@ -132,7 +196,38 @@ export class CharacterPlayback {
   }
   update(dt: number) {
     dt = Math.max(0, dt);
-    if (this.targetWeight === 0 && this.stopAction && this.plan) {
+    if (this.targetWeight === 1 && this.launch && this.startAction) {
+      const launch = this.launch,
+        rate = Math.max(0.02, this.speed),
+        previous = this.startTime;
+      this.startTime = Math.min(
+        launch.clip.duration,
+        this.startTime + (this.playing ? dt : 0) * rate,
+      );
+      this.startAction.time = this.startTime;
+      this.startAction.paused = true;
+      this.mixer.update(0);
+      this.rootSample(this.startTime);
+      if (this.startTime >= launch.clip.duration) {
+        const carry = Math.max(0, dt - (launch.clip.duration - previous) / rate);
+        const joinPhase = launch.joinPhase;
+        this.speed *= launch.endRate;
+        this.discardStart();
+        this.rootCurve = undefined;
+        this.previousRoot.set(0, 0, 0);
+        this.weight = 1;
+        this.action.setEffectiveWeight(1);
+        this.action.time = joinPhase * this.duration + carry * this.speed;
+        this.action.paused = !this.playing;
+        this.action.timeScale = this.speed;
+        this.mixer.update(0);
+        if (this.rootMotionEnabled)
+          this.motion.z +=
+            this.model.getObjectByName('HEA_101172')!.userData.heaCharacter.walkSpeed *
+            this.speed *
+            carry;
+      }
+    } else if (this.targetWeight === 0 && this.stopAction && this.plan) {
       this.stopTime = Math.min(this.plan.clip.duration, this.stopTime + dt);
       this.stopAction.time = this.stopTime;
       this.stopAction.paused = true;
@@ -143,10 +238,6 @@ export class CharacterPlayback {
       this.action.paused = !this.playing || this.targetWeight === 0;
       this.action.timeScale = this.speed;
       this.mixer.update(dt);
-      if (this.fadeTime > 0) {
-        this.fadeTime -= dt;
-        if (this.fadeTime <= 0) this.discardStop();
-      }
     }
     if (this.rootMotionEnabled && this.root) {
       if (this.targetWeight === 0 && this.plan) {

@@ -1,4 +1,4 @@
-// Independent renderer for phase-specific Stopping clips. Images stay ignored.
+// Independent renderer for Starting / phase-specific Stopping clips. Images stay ignored.
 import { createServer } from 'vite';
 import { chromium } from '@playwright/test';
 import { browserOptions } from '../tests/browser.ts';
@@ -19,6 +19,7 @@ try {
     const { CharacterPlayback } = await import('/src/character/CharacterPlayback.ts');
     const gltf = await new GLTFLoader().loadAsync('/models/101172-rigged.glb');
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.rootMotionEnabled = true;
     const scene = new T.Scene();
     scene.background = new T.Color('#c5cecb');
     scene.add(gltf.scene);
@@ -49,9 +50,10 @@ try {
     document.body.append(label);
     let time = 0;
     window.beginStop = (phase) => {
-      player.setMode('walk');
+      player.setMode('walk', true);
+      gltf.scene.position.set(0, 0, 0);
       player.playing = true;
-      player.update(1);
+      player.speed = 1;
       player.seek(phase);
       player.setMode('bind');
       time = 0;
@@ -67,9 +69,36 @@ try {
         ],
       };
     };
+    window.beginStart = () => {
+      player.setMode('bind', true);
+      gltf.scene.position.set(0, 0, 0);
+      player.playing = true;
+      player.speed = 1;
+      player.setMode('walk');
+      time = 0;
+      const p = player.startPlan;
+      return {
+        times: [
+          0,
+          0.09,
+          p.clip.duration * 0.4,
+          p.clip.duration * 0.7,
+          p.clip.duration,
+          p.clip.duration + 0.12,
+          p.clip.duration + 0.35,
+        ],
+      };
+    };
     window.renderStop = (t, angle, caption) => {
       if (t < time) throw new Error('Review time must be ascending');
+      const starting = player.isStarting;
       player.update(t - time);
+      gltf.scene.position.add(player.consumeRootMotion());
+      if (!starting && player.mode === 'walk')
+        gltf.scene.position.z +=
+          (t - time) *
+          player.speed *
+          gltf.scene.getObjectByName('HEA_101172').userData.heaCharacter.walkSpeed;
       time = t;
       camera.position.set(Math.sin(angle) * 5, 1.1, Math.cos(angle) * 5 + 0.2);
       camera.lookAt(0, 1.1, 0.2);
@@ -94,6 +123,21 @@ try {
         await page.screenshot({ path: `.cache/stop-review/${phase}-${view}-${i}.png` });
       }
     }
+  for (const [view, angle] of [
+    ['front', 0],
+    ['side', Math.PI / 2],
+    ['three-quarter', Math.PI / 6],
+  ]) {
+    const plan = await page.evaluate(() => window.beginStart());
+    for (let i = 0; i < plan.times.length; i++) {
+      await page.evaluate(({ t, angle, caption }) => window.renderStop(t, angle, caption), {
+        t: plan.times[i],
+        angle,
+        caption: `Start → Walking · ${view} · stage ${i}`,
+      });
+      await page.screenshot({ path: `.cache/stop-review/start-${view}-${i}.png` });
+    }
+  }
   console.log('Stop renders: .cache/stop-review/');
 } finally {
   await browser?.close();

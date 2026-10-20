@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { CharacterPlayback } from './CharacterPlayback';
 
 /** Camera-relative flat-floor motor, with exclusive authored root motion while
- * closing the last two steps. The controller must not damp/slide planted feet. */
+ * launching the first step or closing the last two steps. The controller must not damp/slide planted feet. */
 export class CharacterTestDrive {
   resetMotion() {
     this.playback.setMode('bind', true);
@@ -27,13 +27,24 @@ export class CharacterTestDrive {
     if (direction.length() > 0 && direction.length() < 0.35) direction.setLength(0.35);
     this.playback.playing = true;
     if (direction.lengthSq() > 0) {
-      this.body.position.addScaledVector(direction, this.walkSpeed * dt);
+      const initiating = this.playback.mode === 'bind';
       const target = new THREE.Quaternion().setFromAxisAngle(
         new THREE.Vector3(0, 1, 0),
         Math.atan2(direction.x, direction.z),
       );
-      this.body.quaternion.slerp(target, 1 - Math.exp(-14 * dt));
+      // Commit the launch heading before the weight transfer, then hold it
+      // until first contact: yawing a planted sole would invalidate its lock.
+      if (initiating && !this.playback.isStopping) this.body.quaternion.copy(target);
+      else if (!this.playback.isStarting)
+        this.body.quaternion.slerp(target, 1 - Math.exp(-14 * dt));
+      this.playback.setMode('walk');
+      const authoredLaunch = this.playback.isStarting;
       this.playback.locomotion(dt, this.walkSpeed * direction.length(), true, this.walkSpeed);
+      if (!authoredLaunch)
+        this.body.position.addScaledVector(
+          direction.clone().normalize(),
+          this.walkSpeed * this.playback.speed * dt,
+        );
     } else {
       this.playback.setMode('bind');
       this.playback.update(dt);

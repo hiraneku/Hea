@@ -7,6 +7,22 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Ditambahkan / diperbaiki — start bertahap dan stop mengikuti ritme Walking
+
+- Tambahkan clip Starting runtime: transfer berat, langkah pertama terangkat,
+  supporting sole dipin, percepatan Root, lalu handoff ke pose kontak Walking yang
+  identik. Input tidak lagi langsung memberi translasi/Walking penuh.
+- Stop meneruskan counter-swing Walking dan gerak pelvis dengan cadence mereda,
+  bukan membekukan pose lalu menariknya ke netral. Pendekkan jeda transfer dan
+  selaraskan waktu/tinggi langkah penutup dengan karakter Walking.
+- Tangani release saat start dan restart saat stop dari pose terkini; geser fase
+  join dalam double support bila perlu untuk menghindari displacement mundur.
+  Motor memakai root motion eksklusif saat transisi dan menghitung leftover frame
+  sekali; heading start ditahan sampai kontak untuk menjaga pijakan.
+- Tambahkan regresi start/join, pose saat interupsi, kelanjutan swing, dan motor
+  diskalakan; perluas review renderer ke start. Aset v6, file asli dan pemain
+  default tidak berubah; Starting/Stopping tidak disertakan dalam GLB unduhan.
+
 ### Diperbaiki — stop dua langkah sesuai fase dan pijakan
 
 - Ganti fade ke A-pose yang ditolak dengan clip Stopping hasil bake pose/fase:

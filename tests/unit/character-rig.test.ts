@@ -475,6 +475,160 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(player.mode).toBe('bind');
     player.dispose();
   });
+  it('accelerates a planted first step into the exact Walking pose without a join snap', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    const body = new THREE.Group();
+    body.add(gltf.scene);
+    player.rootMotionEnabled = true;
+    player.setMode('bind', true);
+    const initial = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+    player.setMode('walk');
+    const plan = player.startPlan!;
+    expect(plan.clip.name).toBe('Starting');
+    expect(player.isStarting).toBe(true);
+    const positions = mesh.geometry.getAttribute('position');
+    const sole: number[] = [];
+    for (let i = 0; i < positions.count; i++) if (positions.getY(i) < 0.1) sole.push(i);
+    const vertex = (i: number) =>
+      mesh.localToWorld(
+        mesh.applyBoneTransform(i, new THREE.Vector3().fromBufferAttribute(positions, i)),
+      );
+    body.updateMatrixWorld(true);
+    const anchor = vertex(plan.supportVertex);
+    let previous = initial,
+      worstAngle = 0,
+      pin = 0,
+      floor = Infinity,
+      lift = 0;
+    const n = Math.ceil(plan.clip.duration * 120);
+    for (let frame = 1; frame <= n; frame++) {
+      player.update(plan.clip.duration / n);
+      body.position.add(player.consumeRootMotion());
+      body.updateMatrixWorld(true);
+      const contact = vertex(plan.supportVertex);
+      pin = Math.max(pin, Math.hypot(contact.x - anchor.x, contact.z - anchor.z));
+      for (const [i, b] of mesh.skeleton.bones.entries())
+        worstAngle = Math.max(worstAngle, b.quaternion.clone().normalize().angleTo(previous[i]));
+      previous = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+      if (frame % 5 === 0) {
+        let leadFloor = Infinity;
+        for (const i of sole) {
+          const p = vertex(i);
+          floor = Math.min(floor, p.y);
+          if (positions.getX(i) > 0 === (plan.lead === 'Left'))
+            leadFloor = Math.min(leadFloor, p.y);
+        }
+        lift = Math.max(lift, leadFloor);
+      }
+    }
+    player.update(1e-7);
+    body.position.add(player.consumeRootMotion());
+    body.updateMatrixWorld(true);
+    expect(player.isStarting).toBe(false);
+    expect(pin).toBeLessThan(0.003);
+    expect(floor).toBeGreaterThan(-0.002);
+    expect(lift).toBeGreaterThan(0.07);
+    expect(worstAngle).toBeLessThan(0.1);
+    expect(body.position.z).toBeCloseTo(plan.rootEnd.z, 5);
+    const endPose = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+    player.seek(plan.joinPhase);
+    mesh.skeleton.bones.forEach((b, i) =>
+      expect(b.quaternion.clone().normalize().angleTo(endPose[i])).toBeLessThan(1e-5),
+    );
+    player.dispose();
+  });
+
+  it('preserves the sampled pose when releasing mid-start and restarting mid-stop', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.rootMotionEnabled = true;
+    for (const fraction of [0.05, 0.3, 0.7, 0.95]) {
+      player.speed = 1;
+      player.setMode('bind', true);
+      player.setMode('walk');
+      player.update(player.startPlan!.clip.duration * fraction);
+      player.consumeRootMotion();
+      const pose = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+      player.setMode('bind');
+      player.update(0);
+      mesh.skeleton.bones.forEach((b, i) =>
+        expect(b.quaternion.clone().normalize().angleTo(pose[i])).toBeLessThan(1e-5),
+      );
+      player.update(0.22);
+      player.consumeRootMotion();
+      const stopped = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+      player.setMode('walk');
+      player.update(0);
+      mesh.skeleton.bones.forEach((b, i) =>
+        expect(b.quaternion.clone().normalize().angleTo(stopped[i])).toBeLessThan(1e-5),
+      );
+      for (let i = 0; i < 150; i++) {
+        player.update(1 / 120);
+        const delta = player.consumeRootMotion();
+        expect(delta.z).toBeGreaterThan(-0.001);
+      }
+      expect(player.isStarting).toBe(false);
+    }
+    player.dispose();
+  });
+
+  it('never plans a backwards launch when restarting different closing-step phases', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.rootMotionEnabled = true;
+    for (const phase of [0.02, 0.25, 0.49, 0.52, 0.75, 0.98])
+      for (const progress of [0.15, 0.45, 0.75]) {
+        player.setMode('walk', true);
+        player.speed = 1;
+        player.seek(phase);
+        player.setMode('bind');
+        player.update(player.stopPlan!.clip.duration * progress);
+        player.consumeRootMotion();
+        player.setMode('walk');
+        expect(
+          player.startPlan!.rootEnd.z,
+          `release ${phase}, restart ${progress}`,
+        ).toBeGreaterThanOrEqual(0);
+      }
+    player.dispose();
+  });
+
+  it('continues Walking arm and torso cadence at release instead of freezing the captured pose', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    const names = ['Spine', 'Chest', 'LeftUpperArm', 'RightUpperArm'];
+    player.seek(0.12 + 0.04 / WALK.duration);
+    const expected = names.map((n) =>
+      gltf.scene.getObjectByName(n)!.quaternion.clone().normalize(),
+    );
+    player.seek(0.12);
+    player.setMode('bind');
+    player.update(0.04);
+    names.forEach((name, i) =>
+      expect(
+        gltf.scene.getObjectByName(name)!.quaternion.clone().normalize().angleTo(expected[i]),
+      ).toBeLessThan(0.002),
+    );
+    player.dispose();
+  });
+  it('uses only launch root motion, including leftover frame time at the Walking handoff', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    const body = new THREE.Group();
+    body.add(gltf.scene);
+    body.scale.setScalar(1.4);
+    const speed = (WALK.stride / WALK.duration) * 1.4;
+    const drive = new CharacterTestDrive(body, player, speed);
+    drive.resetMotion();
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(0, 2, 5);
+    camera.lookAt(0, 1, 0);
+    camera.updateMatrixWorld(true);
+    drive.update(0.001, 0, 1, camera);
+    const plan = player.startPlan!;
+    expect(body.position.length()).toBeLessThan(0.0001);
+    drive.update(plan.clip.duration + 0.039, 0, 1, camera);
+    expect(player.isStarting).toBe(false);
+    expect(body.position.z).toBeCloseTo(-1.4 * plan.rootEnd.z - speed * player.speed * 0.04, 5);
+    player.dispose();
+  });
+
   it('lands the phase-selected foot first, closes the other beside it, and pins planted feet', () => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
     const positions = mesh.geometry.getAttribute('position');

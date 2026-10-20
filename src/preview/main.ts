@@ -413,7 +413,8 @@ async function boot() {
       const restart = !playback!.isStopping && playback!.action.getEffectiveWeight() < 0.001;
       playback!.setMode(mode);
       playback!.playing = mode === 'walk';
-      if (mode === 'walk' && restart) playback!.seek(0);
+      // Starting owns its phase and root motion; do not overwrite it with seek(0).
+      if (mode === 'walk' && restart && !playback!.isStarting) playback!.seek(0);
       syncMovement();
     };
     syncMovement();
