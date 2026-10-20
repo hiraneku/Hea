@@ -846,6 +846,8 @@ async function boot() {
   try {
     await document.fonts.ready;
     game = new Game($<HTMLCanvasElement>('#arena'), settings, event);
+    $('#boot-status').textContent = 'MEMUAT KARAKTER · V9';
+    await game.characterReady;
     applySettings();
     $('#start-button').onclick = start;
     $('#demo-play').onclick = start;
@@ -909,7 +911,7 @@ async function boot() {
   } catch (error) {
     console.error('Unable to initialize HEA:', error);
     $('#boot').innerHTML =
-      `<span class="boot-wordmark">HEA.</span><h2>ARENA BELUM BISA DIMUAT.</h2><p>Browser ini memerlukan WebGL 2 dan akselerasi grafis.<br>Coba Chrome terbaru atau aktifkan akselerasi perangkat keras.</p><button id="reload-button" class="primary-button">MUAT ULANG ${icons.reset}</button>`;
+      `<span class="boot-wordmark">HEA.</span><h2>ARENA BELUM BISA DIMUAT.</h2><p>Arena atau karakter gagal dimuat.<br>Pastikan koneksi stabil, lalu muat ulang. Jika tetap gagal, periksa dukungan WebGL 2 dan akselerasi grafis.</p><button id="reload-button" class="primary-button">MUAT ULANG ${icons.reset}</button>`;
     $('#reload-button').onclick = () => location.reload();
   }
 }

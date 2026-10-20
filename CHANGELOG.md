@@ -7,6 +7,13 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — jangan tampilkan balok saat karakter belum siap
+
+- Boot menunggu model v9 siap sebelum membuka menu/main. Loading karakter kini
+  eksplisit; kegagalan bukan lagi fallback merah diam-diam.
+- Retire mesh balok segera setelah load sukses, bukan menunggu frame gameplay.
+- Simpan error load pada diagnostics dan tampilkan layar muat ulang saat gagal.
+
 ### Diterapkan — karakter v9 di arena gameplay
 
 - Avatar utama memakai GLB rigged putih v9 dengan URL relatif yang valid di Pages.

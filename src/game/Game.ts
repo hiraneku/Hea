@@ -208,6 +208,7 @@ export class Game {
   private stride = 0;
   /** The articulated silhouette riding the collision box, and whether it has arrived. */
   private avatarModel!: AvatarModel;
+  readonly characterReady: Promise<void>;
   /** Whether the box's own faces have been retired in favour of the model. */
   private skinRetired = false;
   /** Whether the body is resting on the floor this frame: jumping and falling count as airborne. */
@@ -420,7 +421,11 @@ export class Game {
     // An articulated body riding the same transform as the physics box: the box keeps the
     // collisions, the model supplies the silhouette and the animation.
     this.avatarModel = new AvatarModel(this.avatar);
-    void this.avatarModel.load();
+    this.characterReady = this.avatarModel.load().then(() => {
+      if (!this.avatarModel.ready)
+        throw new Error('Karakter gagal dimuat: ' + (this.avatarModel.loadError ?? 'unknown'));
+      this.retireAvatarBox();
+    });
     this.ragdoll = new Ragdoll(this.scene, this.avatar.material as THREE.Material);
     const world = this.world;
     this.ragdollSurface = {
@@ -846,6 +851,17 @@ export class Game {
     this.facingQuaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
     this.facing.set(0, 0, -1).applyQuaternion(this.facingQuaternion);
     this.boss.lockedTarget.copy(this.player).add(new THREE.Vector3(0, 0.9, 0));
+  }
+  private retireAvatarBox() {
+    if (this.skinRetired) return;
+    this.skinRetired = true;
+    const retired = (this.avatar.material as THREE.MeshStandardMaterial).clone();
+    retired.visible = false;
+    this.avatar.material = retired;
+    this.avatar.castShadow = false;
+    this.avatar.children.forEach((child) => {
+      if (child !== this.avatarModel.group) child.visible = false;
+    });
   }
   start(capturePointer = true) {
     this.audio.unlock();
@@ -1671,19 +1687,7 @@ export class Game {
     }
     const first = this.cameraMode === 'first';
     this.avatar.visible = !this.ragdoll.active && !first;
-    if (this.avatarModel.ready && !this.skinRetired) {
-      // The box stays as the transform root, but its own faces are retired once the model stands
-      // on it. The material is swapped rather than hidden in place: the ragdoll shares the
-      // original instance, and hiding that would take the jointed body with it.
-      this.skinRetired = true;
-      const retired = (this.avatar.material as THREE.MeshStandardMaterial).clone();
-      retired.visible = false;
-      this.avatar.material = retired;
-      this.avatar.castShadow = false;
-      this.avatar.children.forEach((child) => {
-        if (child !== this.avatarModel.group) child.visible = false;
-      });
-    }
+    if (this.avatarModel.ready) this.retireAvatarBox();
     if (this.avatarModel.ready) {
       this.avatarModel.update(dt, {
         speed: this.velocity.length() + this.airDash.velocity.length(),

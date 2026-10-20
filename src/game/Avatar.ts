@@ -54,6 +54,7 @@ export class AvatarModel {
   private mixer?: THREE.AnimationMixer;
   private playback?: CharacterPlayback;
   private wasAirborne = false;
+  loadError?: string;
   private actions = new Map<AvatarPose, THREE.AnimationAction>();
   private pose: AvatarPose = 'idle';
   private speedBlend = 1;
@@ -150,8 +151,11 @@ export class AvatarModel {
         this.playback.setMode('bind', true);
       } else this.actions.get('idle')?.play();
       this.pose = 'idle';
-    } catch {
-      /* The asset is optional: without it the body stays the grey box. */
+    } catch (error) {
+      this.mixer = undefined;
+      this.group.visible = false;
+      this.loadError = error instanceof Error ? error.message : String(error);
+      console.error('HEA character failed to load:', this.url, error);
     }
   }
 
@@ -220,6 +224,7 @@ export class AvatarModel {
 export function avatarReport(model: AvatarModel) {
   return {
     ready: model.ready,
+    error: model.loadError ?? null,
     pose: model.current,
     clips: model.clipNames,
     height: model.measured.height ?? 0,
