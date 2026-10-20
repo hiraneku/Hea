@@ -598,3 +598,12 @@ Delapan perubahan tuning atas v0.6; angka lama → baru dicantumkan agar mudah d
 - Dash udara memakai kurva akselerasi 60 ms, puncak 90 ms, lalu coast 350 ms. Arah dash dapat dibelokkan perlahan; boost ditambahkan ke gerak terbang dan turun kembali ke kecepatan normal tanpa stop mendadak. Kekebalan hanya pada 230 ms awal, bukan seluruh coast/cooldown. Hover dan kontrol ketinggian, regenerasi energi, serta pemulihan HP setelah sembilan detik tanpa terkena serangan.
 - Multitouch, fokus boss opsional, layout portrait/landscape, pause, restart, demo real-time, panduan, dan video referensi asli.
 - Audio WebAudio prosedural; kualitas, sensitivitas, volume, serta **Efek nyaman** untuk menonaktifkan impact frame dan mengurangi guncangan. Jeda kontak tetap berlaku agar aturan hempasan konsisten. Rekor waktu kemenangan dan preferensi disimpan lokal.
+
+### Ketahanan halaman saat cache/deployment tidak sinkron
+
+- Pertahankan hashed assets lama saat build Pages dan pulihkan aset dari versi
+  publik sebelumnya, agar HTML yang masih tersimpan tidak kehilangan dependensi.
+- Tambah pesan startup dan tombol muat ulang yang tidak bergantung pada bundle
+  utama, sehingga kegagalan memuat JavaScript tidak hanya meninggalkan layar kosong.
+- Ini memperbaiki ketahanan aplikasi; tidak membatalkan deployment Pages yang
+  terkunci di server GitHub.

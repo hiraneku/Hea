@@ -15,7 +15,45 @@
     <title>HEA — Arcane Arena</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div
+        data-startup-fallback
+        role="status"
+        style="
+          min-height: 100vh;
+          display: grid;
+          place-content: center;
+          gap: 18px;
+          padding: 24px;
+          background: #111918;
+          color: #edf4e9;
+          font: 16px sans-serif;
+          text-align: center;
+        "
+      >
+        <strong style="font-size: 36px">HEA.</strong>
+        <p id="startup-message">Memuat aplikasi HEA…</p>
+        <button
+          type="button"
+          onclick="location.replace(location.pathname + '?reload=' + Date.now())"
+          style="
+            padding: 14px;
+            border: 1px solid #d9f48e;
+            background: #d9f48e;
+            color: #111918;
+            border-radius: 8px;
+          "
+        >
+          Muat ulang aplikasi
+        </button>
+      </div>
+    </div>
+    <script>
+      setTimeout(function () {
+        var message = document.getElementById('startup-message');
+        if (message) message.textContent = 'File aplikasi belum berhasil dimuat. Coba muat ulang.';
+      }, 12000);
+    </script>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
