@@ -69,6 +69,25 @@ try {
         ],
       };
     };
+    window.beginJump = (moving) => {
+      player.setMode('bind', true);
+      gltf.scene.position.set(0, 0, 0);
+      player.speed = 1;
+      if (moving) {
+        player.setMode('walk', true);
+        player.seek(0.25);
+      }
+      player.jump(moving ? 0.65 : 0);
+      player.setMode('bind');
+      time = 0;
+      const p = player.jumpPlan;
+      camera.top = 1.75;
+      camera.bottom = -1.75;
+      camera.left = -1.475;
+      camera.right = 1.475;
+      camera.updateProjectionMatrix();
+      return { times: [0, p.charge, p.takeoff, p.apex, p.landing, p.impact, p.clip.duration] };
+    };
     window.beginStart = () => {
       player.setMode('bind', true);
       gltf.scene.position.set(0, 0, 0);
@@ -135,6 +154,24 @@ try {
       await page.screenshot({ path: `.cache/stop-review/start-${view}-${i}.png` });
     }
   }
+  for (const moving of [false, true])
+    for (const [view, angle] of [
+      ['front', 0],
+      ['side', Math.PI / 2],
+      ['three-quarter', Math.PI / 6],
+    ]) {
+      const plan = await page.evaluate((m) => window.beginJump(m), moving);
+      for (let i = 0; i < plan.times.length; i++) {
+        await page.evaluate(({ t, angle, caption }) => window.renderStop(t, angle, caption), {
+          t: plan.times[i],
+          angle,
+          caption: `Arcane jump · ${moving ? 'moving' : 'standing'} · ${view} · stage ${i}`,
+        });
+        await page.screenshot({
+          path: `.cache/stop-review/jump-${moving ? 'moving' : 'standing'}-${view}-${i}.png`,
+        });
+      }
+    }
   console.log('Stop renders: .cache/stop-review/');
 } finally {
   await browser?.close();

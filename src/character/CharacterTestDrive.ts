@@ -4,7 +4,12 @@ import type { CharacterPlayback } from './CharacterPlayback';
 /** Camera-relative flat-floor motor, with exclusive authored root motion while
  * launching the first step or closing the last two steps. The controller must not damp/slide planted feet. */
 export class CharacterTestDrive {
+  private lastSpeed = 0;
+  requestJump() {
+    return this.playback.jump(this.lastSpeed);
+  }
   resetMotion() {
+    this.lastSpeed = 0;
     this.playback.setMode('bind', true);
     this.playback.consumeRootMotion();
   }
@@ -30,7 +35,11 @@ export class CharacterTestDrive {
     if (direction.length() > 1) direction.normalize();
     if (direction.length() > 0 && direction.length() < 0.35) direction.setLength(0.35);
     this.playback.playing = true;
-    if (direction.lengthSq() > 0) {
+    const jumping = this.playback.isJumping;
+    if (jumping) {
+      this.playback.setMode(direction.lengthSq() > 0 ? 'walk' : 'bind');
+      this.playback.update(dt);
+    } else if (direction.lengthSq() > 0) {
       const initiating = this.playback.mode === 'bind';
       const target = new THREE.Quaternion().setFromAxisAngle(
         new THREE.Vector3(0, 1, 0),
@@ -61,6 +70,9 @@ export class CharacterTestDrive {
     this.body.position.add(rootDelta);
     this.body.position.x = THREE.MathUtils.clamp(this.body.position.x, -5, 5);
     this.body.position.z = THREE.MathUtils.clamp(this.body.position.z, -5, 5);
-    return this.body.position.clone().sub(old);
+    const delta = this.body.position.clone().sub(old);
+    if (dt > 0)
+      this.lastSpeed = Math.hypot(delta.x, delta.z) / dt / Math.max(0.001, this.body.scale.x);
+    return delta;
   }
 }

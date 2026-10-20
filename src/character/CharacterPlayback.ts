@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { makeCharacterJump, type JumpPlan } from './CharacterJump';
 import { makeCharacterStart, type StartPlan } from './CharacterStart';
 import { makeCharacterStop, type StopPlan } from './CharacterStop';
 import { resolveWalkingGait, type WalkingGait, type WalkingGaitSpec } from './WalkingGait';
@@ -11,6 +12,74 @@ export class CharacterPlayback {
   private walkAction: THREE.AnimationAction;
   get action() {
     return this.walkAction;
+  }
+  private vault?: JumpPlan;
+  private jumpAction?: THREE.AnimationAction;
+  private jumpTime = 0;
+  private resumeAfterJump = false;
+  get isJumping() {
+    return !!this.vault && this.jumpTime < this.vault.clip.duration - 1e-7;
+  }
+  get jumpPlan() {
+    return this.vault;
+  }
+  get jumpStage() {
+    if (!this.isJumping) return 'grounded';
+    const p = this.vault!;
+    return this.jumpTime < p.charge
+      ? 'charge'
+      : this.jumpTime < p.takeoff
+        ? 'release'
+        : this.jumpTime < p.apex
+          ? 'rise'
+          : this.jumpTime < p.landing
+            ? 'fall'
+            : this.jumpTime < p.impact
+              ? 'impact'
+              : 'recover';
+  }
+  private discardJump() {
+    if (this.jumpAction) {
+      const clip = this.jumpAction.getClip();
+      this.jumpAction.stop();
+      this.mixer.uncacheClip(clip);
+    }
+    this.vault = undefined;
+    this.jumpAction = undefined;
+    this.jumpTime = 0;
+  }
+  /** One authored flat-floor vault; rejects re-trigger while airborne/recovering. */
+  jump(forwardSpeed?: number) {
+    if (this.isJumping) return false;
+    const resume = this.mode === 'walk' && this.playing;
+    let speed = forwardSpeed ?? (resume ? this.authoredWalkSpeed * this.speed : 0);
+    if (forwardSpeed === undefined && this.rootCurve && (this.launch || this.plan)) {
+      const t = this.launch ? this.startTime : this.stopTime;
+      const a = new THREE.Vector3().fromArray(this.rootCurve.evaluate(Math.max(0, t - 0.002)));
+      const b = new THREE.Vector3().fromArray(this.rootCurve.evaluate(t + 0.002));
+      speed = Math.max(0, (b.z - a.z) / 0.004) * (this.launch ? this.speed : 1);
+    }
+    const plan = makeCharacterJump(this.model, speed);
+    this.discardJump();
+    this.discardStart();
+    this.discardStop();
+    this.vault = plan;
+    this.resumeAfterJump = resume;
+    this.targetWeight = 0;
+    this.weight = 0;
+    this.playing = true;
+    this.action.setEffectiveWeight(0);
+    this.action.paused = true;
+    const track = plan.clip.tracks.find((t) => t.name === 'Root.position')!;
+    this.rootCurve = new THREE.LinearInterpolant(track.times, track.values, 3);
+    this.previousRoot.set(0, 0, 0);
+    this.jumpAction = this.mixer.clipAction(plan.clip).setLoop(THREE.LoopOnce, 1);
+    this.jumpAction.clampWhenFinished = true;
+    this.jumpAction.play();
+    this.jumpAction.paused = true;
+    this.mixer.update(0);
+    this.model.updateMatrixWorld(true);
+    return true;
   }
   private walkGait: WalkingGait;
   get gait() {
@@ -51,6 +120,7 @@ export class CharacterPlayback {
     return this.action.getClip().duration;
   }
   get phase() {
+    if (this.vault) return this.jumpTime / this.vault.clip.duration;
     if (this.isStarting) return this.startTime / this.launch!.clip.duration;
     return this.targetWeight === 0 && this.plan
       ? Math.min(1, this.stopTime / this.plan.clip.duration)
@@ -76,7 +146,7 @@ export class CharacterPlayback {
   /** Replace a clip only while idle. Analyze first so invalid input leaves the
    * current playback untouched. Pass exact authoring markers if analysis is uncertain. */
   replaceWalking(clip: THREE.AnimationClip, markers?: WalkingGaitSpec) {
-    if (this.mode === 'walk' || this.isStopping)
+    if (this.mode === 'walk' || this.isStopping || this.isJumping)
       throw new Error('Stop completely or reset to bind before replacing Walking.');
     const gait = resolveWalkingGait(this.model, clip, markers);
     this.setMode('bind', true);
@@ -122,6 +192,7 @@ export class CharacterPlayback {
   setMode(mode: 'walk' | 'bind', immediate = false) {
     const target = mode === 'walk' ? 1 : 0;
     if (immediate) {
+      this.discardJump();
       this.discardStart();
       this.discardStop();
       this.targetWeight = target;
@@ -135,10 +206,15 @@ export class CharacterPlayback {
       this.model.updateMatrixWorld(true);
       return;
     }
+    if (this.isJumping) {
+      this.resumeAfterJump = target === 1;
+      return;
+    }
     if (target === this.targetWeight) return;
     this.targetWeight = target;
     if (target === 1) {
       const launch = makeCharacterStart(this.model, this.action.getClip(), this.walkGait);
+      this.discardJump();
       this.discardStop();
       this.discardStart();
       this.launch = launch;
@@ -202,6 +278,7 @@ export class CharacterPlayback {
     }
   }
   seek(phase: number) {
+    if (this.isJumping) return;
     if (this.launch) {
       this.discardStart();
       this.targetWeight = 1;
@@ -230,6 +307,22 @@ export class CharacterPlayback {
   }
   update(dt: number) {
     dt = Math.max(0, dt);
+    if (this.jumpAction && this.vault) {
+      const old = this.jumpTime;
+      this.jumpTime = Math.min(this.vault.clip.duration, this.jumpTime + (this.playing ? dt : 0));
+      this.jumpAction.time = this.jumpTime;
+      this.mixer.update(0);
+      this.rootSample(this.jumpTime);
+      if (this.rootMotionEnabled) this.root?.position.set(0, 0, 0);
+      this.model.updateMatrixWorld(true);
+      if (!this.isJumping && this.resumeAfterJump) {
+        const carry = this.playing ? Math.max(0, dt - (this.jumpTime - old)) : 0;
+        this.resumeAfterJump = false;
+        this.setMode('walk');
+        if (carry > 0) this.update(carry);
+      }
+      return;
+    }
     if (this.targetWeight === 1 && this.launch && this.startAction) {
       const launch = this.launch,
         rate = Math.max(0.02, this.speed),

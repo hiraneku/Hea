@@ -369,3 +369,59 @@ mengecek foot-lock start/stop, mengabaikan metadata rig yang sengaja dibuat basi
 mengecek interval asimetris/wrap, menolak clip tidak didukung, serta memastikan
 replacement yang gagal tidak merusak action lama. GLB v6 ditambah metadata saja;
 binary chunk mesh, skin, skeleton dan keyframe-nya tetap identik.
+
+## ArcaneJump — lompatan bergaya HEA untuk review
+
+`CharacterJump.ts` membake clip standar `ArcaneJump` dari pose aktual (diam,
+Walking, start atau stop), bukan memindahkan mesh statis ke atas. Siluet: gather
+0,18 s, coil/charge 0,36 s, sapuan telapak dan takeoff 0,50 s, apex 0,95 s,
+landing 1,40 s, impact 1,54 s, recovery selesai 1,94 s. Flight memakai arc naik/turun
+dengan sedikit pelebaran apex; tinggi Root maksimum sekitar 0,775 unit aset.
+Lengan/torso berputar halus dan asimetris, kaki tuck berbeda, tanpa VFX yang
+menutupi pose. Pelvis dipersiapkan sebelum kontak dan menyerap kecepatan turun
+sesudah kontak; kaki mendarat sejajar lalu dipin hingga recovery selesai.
+
+Foot IK dibake berdasarkan anatomi dan telapak karakter yang sama. Jangkauan
+pelvis dihitung dari panjang tungkai dan target ankle, dengan margin agar knee
+tidak snap dekat ekstensi penuh. Pose awal cocok dengan pose yang ditangkap;
+pose akhir bisa menjadi sumber Starting bila input jalan masih ditahan.
+
+API reusable:
+
+```ts
+playback.rootMotionEnabled = true;
+playback.jump(); // false bila lompatan/recovery masih berlangsung
+// Opsional: jump(forwardSpeedInAssetUnits) menentukan travel ke depan.
+playback.update(dt);
+const delta = playback.consumeRootMotion(); // XYZ; motor mengalikan skala/orientasi
+// Inspeksi: isJumping, jumpStage, jumpPlan (clip + waktu tiap event).
+```
+
+`CharacterTestDrive.requestJump()` memakai kecepatan horizontal terakhir. Selama
+jump, motor menahan heading dan tidak menambahkan gerak jalan/gravity/impulse lain.
+Input gerak dapat berubah selama airborne, tetapi hanya menentukan diam/jalan
+setelah recovery; bukan air steering. Held input masuk ke Starting, bukan langsung
+memutar Walking di fase sembarang. Retrigger ditolak sampai recovery selesai.
+`setMode()` selama jump hanya memperbarui tujuan setelah landing; reset eksplisit
+boleh membatalkan jump. Pemilik motor harus mereset posisi tubuh dan kamera juga.
+
+Preview: tombol **Loncat arcane** pada pilihan gerakan; mode main juga memakai
+**Spasi** atau tombol **LONCAT** di stage untuk HP. Scrub/ganti Walking/speed dikunci
+selama jump; pause inspeksi tetap tersedia. Clock jump tidak mengikuti cadence
+analog jalan, sehingga input pelan tidak mengubah durasi fisik flight. Tidak ada
+perubahan input/gameplay pemain default.
+
+Ini authoring/root-motion untuk lantai datar, **bukan collision solver**: tidak ada
+platform, ceiling collision, terrain, jatuh dari tebing, lompat ganda, air steering,
+atau physics jump milik game aktif. Travel depan dari jalan sengaja direm saat
+charge lalu didorong saat flight (vault arcane), bukan lompatan momentum realistis.
+Jangan menjalankan gravity/controller jump lain bersamaan dengan trajectory ini.
+Batas arena yang menolak root motion tetap membatasi jaminan foot-lock.
+
+Clip dibake runtime dan reusable sebagai AnimationClip, **belum disimpan dalam
+GLB unduhan** (label tetap GLB rig + Walking). Model asli, derivative mesh/rig,
+Walking dan profil gait tidak diubah oleh fitur ini. `character:stop-review` juga
+merender tujuh tahap jump diam/bergerak dari tiga sudut ke cache. Unit menguji
+pose capture, kontak/floor, perubahan joint, height, displacement sekali pada motor
+diskalakan, recovery, pause/retrigger dan reset. Kualitas gerak tetap perlu review
+pengguna; kelulusan tes tidak dianggap persetujuan visual.

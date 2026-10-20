@@ -30,6 +30,7 @@ app.innerHTML = `
       <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION}</p></div>
       <div id="viewport"></div><div id="joint-labels" class="joint-labels" aria-hidden="true" hidden></div>
       <div id="drive-pad" role="group" aria-label="Joystick gerak" hidden><span id="drive-knob"></span><small>GERAK</small></div>
+      <button id="drive-jump" class="drive-jump" aria-label="Loncat arcane" hidden disabled>LONCAT</button>
       <div id="load-status" role="status">Memuat model…</div>
       <div class="stage-footer"><span><i></i> HEA · PREVIEW</span><span>Y ↑</span></div>
     </section>
@@ -39,13 +40,13 @@ app.innerHTML = `
       <h3>SUDUT PANDANG</h3><div class="view-buttons"><button data-view="front">Depan</button><button data-view="side">Samping</button><button data-view="back">Belakang</button><button id="reset">Reset kamera</button></div>
       <h3>MAIN</h3>
       <div class="view-buttons"><button id="drive-toggle" aria-pressed="false" disabled>Mainkan karakter</button><button id="drive-reset" disabled>Reset posisi</button></div>
-      <p class="movement-help">Joystick / WASD · Lepaskan untuk berhenti.</p>
+      <p class="movement-help">Joystick / WASD · Spasi untuk loncat.</p>
       <h3>ARAH KEPALA</h3>
       <label for="look-yaw"><span>Menoleh kiri / kanan</span><output id="look-yaw-value">0°</output></label><input id="look-yaw" type="range" min="-70" max="70" value="0" aria-label="Menoleh kiri kanan" disabled />
       <label for="look-pitch"><span>Tunduk / mendongak</span><output id="look-pitch-value">0°</output></label><input id="look-pitch" type="range" min="-30" max="30" value="0" aria-label="Tunduk mendongak" disabled />
       <button id="look-reset" disabled>Luruskan kepala</button>
       <h3>COBA GERAKAN</h3>
-      <div class="view-buttons" id="movement-options" aria-label="Pilihan gerakan"><button id="movement-walk" aria-pressed="false" disabled>Jalan</button></div>
+      <div class="view-buttons" id="movement-options" aria-label="Pilihan gerakan"><button id="movement-walk" aria-pressed="false" disabled>Jalan</button><button id="movement-jump" disabled>Loncat arcane</button></div>
       <p class="movement-help">Klik untuk jalan, klik lagi untuk berhenti.</p>
       <h3>ANIMASI</h3>
       <label><span>Pose / animasi</span><select id="animation" disabled><option value="walk">Berjalan</option><option value="bind">Diam / berhenti</option></select></label>
@@ -167,6 +168,22 @@ async function boot() {
       THREE.MathUtils.degToRad(Number(pitchInput.value)),
     );
     if (playback) {
+      viewport.dataset.motion = playback.isJumping
+        ? playback.jumpStage
+        : playback.isStarting
+          ? 'starting'
+          : playback.isStopping
+            ? 'stopping'
+            : playback.mode;
+      for (const id of ['movement-jump', 'drive-jump'])
+        (document.getElementById(id) as HTMLButtonElement).disabled = playback.isJumping;
+      for (const id of ['animation', 'speed', 'phase', 'movement-walk', 'restart-animation'])
+        (document.getElementById(id) as HTMLInputElement).disabled = driving || playback.isJumping;
+      if (!driving)
+        document.querySelector<HTMLButtonElement>('#play')!.textContent =
+          playback.playing && (playback.isJumping || playback.mode === 'walk')
+            ? 'Jeda animasi'
+            : 'Putar animasi';
       phaseInput.value = String(Math.round(playback.phase * 1000));
       document.querySelector<HTMLOutputElement>('#phase-value')!.value =
         `${Math.round(playback.phase * 100)}%`;
@@ -276,6 +293,23 @@ async function boot() {
     window.addEventListener('blur', release);
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) release();
+    });
+    const launchJump = () => {
+      look?.clear();
+      if (driving) drive.requestJump();
+      else playback!.jump();
+    };
+    document.querySelector<HTMLButtonElement>('#movement-jump')!.onclick = launchJump;
+    document.querySelector<HTMLButtonElement>('#drive-jump')!.onclick = launchJump;
+    window.addEventListener('keydown', (e) => {
+      if (
+        !driving ||
+        e.code !== 'Space' ||
+        /INPUT|SELECT|TEXTAREA/.test((e.target as HTMLElement).tagName)
+      )
+        return;
+      e.preventDefault();
+      if (!e.repeat) launchJump();
     });
     const movementKeys = [
       'KeyW',
@@ -393,7 +427,7 @@ async function boot() {
     landmarks.add(forward);
     document
       .querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
-        '#animation, #play, #restart-animation, #speed, #phase, #skeleton, #movement-walk, #drive-toggle, #drive-reset, #look-yaw, #look-pitch, #look-reset',
+        '#movement-jump, #drive-jump, #animation, #play, #restart-animation, #speed, #phase, #skeleton, #movement-walk, #drive-toggle, #drive-reset, #look-yaw, #look-pitch, #look-reset',
       )
       .forEach((el) => {
         el.disabled = false;
@@ -423,8 +457,14 @@ async function boot() {
     driveButton.onclick = () => {
       driving = !driving;
       release();
+      const elevation = holder.position.y;
       drive.resetMotion();
+      holder.position.y = 0;
+      camera.position.y -= elevation;
+      target.y -= elevation;
+      controls.target.y -= elevation;
       pad.hidden = !driving;
+      document.querySelector<HTMLButtonElement>('#drive-jump')!.hidden = !driving;
       driveButton.setAttribute('aria-pressed', String(driving));
       driveButton.textContent = driving ? 'Selesai main' : 'Mainkan karakter';
       controls.autoRotate = false;
@@ -458,6 +498,11 @@ async function boot() {
     };
     movementButton.onclick = () => selectMovement(playback!.mode === 'walk' ? 'bind' : 'walk');
     playButton.onclick = () => {
+      if (playback!.isJumping) {
+        playback!.playing = !playback!.playing;
+        playButton.textContent = playback!.playing ? 'Jeda animasi' : 'Putar animasi';
+        return;
+      }
       if (playback!.mode === 'bind') {
         selectMovement('walk');
         return;

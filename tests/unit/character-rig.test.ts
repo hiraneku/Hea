@@ -831,6 +831,138 @@ describe('portable 101172 rig and Walking asset', () => {
     );
   });
 
+  it('bakes an arcane jump with real height, pinned charge/landing feet and smooth pose samples', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.rootMotionEnabled = true;
+    const body = new THREE.Group();
+    body.add(gltf.scene);
+    const positions = mesh.geometry.getAttribute('position');
+    const soles: number[] = [];
+    for (let i = 0; i < positions.count; i++) if (positions.getY(i) < 0.1) soles.push(i);
+    for (const phase of [undefined, 0.12, 0.49, 0.74]) {
+      body.position.set(0, 0, 0);
+      player.setMode('bind', true);
+      player.speed = 1;
+      if (phase !== undefined) {
+        player.setMode('walk', true);
+        player.seek(phase);
+      }
+      const initial = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+      expect(player.jump(phase === undefined ? 0 : 0.65)).toBe(true);
+      expect(player.jump()).toBe(false);
+      // Force an idle exit; held movement is covered by the motor test below.
+      player.setMode('bind');
+      const plan = player.jumpPlan!;
+      mesh.skeleton.bones.forEach((b, i) =>
+        expect(b.quaternion.clone().normalize().angleTo(initial[i])).toBeLessThan(1e-5),
+      );
+      let previous = initial,
+        worstAngle = 0,
+        minFloor = Infinity,
+        maxHeight = 0,
+        pin = 0;
+      const foot = (s: string) =>
+        gltf.scene.getObjectByName(s + 'Foot')!.getWorldPosition(new THREE.Vector3());
+      body.updateMatrixWorld(true);
+      const anchors = { Left: foot('Left'), Right: foot('Right') };
+      let landed: typeof anchors | undefined;
+      const n = 240;
+      for (let frame = 1; frame <= n; frame++) {
+        const t = (plan.clip.duration * frame) / n;
+        player.update(plan.clip.duration / n);
+        body.position.add(player.consumeRootMotion());
+        body.updateMatrixWorld(true);
+        maxHeight = Math.max(maxHeight, body.position.y);
+        for (const side of ['Left', 'Right'] as const) {
+          const p = foot(side);
+          if (t < plan.takeoff)
+            pin = Math.max(pin, Math.hypot(p.x - anchors[side].x, p.z - anchors[side].z));
+          if (t > plan.landing + 0.02) {
+            landed ??= { Left: foot('Left'), Right: foot('Right') };
+            pin = Math.max(pin, p.distanceTo(landed[side]));
+          }
+        }
+        mesh.skeleton.bones.forEach((b, i) => {
+          const angle = b.quaternion.clone().normalize().angleTo(previous[i]);
+          worstAngle = Math.max(worstAngle, angle);
+        });
+        previous = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+        if (frame % 12 === 0)
+          for (const i of soles) {
+            const p = mesh.localToWorld(
+              mesh.applyBoneTransform(i, new THREE.Vector3().fromBufferAttribute(positions, i)),
+            );
+            minFloor = Math.min(minFloor, p.y);
+          }
+      }
+      expect(player.isJumping).toBe(false);
+      expect(maxHeight).toBeGreaterThan(0.75);
+      expect(minFloor).toBeGreaterThan(-0.003);
+      expect(pin).toBeLessThan(0.003);
+      expect(worstAngle).toBeLessThan(0.17);
+      expect(body.position.y).toBeCloseTo(0, 6);
+      expect(body.position.z).toBeCloseTo(plan.rootEnd.z, 5);
+      expect(foot('Left').z).toBeCloseTo(foot('Right').z, 3);
+      const held = foot('Left');
+      player.update(0.5);
+      body.position.add(player.consumeRootMotion());
+      body.updateMatrixWorld(true);
+      expect(foot('Left').distanceTo(held)).toBeLessThan(1e-6);
+    }
+    player.dispose();
+  });
+  it('owns jump root motion once in a scaled motor, queues Walking after landing and resets midair', () => {
+    const body = new THREE.Group();
+    body.scale.setScalar(0.76);
+    body.add(gltf.scene);
+    const player = new CharacterPlayback(gltf.scene, gltf.animations),
+      drive = new CharacterTestDrive(body, player);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(0, 2, 5);
+    camera.lookAt(0, 1, 0);
+    camera.updateMatrixWorld(true);
+    drive.resetMotion();
+    for (let i = 0; i < 100; i++) drive.update(1 / 60, 0, 1, camera);
+    expect(drive.requestJump()).toBe(true);
+    const plan = player.jumpPlan!;
+    const initial = body.position.clone();
+    for (let i = 0; i < 50; i++) drive.update(0.02, 0, 1, camera);
+    expect(body.position.y).toBeGreaterThan(0.4);
+    expect(drive.requestJump()).toBe(false);
+    for (let i = 0; i < 47; i++) drive.update(0.02, 0, 1, camera);
+    expect(body.position.y).toBeCloseTo(0, 5);
+    expect(body.position.z - initial.z).toBeCloseTo(-plan.rootEnd.z * 0.76, 4);
+    expect(player.isStarting).toBe(true);
+    drive.update(0.6, 0, 1, camera);
+    drive.requestJump();
+    drive.update(0.8, 0, 0, camera);
+    expect(body.position.y).toBeGreaterThan(0.3);
+    // resetMotion clears animation/motion; owner resets the body's position.
+    drive.resetMotion();
+    body.position.set(0, 0, 0);
+    drive.update(0.1, 0, 0, camera);
+    expect(player.isJumping).toBe(false);
+    expect(body.position.length()).toBe(0);
+    player.dispose();
+  });
+  it('pauses jump playback without root rollback or allowing a second airborne impulse', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.rootMotionEnabled = true;
+    player.setMode('bind', true);
+    player.jump();
+    player.update(0.8);
+    player.consumeRootMotion();
+    const phase = player.phase;
+    player.playing = false;
+    player.update(0.4);
+    expect(player.phase).toBe(phase);
+    expect(player.consumeRootMotion().length()).toBe(0);
+    expect(player.jump()).toBe(false);
+    player.setMode('bind', true);
+    expect(player.isJumping).toBe(false);
+    player.dispose();
+  });
+
   it('lands the phase-selected foot first, closes the other beside it, and pins planted feet', () => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
     const positions = mesh.geometry.getAttribute('position');

@@ -7,6 +7,20 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Ditambahkan — ArcaneJump di preview karakter
+
+- Bake lompatan bergaya arcane dari pose terkini: charge, sapuan tangan saat
+  tolakan, pose udara asimetris, landing dengan impact absorption lalu recovery.
+  Foot targets dan margin jangkauan tungkai menjaga kontak dan mencegah knee snap.
+- Tambahkan jump API reusable serta root motion XYZ eksklusif di motor preview;
+  tahan arah saat airborne, tolak retrigger, dan lanjutkan Starting bila input
+  masih ditahan setelah recovery. Reset/pause dan pelepasan input tetap didukung.
+- Tombol Loncat arcane di inspeksi, Spasi serta tombol LONCAT di mode main/HP;
+  controls scrub/speed dikunci selama jump, tanpa menambah panel penjelasan besar.
+- Tambah QA pose/floor/foot-lock, height, scaled motor, transisi, pause/reset,
+  renderer tujuh tahap dan browser desktop/HP. Fitur hanya preview/motor baru:
+  model/Walking/GLB serta gameplay default tidak diganti; jump dibake runtime.
+
 ### Ditambahkan — sinkronisasi gait per clip Walking
 
 - Jadikan fase contact/lift-off tiap kaki, kecepatan acuan, durasi dan clearance
