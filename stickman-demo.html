@@ -98,8 +98,9 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 300);
-// Opens on the exact front view of the reference render — no auto-rotate.
-camera.position.set(0, 1.42, 5.6);
+// Opens on the exact front view of the reference render — no auto-rotate,
+// framed tight like the render (figure fills most of the viewport height).
+camera.position.set(0, 1.36, 3.1);
 
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.target.set(0, 0.92, 0);
@@ -154,7 +155,7 @@ scene.add(group);
 
 // One uniform material for the whole body (colour sampled from the render).
 const bodyMat = new THREE.MeshStandardMaterial({
-  color: '#9806f5', roughness: 0.62, metalness: 0,
+  color: '#9806f5', roughness: 0.42, metalness: 0,
   emissive: '#9806f5', emissiveIntensity: 0.10,
 });
 
@@ -290,9 +291,9 @@ function drawFoot(mesh, ankle, toe, leftAxis, sideSign) {
   _m4.makeBasis(_fx, _fy, _f);
   mesh.quaternion.setFromRotationMatrix(_m4);
   mesh.position.copy(ankle).lerp(toe, 0.42)
-    .addScaledVector(_fy, -0.036)
+    .addScaledVector(_fy, -0.030)
     .addScaledVector(_fx, sideSign * 0.014); // feet splay a touch outward
-  mesh.scale.set(0.058, 0.040, len * 0.62); // chunky rounded foot blob, ~6.6u wide
+  mesh.scale.set(0.060, 0.042, len * 0.66); // foot blob ~6.9u wide, flaring out of the shin
 }
 
 function drawBody(J, headQuat) {
@@ -543,7 +544,7 @@ applyTheme();
 
 const panelEl = document.getElementById('panel');
 function updateViewOffset() {
-  const shift = Math.min(panelEl.offsetHeight * 0.6, innerHeight * 0.24);
+  const shift = Math.min(panelEl.offsetHeight * 0.6, innerHeight * 0.18);
   if (shift > 4) camera.setViewOffset(innerWidth, innerHeight, 0, shift, innerWidth, innerHeight);
   else camera.clearViewOffset();
 }

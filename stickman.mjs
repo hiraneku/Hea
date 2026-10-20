@@ -22,13 +22,13 @@
 import * as THREE from 'three';
 
 export const PROP = {
-  torso: 0.33, // pelvis Y56 -> chest Y75
+  torso: 0.335, // pelvis Y56 -> chest Y75
   neck: 0.15,
   headR: 0.150, // sphere radius: diameter 17.1u
   headLift: 0.287, // chest -> head center (Y75 -> Y91.4)
-  shoulderHalf: 0.091, // shoulder joints +/-5.2u
-  upperArm: 0.215, // 12.3u
-  foreArm: 0.215, // 12.3u (+ ~4.5u rounded hand from the tube extension)
+  shoulderHalf: 0.0945, // shoulder joints +/-5.4u
+  upperArm: 0.23, // 13.1u
+  foreArm: 0.23, // 13.1u (+ ~4.5u rounded hand from the tube extension)
   hipHalf: 0.0525, // hip joints +/-3u
   thigh: 0.455, // 26u
   shin: 0.455, // 26u
@@ -38,9 +38,9 @@ export const PROP = {
 
 /** Tube radii per control point, from the measured silhouette widths. */
 export const RADII = {
-  arm: [0.040, 0.037, 0.0365, 0.036, 0.035, 0.030, 0.004], // root-in, shoulder, mid-upper, elbow, wrist, hand, tip (dia 4.2u)
-  leg: [0.048, 0.044, 0.044, 0.044, 0.043, 0.020], // hip-in, hip, mid-thigh, knee, ankle, cap (dia ~5.0u)
-  torso: [0.010, 0.088, 0.086, 0.052, 0.059, 0.039, 0.034], // cap, pelvis-low (10.5u), pelvis, waist (5.9u), chest (6.7u), neck, into head
+  arm: [0.042, 0.0385, 0.038, 0.037, 0.036, 0.030, 0.004], // root-in, shoulder, mid-upper, elbow, wrist, hand, tip (dia 4.4u)
+  leg: [0.048, 0.044, 0.045, 0.046, 0.050, 0.030], // hip-in, hip, mid-thigh, knee, ankle, cap (5.0u flaring to 5.7u at the foot)
+  torso: [0.010, 0.092, 0.086, 0.052, 0.056, 0.088, 0.042], // cap, pelvis-low (10.5u), pelvis, waist (5.9u), chest (6.4u), shoulder cone (10.1u — head sits in sloped shoulder mass), into head
 };
 
 /** Joint pairs used as ragdoll constraints. */
@@ -72,8 +72,8 @@ export const BASE = {
   pelvisPitch: 0.0, pelvisYaw: 0.0, pelvisRoll: 0.0,
   lean: 0.0, spineYaw: 0.0, spineRoll: 0.0,
   headPitch: 0.02, headYaw: 0.0,
-  hLx: 0.19, hLy: 0.895, hLz: 0.005,
-  hRx: -0.19, hRy: 0.895, hRz: 0.005,
+  hLx: 0.180, hLy: 0.869, hLz: 0.005,
+  hRx: -0.180, hRy: 0.869, hRz: 0.005,
   fLx: 0.21, fLy: PROP.ankleH, fLz: 0.0,
   fRx: -0.21, fRy: PROP.ankleH, fRz: 0.0,
   toeL: 0.28, toeR: 0.28,
@@ -148,8 +148,8 @@ export function computeSkeleton(p) {
   const rightS = axis(1, 0, 0, qSpine);
   J.chest.copy(J.pelvis).addScaledVector(upS, PROP.torso);
   J.neck.copy(J.chest).addScaledVector(upS, PROP.neck * 0.6);
-  J.shoulderL.copy(J.chest).addScaledVector(rightS, PROP.shoulderHalf).addScaledVector(upS, -0.02);
-  J.shoulderR.copy(J.chest).addScaledVector(rightS, -PROP.shoulderHalf).addScaledVector(upS, -0.02);
+  J.shoulderL.copy(J.chest).addScaledVector(rightS, PROP.shoulderHalf).addScaledVector(upS, -0.01);
+  J.shoulderR.copy(J.chest).addScaledVector(rightS, -PROP.shoulderHalf).addScaledVector(upS, -0.01);
 
   const qHead = qSpine.clone().multiply(q(p.headPitch, p.headYaw, 0));
   J.head.copy(J.chest).addScaledVector(axis(0, 1, 0, qHead), PROP.headLift);
@@ -421,7 +421,7 @@ export const CASTS = {
     label: 'FALL', color: '#a64dff', fx: 'shockwave', fxAt: 0.41, glow: 'both',
     keys: [
       { d: 0.30, ease: 'out', p: { hLx: 0.20, hLy: 1.70, hLz: 0.12, hRx: -0.20, hRy: 1.70, hRz: 0.12, rootY: 0.99, fLx: 0.16, fRx: -0.16, lean: -0.08, headPitch: -0.08, headYaw: 0, spineYaw: 0 } },
-      { d: 0.11, ease: 'in', p: { hLx: 0.16, hLy: 0.26, hLz: 0.36, hRx: -0.16, hRy: 0.26, hRz: 0.36, rootY: 0.47, lean: 1.00, headPitch: 0.30, fLx: 0.22, fLz: -0.04, fRx: -0.22, fRz: -0.04 } },
+      { d: 0.11, ease: 'in', p: { hLx: 0.16, hLy: 0.21, hLz: 0.36, hRx: -0.16, hRy: 0.21, hRz: 0.36, rootY: 0.47, lean: 1.00, headPitch: 0.30, fLx: 0.22, fLz: -0.04, fRx: -0.22, fRz: -0.04 } },
       { d: 0.28, ease: 'linear', p: {} },
       { d: 0.48, ease: 'inout', p: { ...BASE } },
     ],
