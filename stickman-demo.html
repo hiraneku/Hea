@@ -15,16 +15,23 @@
   }
   #title small { display: block; font-weight: 400; opacity: .8; font-size: 12px; }
   #panel {
-    position: fixed; left: 50%; transform: translateX(-50%); bottom: 10px;
-    display: flex; flex-direction: column; gap: 6px; align-items: center;
-    background: rgba(16,10,28,.72); padding: 10px; border-radius: 14px; backdrop-filter: blur(6px);
-    max-width: 96vw; font: 14px system-ui, sans-serif; color: #fff;
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 8px;
+    display: flex; flex-direction: column; gap: 6px; align-items: stretch;
+    background: rgba(16,10,28,.72); padding: 8px; border-radius: 14px; backdrop-filter: blur(6px);
+    width: min(97vw, 600px); max-height: 38vh; overflow-y: auto;
+    font: 14px system-ui, sans-serif; color: #fff;
   }
-  .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  #panel.collapsed .row, #panel.collapsed .hint { display: none; }
+  #collapseBtn { align-self: center; padding: 6px 14px; min-height: 34px; font-size: 12.5px; opacity: .9; }
+  .row {
+    display: flex; gap: 6px; flex-wrap: nowrap; overflow-x: auto; max-width: 100%;
+    justify-content: safe center; align-items: center; scrollbar-width: none; padding-bottom: 2px;
+  }
+  .row::-webkit-scrollbar { display: none; }
   button {
     appearance: none; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08);
-    color: #fff; border-radius: 9px; padding: 10px 14px; font: 600 14px system-ui, sans-serif;
-    min-height: 42px; cursor: pointer;
+    color: #fff; border-radius: 9px; padding: 8px 12px; font: 600 13px system-ui, sans-serif;
+    min-height: 38px; cursor: pointer; flex: 0 0 auto; white-space: nowrap;
   }
   button:active { transform: scale(.96); }
   button.on { background: #fff; color: #1c1030; border-color: #fff; }
@@ -40,6 +47,7 @@
   <small>Kepala bulat besar, tungkai tebal mulus, pose prosedural + ragdoll fisika. Seret untuk memutar kamera, cubit/scroll untuk zoom.</small>
 </div>
 <div id="panel">
+  <button data-act="collapse" id="collapseBtn">Sembunyikan Kontrol ▾</button>
   <div class="row">
     <button data-act="idle" class="modebtn on">Diam</button>
     <button data-act="walk" class="modebtn">Jalan</button>
@@ -90,10 +98,10 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 300);
-camera.position.set(3.2, 1.7, 4.6);
+camera.position.set(3.4, 1.9, 5.2);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 1.0, 0);
+controls.target.set(0, 0.95, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.minDistance = 1.6;
@@ -505,7 +513,18 @@ function applyTheme() {
 }
 applyTheme();
 
-document.getElementById('panel').addEventListener('click', (e) => {
+const panelEl = document.getElementById('panel');
+/**
+ * Shift the rendered scene up by part of the panel's height so the fighter
+ * stands in the visible area above the controls instead of behind them.
+ */
+function updateViewOffset() {
+  const shift = Math.min(panelEl.offsetHeight * 0.6, innerHeight * 0.24);
+  if (shift > 4) camera.setViewOffset(innerWidth, innerHeight, 0, shift, innerWidth, innerHeight);
+  else camera.clearViewOffset();
+}
+
+panelEl.addEventListener('click', (e) => {
   const btn = e.target.closest('button');
   if (!btn) return;
   const act = btn.dataset.act;
@@ -517,7 +536,12 @@ document.getElementById('panel').addEventListener('click', (e) => {
     return;
   }
   if (!act) return;
-  if (act === 'idle' || act === 'walk' || act === 'run') setMode(act);
+  if (act === 'collapse') {
+    const collapsed = panelEl.classList.toggle('collapsed');
+    btn.textContent = collapsed ? 'Tampilkan Kontrol ▴' : 'Sembunyikan Kontrol ▾';
+    requestAnimationFrame(updateViewOffset);
+  }
+  else if (act === 'idle' || act === 'walk' || act === 'run') setMode(act);
   else if (act === 'jump') doJump();
   else if (act.startsWith('cast-')) startCast(act.slice(5));
   else if (act === 'hit') doHit();
@@ -539,7 +563,9 @@ addEventListener('resize', () => {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  updateViewOffset();
 });
+updateViewOffset();
 
 /* ---------------------------------------------------------------- loop -- */
 const clock = new THREE.Clock();
