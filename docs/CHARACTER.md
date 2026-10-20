@@ -450,3 +450,16 @@ bukan 17 cm atau 44 cm bind. Knee chain tetap lurus. Arah upper arm ±0,22
 dan forearm ±0,16 memberi ruang rileks di samping tubuh, tanpa A-pose lebar.
 Test jarak minimum/maksimum mencegah regresi ke kedua ekstrem. Skin, entry/exit
 stance dan playback v8 tidak berubah.
+
+## Integrasi arena gameplay (disetujui setelah v9)
+
+AvatarModel kini default ke models/101172-rigged.glb?revision=9 (relatif root
+halaman game untuk kompatibilitas /Hea/). Rig bermetadata memakai CharacterPlayback
+untuk Start/Walking/Stop serta flight. Root displacement diekstrak lalu dibuang,
+bukan ditambahkan ke physics: tidak ada lift/perpindahan ganda. State airborne
+arena memulai flight, kontak ground meminta landing, speed ground mengendalikan
+gait dan intent lanjut Walking. Speed tinggi memakai Walking yang dipercepat
+sampai tersedia Running khusus. Death melepas animasi ke bind; ragdoll existing
+menyembunyikan avatar seperti sebelumnya. Model non-HEA masih memakai clip adapter
+lama dan kegagalan load tetap mempertahankan box. Preview tetap tersedia untuk
+inspeksi, tetapi karakter ini sekarang aktif di arena utama.

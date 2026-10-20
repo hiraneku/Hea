@@ -1237,8 +1237,9 @@ describe('portable 101172 rig and Walking asset', () => {
     const loader = vi.spyOn(GLTFLoader.prototype, 'loadAsync').mockResolvedValue(gltf);
     try {
       const playerRoot = new THREE.Group();
-      const avatar = new AvatarModel(playerRoot, '/models/101172-rigged.glb');
+      const avatar = new AvatarModel(playerRoot);
       await avatar.load();
+      expect(loader).toHaveBeenCalledWith('models/101172-rigged.glb?revision=9');
       expect(avatar.ready).toBe(true);
       expect(avatar.clipNames).toEqual(['walk']);
       expect(gltf.scene.rotation.y).toBeCloseTo(Math.PI, 6);
@@ -1252,12 +1253,17 @@ describe('portable 101172 rig and Walking asset', () => {
       ).toBeGreaterThan(0.1);
       for (let i = 0; i < 60; i++)
         avatar.update(1 / 60, { speed: 0, airborne: false, dead: false });
-      expect(hip.position.y).toBeCloseTo(bindY, 5);
+      expect(Math.abs(hip.position.y - bindY)).toBeLessThan(0.05);
       for (let i = 0; i < 40; i++)
         avatar.update(1 / 60, { speed: 2, airborne: false, dead: false });
-      for (let i = 0; i < 40; i++) avatar.update(1 / 60, { speed: 2, airborne: true, dead: false });
+      for (let i = 0; i < 70; i++) avatar.update(1 / 60, { speed: 2, airborne: true, dead: false });
       expect(avatar.current).toBe('air');
-      expect(hip.position.y).toBeCloseTo(bindY, 5);
+      expect(Math.abs(hip.position.y - bindY)).toBeLessThan(0.06);
+      expect(playerRoot.getObjectByName('Root')!.position.length()).toBeLessThan(1e-6);
+      for (let i = 0; i < 120; i++)
+        avatar.update(1 / 60, { speed: 0, airborne: false, dead: false });
+      expect(avatar.current).toBe('idle');
+      expect(playerRoot.getObjectByName('Root')!.position.length()).toBeLessThan(1e-6);
       expect(playerRoot.position.toArray()).toEqual([0, 0, 0]);
       expect(avatar.measured.height).toBeCloseTo(1.52, 2);
     } finally {

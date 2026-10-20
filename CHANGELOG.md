@@ -7,6 +7,15 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diterapkan — karakter v9 di arena gameplay
+
+- Avatar utama memakai GLB rigged putih v9 dengan URL relatif yang valid di Pages.
+- Reuse CharacterPlayback untuk Start/Walking/Stop dan sustained flight/landing
+  berdasarkan state pemain arena, bukan animasi viewer terpisah.
+- Root motion animasi dibuang: fisika arena tetap satu-satunya pengendali posisi,
+  ketinggian, tabrakan dan kamera. Ragdoll/first person tetap mengikuti sistem lama.
+- Pertahankan warna putih tanpa tint emissive merah; fallback box tetap tersedia.
+
 ### Diganti / diperbaiki — pose flight netral v9
 
 - Koreksi v8 yang terlalu rapat: ankle hover berjarak sekitar 25,5 cm,

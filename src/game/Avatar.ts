@@ -9,6 +9,8 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CharacterPlayback } from '../character/CharacterPlayback';
+import { RIG_REVISION, RIGGED_CHARACTER } from '../character/rig101172';
 
 export type AvatarPose = 'idle' | 'walk' | 'run' | 'air' | 'dead';
 
@@ -50,6 +52,8 @@ export class AvatarModel {
   /** Everything the model owns; empty until the asset arrives. */
   readonly group = new THREE.Group();
   private mixer?: THREE.AnimationMixer;
+  private playback?: CharacterPlayback;
+  private wasAirborne = false;
   private actions = new Map<AvatarPose, THREE.AnimationAction>();
   private pose: AvatarPose = 'idle';
   private speedBlend = 1;
@@ -59,7 +63,7 @@ export class AvatarModel {
 
   constructor(
     parent: THREE.Object3D,
-    private readonly url = '/models/101172.glb',
+    private readonly url = `${RIGGED_CHARACTER}?revision=${RIG_REVISION}`,
     /** Metres from the soles to the crown the model is scaled to. */
     private readonly height = 1.52,
   ) {
@@ -121,7 +125,7 @@ export class AvatarModel {
         mesh.receiveShadow = true;
         // A dim warm key on the armour, so the player reads warm in an arena of cold stone.
         const material = mesh.material as THREE.MeshStandardMaterial;
-        if (material && 'emissive' in material && material.emissive)
+        if (!metadata && material && 'emissive' in material && material.emissive)
           material.emissive.setHex(0x2a0a06);
       });
       this.group.add(model);
@@ -137,7 +141,14 @@ export class AvatarModel {
         }
         this.actions.set(pose, action);
       }
-      this.actions.get('idle')?.play();
+      if (metadata?.anatomy && gltf.animations.some((clip) => clip.name === 'Walking')) {
+        // Animation owns bone articulation only. Arena physics owns translation,
+        // ground contact and flight height; never apply preview root displacement.
+        this.mixer.stopAllAction();
+        this.playback = new CharacterPlayback(model, gltf.animations);
+        this.playback.rootMotionEnabled = true;
+        this.playback.setMode('bind', true);
+      } else this.actions.get('idle')?.play();
       this.pose = 'idle';
     } catch {
       /* The asset is optional: without it the body stays the grey box. */
@@ -151,6 +162,27 @@ export class AvatarModel {
   update(dt: number, state: AvatarState) {
     if (!this.mixer) return;
     const next = avatarPose(state);
+    if (this.playback) {
+      const player = this.playback;
+      if (state.dead) {
+        if (this.pose !== 'dead') player.setMode('bind', true);
+        this.wasAirborne = false;
+        this.pose = next;
+        return;
+      }
+      const moving = !state.airborne && state.speed > 0.15;
+      // The source only supplies Walking: scale that gait to actual ground speed
+      // rather than freeze at the run threshold when Running is absent.
+      player.speed = THREE.MathUtils.clamp(state.speed / this.walkSpeed, 0.15, 3);
+      if (state.airborne && !this.wasAirborne) player.fly(0);
+      if (!state.airborne && this.wasAirborne) player.land();
+      player.setMode(moving ? 'walk' : 'bind');
+      player.update(dt);
+      player.consumeRootMotion(); // discard: world movement already came from physics
+      this.wasAirborne = state.airborne;
+      this.pose = next;
+      return;
+    }
     if (next !== this.pose) this.blend(next);
     const action = this.actions.get(this.pose);
     if (action && (this.pose === 'walk' || this.pose === 'run')) {

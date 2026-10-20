@@ -2196,3 +2196,30 @@ test('grimoire: spells can be rearranged across the four slots and lose their BA
   expect(snap.cooldowns[2]).toBeGreaterThan(0.5);
   await page.locator('#panel-done').click();
 });
+
+test('arena loads the white rigged gameplay avatar and drives its flight pose', async ({
+  page,
+}) => {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
+  const rig = page.waitForResponse(
+    (response) => response.url().includes('101172-rigged.glb?revision=9') && response.ok(),
+  );
+  await load(page);
+  await rig;
+  await expect
+    .poll(
+      async () => (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel.ready,
+    )
+    .toBe(true);
+  await page.locator('#start-button').click();
+  await expect
+    .poll(
+      async () => (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel.pose,
+    )
+    .toBe('air');
+  const avatar = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
+  expect(avatar.height).toBeCloseTo(1.52, 2);
+  expect(avatar.clips).toContain('walk');
+  expect(errors).toEqual([]);
+});
