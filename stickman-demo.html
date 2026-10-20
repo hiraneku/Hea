@@ -43,8 +43,8 @@
 </head>
 <body>
 <div id="flash"></div>
-<div id="title">STICKMAN — prototipe pemain gaya Hyun's Dojo
-  <small>Kepala bulat besar, tungkai tebal mulus, pose prosedural + ragdoll fisika. Seret untuk memutar kamera, cubit/scroll untuk zoom.</small>
+<div id="title">STICKMAN — badan sesuai spesifikasi 100 unit
+  <small>Satu permukaan mulus tanpa sambungan (tabung menyapu kurva sendi), pose prosedural + ragdoll. Seret untuk memutar, cubit/scroll untuk zoom.</small>
 </div>
 <div id="panel">
   <button data-act="collapse" id="collapseBtn">Sembunyikan Kontrol ▾</button>
@@ -68,7 +68,7 @@
     <button data-act="band" id="bandBtn">Ikat Kepala</button>
   </div>
   <div class="row" id="colors">
-    <button class="sw on" data-color="#8e00c6" style="background:#8e00c6" aria-label="Ungu"></button>
+    <button class="sw on" data-color="#a000e8" style="background:#a000e8" aria-label="Ungu"></button>
     <button class="sw" data-color="#17171c" style="background:#17171c" aria-label="Hitam"></button>
     <button class="sw" data-color="#f2f2f5" style="background:#f2f2f5" aria-label="Putih"></button>
     <button class="sw" data-color="#d23b2e" style="background:#d23b2e" aria-label="Merah"></button>
@@ -83,8 +83,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  PROP, BONES, JOINTS, makePose, lerpPose, EASE,
-  computeSkeleton, idlePose, gaitPose, airPose, crouchPose,
+  PROP, RADII, BONES, JOINTS, makePose, lerpPose, EASE,
+  computeSkeleton, sweepTube, idlePose, gaitPose, airPose, crouchPose,
   CASTS, castPoseAt, castDuration,
 } from './stickman.mjs';
 
@@ -98,10 +98,10 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 300);
-camera.position.set(2.9, 1.55, 4.4);
+camera.position.set(3.0, 1.7, 4.8);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.85, 0);
+controls.target.set(0, 0.9, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.minDistance = 1.6;
@@ -143,76 +143,106 @@ gridCanvas.width = gridCanvas.height = 128;
 }
 const gridTex = new THREE.CanvasTexture(gridCanvas);
 gridTex.wrapS = gridTex.wrapT = THREE.RepeatWrapping;
-gridTex.repeat.set(45, 45); // 90 m plane -> 2 m tiles
+gridTex.repeat.set(45, 45);
 const gridMat = new THREE.MeshBasicMaterial({ map: gridTex, transparent: true, opacity: 0.35, depthWrite: false, color: '#be8cff' });
 const grid = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), gridMat);
 grid.rotation.x = -Math.PI / 2;
 grid.position.y = 0.01;
 scene.add(grid);
 
-/* ------------------------------------------------------------ stickman -- */
+/* ------------------------------------------------------------ the body -- */
 const group = new THREE.Group();
 scene.add(group);
 
-const bodyMat = new THREE.MeshStandardMaterial({ color: '#8e00c6', roughness: 0.5, emissive: '#8e00c6', emissiveIntensity: 0.18 });
+// One uniform material for the whole body (spec: #A000E8, rough ~0.65).
+const bodyMat = new THREE.MeshStandardMaterial({
+  color: '#a000e8', roughness: 0.65, metalness: 0,
+  emissive: '#a000e8', emissiveIntensity: 0.14,
+});
 
 /**
- * Radius at each joint, from the measured reference: limbs are near-uniform
- * tubes ~0.26 head-diameters thick, the torso column ~0.4 tapering from
- * chest to pelvis. Bone cylinders are baked with the two end radii and a
- * sphere of the joint's radius sits on every joint, so bends read smooth.
+ * A limb/torso tube: preallocated ring grid, refilled every frame by
+ * sweepTube() along the joint curve. One continuous surface per part —
+ * there are no joint spheres or connectors anywhere in this body.
  */
-const jointRadius = {
-  pelvis: 0.085, chest: 0.10, neck: 0.06, head: 0.07,
-  shoulderL: 0.055, shoulderR: 0.055, elbowL: 0.05, elbowR: 0.05, handL: 0.048, handR: 0.048,
-  hipL: 0.062, hipR: 0.062, kneeL: 0.058, kneeR: 0.058, ankleL: 0.055, ankleR: 0.055,
-};
-const sphGeo = new THREE.SphereGeometry(1, 16, 12);
-const boneMeshes = BONES.map(([a, b]) => {
-  const geo = new THREE.CylinderGeometry(jointRadius[b], jointRadius[a], 1, 14);
-  const m = new THREE.Mesh(geo, bodyMat);
-  m.castShadow = true;
-  group.add(m);
-  return { a, b, mesh: m };
-});
-const jointMeshes = {};
-for (const name of JOINTS) {
-  if (name === 'head') continue;
-  const m = new THREE.Mesh(sphGeo, bodyMat);
-  m.scale.setScalar(jointRadius[name]);
-  m.castShadow = true;
-  group.add(m);
-  jointMeshes[name] = m;
+function makeTube(rings, radial) {
+  const geo = new THREE.BufferGeometry();
+  const pos = new THREE.BufferAttribute(new Float32Array(rings * radial * 3), 3);
+  const nor = new THREE.BufferAttribute(new Float32Array(rings * radial * 3), 3);
+  pos.setUsage(THREE.DynamicDrawUsage);
+  nor.setUsage(THREE.DynamicDrawUsage);
+  geo.setAttribute('position', pos);
+  geo.setAttribute('normal', nor);
+  const idx = [];
+  for (let i = 0; i < rings - 1; i++) {
+    for (let j = 0; j < radial; j++) {
+      const a = i * radial + j;
+      const b = i * radial + ((j + 1) % radial);
+      const c = (i + 1) * radial + j;
+      const d = (i + 1) * radial + ((j + 1) % radial);
+      idx.push(a, b, c, b, d, c);
+    }
+  }
+  geo.setIndex(idx);
+  const mesh = new THREE.Mesh(geo, bodyMat);
+  mesh.castShadow = true;
+  mesh.frustumCulled = false;
+  group.add(mesh);
+  return { mesh, rings, radial, pos, nor };
+}
+const tubeTorso = makeTube(24, 14);
+const tubeArmL = makeTube(22, 12);
+const tubeArmR = makeTube(22, 12);
+const tubeLegL = makeTube(22, 12);
+const tubeLegR = makeTube(22, 12);
+function fillTube(t, points, radii) {
+  sweepTube(points, radii, t.rings, t.radial, t.pos.array, t.nor.array);
+  t.pos.needsUpdate = true;
+  t.nor.needsUpdate = true;
 }
 
-/* Head: big sphere + sharp pale eyes + optional headband, all in a group
-   oriented by the skeleton's head quaternion. */
+// Head: ellipsoid (17w x 19h x 14d) with a subtly tapered jaw.
 const headGroup = new THREE.Group();
 group.add(headGroup);
-const headMesh = new THREE.Mesh(sphGeo, bodyMat);
-headMesh.scale.setScalar(PROP.headR);
+const headGeo = new THREE.SphereGeometry(1, 28, 20);
+{
+  const p = headGeo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let i = 0; i < p.count; i++) {
+    v.fromBufferAttribute(p, i);
+    if (v.y < 0) {
+      const f = 1 + v.y * 0.16; // narrow toward the jaw
+      v.x *= f;
+      v.z *= f;
+    }
+    p.setXYZ(i, v.x, v.y, v.z);
+  }
+  headGeo.computeVertexNormals();
+}
+const headMesh = new THREE.Mesh(headGeo, bodyMat);
+headMesh.scale.set(PROP.headRX, PROP.headR, PROP.headRZ);
 headMesh.castShadow = true;
 headGroup.add(headMesh);
 
+// Small narrow eyes only — they never change the head silhouette.
 const eyeCanvas = document.createElement('canvas');
 eyeCanvas.width = 128; eyeCanvas.height = 64;
 {
   const g = eyeCanvas.getContext('2d');
   g.clearRect(0, 0, 128, 64);
   g.fillStyle = '#f6f2ff';
-  // One big sharp slanted eye, inner corner low and pointed (determined look).
   g.beginPath();
-  g.moveTo(3, 38); g.lineTo(30, 9); g.lineTo(113, 15); g.lineTo(125, 32);
-  g.lineTo(88, 52); g.lineTo(25, 50); g.closePath();
+  g.moveTo(4, 38); g.lineTo(34, 20); g.lineTo(112, 24); g.lineTo(124, 34);
+  g.lineTo(84, 44); g.lineTo(28, 43); g.closePath();
   g.fill();
 }
 const eyeTex = new THREE.CanvasTexture(eyeCanvas);
 const eyeMat = new THREE.MeshBasicMaterial({ map: eyeTex, transparent: true, side: THREE.DoubleSide, depthWrite: false });
 function makeEye(sideSign) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.14, 0.07), eyeMat);
-  m.position.set(sideSign * 0.085, -0.03, PROP.headR * 0.915);
-  m.rotation.y = sideSign * 0.4;
-  if (sideSign < 0) m.scale.x = -1; // mirror the slant
+  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.085, 0.042), eyeMat);
+  m.position.set(sideSign * 0.06, -0.005, PROP.headRZ * 0.92);
+  m.rotation.y = sideSign * 0.42;
+  if (sideSign < 0) m.scale.x = -1;
   m.renderOrder = 2;
   headGroup.add(m);
   return m;
@@ -221,40 +251,47 @@ makeEye(1);
 makeEye(-1);
 
 const bandMesh = new THREE.Mesh(
-  new THREE.TorusGeometry(PROP.headR * 1.02, 0.028, 8, 28),
+  new THREE.TorusGeometry((PROP.headRX + PROP.headRZ) / 2 * 1.04, 0.024, 8, 28),
   new THREE.MeshStandardMaterial({ color: '#d7263d', roughness: 0.6 }),
 );
-bandMesh.position.y = 0.04;
+bandMesh.position.y = 0.035;
 bandMesh.rotation.x = Math.PI / 2 - 0.18;
 bandMesh.castShadow = true;
 bandMesh.visible = false;
 headGroup.add(bandMesh);
 
-/* Katana in the right hand, as in the reference: black grip, chunky gold
-   guard disc, wide dark navy blade. The blade direction follows the
-   forearm biased backward, so at rest it rides over the shoulder. */
+// Feet: simple rounded ellipsoids, 5u long x 4u wide, no toes.
+const footGeo = new THREE.SphereGeometry(1, 16, 12);
+const footL = new THREE.Mesh(footGeo, bodyMat);
+const footR = new THREE.Mesh(footGeo, bodyMat);
+footL.castShadow = footR.castShadow = true;
+group.add(footL, footR);
+
+/* Katana (optional weapon, not part of the body): black grip, chunky gold
+   guard disc, wide dark navy blade. Direction follows the forearm biased
+   backward, so at rest it rides over the shoulder like the reference. */
 const katana = new THREE.Group();
 {
   const handle = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.018, 0.018, 0.22, 10),
+    new THREE.CylinderGeometry(0.017, 0.017, 0.22, 10),
     new THREE.MeshStandardMaterial({ color: '#14141c', roughness: 0.7 }),
   );
   handle.position.y = -0.05;
   const pommel = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.021, 0.021, 0.025, 10),
+    new THREE.CylinderGeometry(0.02, 0.02, 0.025, 10),
     new THREE.MeshStandardMaterial({ color: '#f5c518', metalness: 0.7, roughness: 0.3 }),
   );
-  pommel.position.y = -0.17;
+  pommel.position.y = -0.165;
   const guard = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.05, 0.015, 16),
+    new THREE.CylinderGeometry(0.048, 0.048, 0.014, 16),
     new THREE.MeshStandardMaterial({ color: '#f5c518', metalness: 0.7, roughness: 0.3 }),
   );
   guard.position.y = 0.065;
   const blade = new THREE.Mesh(
-    new THREE.BoxGeometry(0.016, 0.72, 0.06),
+    new THREE.BoxGeometry(0.015, 0.68, 0.058),
     new THREE.MeshStandardMaterial({ color: '#1c2340', metalness: 0.6, roughness: 0.35 }),
   );
-  blade.position.y = 0.43;
+  blade.position.y = 0.41;
   for (const part of [handle, pommel, guard, blade]) {
     part.castShadow = true;
     katana.add(part);
@@ -264,10 +301,15 @@ group.add(katana);
 
 const UP = new THREE.Vector3(0, 1, 0);
 const _d = new THREE.Vector3();
-const _m = new THREE.Vector3();
 const _x = new THREE.Vector3();
 const _y0 = new THREE.Vector3();
 const _z = new THREE.Vector3();
+const _f = new THREE.Vector3();
+const _fx = new THREE.Vector3();
+const _fy = new THREE.Vector3();
+const _m4 = new THREE.Matrix4();
+const _dirA = new THREE.Vector3();
+const _dirB = new THREE.Vector3();
 
 /** Head orientation recovered from raw joints (ragdoll / get-up frames). */
 function headQuatFromJoints(J) {
@@ -279,24 +321,69 @@ function headQuatFromJoints(J) {
     new THREE.Matrix4().makeBasis(_x.clone(), y, z));
 }
 
-function drawSkeleton(J, headQuat) {
-  for (const { a, b, mesh } of boneMeshes) {
-    _d.subVectors(J[b], J[a]);
-    const len = Math.max(_d.length(), 1e-5);
-    _m.addVectors(J[a], J[b]).multiplyScalar(0.5);
-    mesh.position.copy(_m);
-    mesh.quaternion.setFromUnitVectors(UP, _d.normalize());
-    mesh.scale.set(1, len, 1);
+function drawFoot(mesh, ankle, toe, leftAxis) {
+  _f.subVectors(toe, ankle);
+  const len = Math.max(_f.length(), 1e-5);
+  _f.divideScalar(len);
+  _fx.copy(leftAxis).addScaledVector(_f, -leftAxis.dot(_f));
+  if (_fx.lengthSq() < 1e-6) _fx.set(1, 0, 0);
+  _fx.normalize();
+  _fy.crossVectors(_f, _fx);
+  _m4.makeBasis(_fx, _fy, _f);
+  mesh.quaternion.setFromRotationMatrix(_m4);
+  mesh.position.copy(ankle).lerp(toe, 0.42).addScaledVector(_fy, -0.036);
+  mesh.scale.set(0.035, 0.027, len * 0.62);
+}
+
+function drawBody(J, headQuat) {
+  _dirA.subVectors(J.chest, J.pelvis).normalize(); // spine up
+  _dirB.subVectors(J.head, J.neck).normalize(); // head up
+  fillTube(tubeTorso, [
+    J.pelvis.clone().addScaledVector(_dirA, -0.085),
+    J.pelvis.clone().addScaledVector(_dirA, -0.05),
+    J.pelvis.clone(),
+    J.pelvis.clone().lerp(J.chest, 0.45),
+    J.chest.clone(),
+    J.neck.clone(),
+    J.head.clone().addScaledVector(_dirB, -0.06),
+  ], RADII.torso);
+
+  for (const [s, tube] of [['L', tubeArmL], ['R', tubeArmR]]) {
+    _f.subVectors(J[`hand${s}`], J[`elbow${s}`]);
+    if (_f.lengthSq() < 1e-8) _f.set(0, -1, 0); else _f.normalize();
+    fillTube(tube, [
+      J.chest.clone().lerp(J[`shoulder${s}`], 0.35),
+      J[`shoulder${s}`].clone(),
+      J[`elbow${s}`].clone(),
+      J[`hand${s}`].clone(),
+      J[`hand${s}`].clone().addScaledVector(_f, 0.05),
+      J[`hand${s}`].clone().addScaledVector(_f, 0.078),
+    ], RADII.arm);
   }
-  for (const name of Object.keys(jointMeshes)) jointMeshes[name].position.copy(J[name]);
+  for (const [s, tube] of [['L', tubeLegL], ['R', tubeLegR]]) {
+    _f.subVectors(J[`ankle${s}`], J[`knee${s}`]);
+    if (_f.lengthSq() < 1e-8) _f.set(0, -1, 0); else _f.normalize();
+    fillTube(tube, [
+      J.pelvis.clone().lerp(J[`hip${s}`], 0.3),
+      J[`hip${s}`].clone(),
+      J[`knee${s}`].clone(),
+      J[`ankle${s}`].clone(),
+      J[`ankle${s}`].clone().addScaledVector(_f, 0.035),
+    ], RADII.leg);
+  }
+
   headGroup.position.copy(J.head);
   headGroup.quaternion.copy(headQuat || headQuatFromJoints(J));
+
+  _x.subVectors(J.hipL, J.hipR).normalize(); // character left axis
+  drawFoot(footL, J.ankleL, J.toeL, _x);
+  drawFoot(footR, J.ankleR, J.toeR, _x);
+
   if (katana.visible) {
-    _d.subVectors(J.handR, J.elbowR).normalize(); // forearm line
+    _d.subVectors(J.handR, J.elbowR).normalize();
     _x.subVectors(J.shoulderL, J.shoulderR).normalize();
     _y0.subVectors(J.chest, J.pelvis).normalize();
-    _z.crossVectors(_x, _y0).normalize(); // character forward
-    // Blade trails backward over the shoulder, like the reference carry.
+    _z.crossVectors(_x, _y0).normalize();
     _d.addScaledVector(_z, -0.5).addScaledVector(_y0, 0.1).normalize();
     katana.position.copy(J.handR).addScaledVector(_d, -0.02);
     katana.quaternion.setFromUnitVectors(UP, _d);
@@ -347,10 +434,9 @@ function spawnRing(at, color, maxR = 2.6, dur = 0.55) {
   });
 }
 
-// Hand glow that charges up while a cast gesture winds up.
 const glowMat = () => new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
-const glowL = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), glowMat());
-const glowR = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), glowMat());
+const glowL = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 10), glowMat());
+const glowR = new THREE.Mesh(new THREE.SphereGeometry(0.09, 14, 10), glowMat());
 group.add(glowL, glowR);
 const glowLight = new THREE.PointLight(0xffffff, 0, 7, 1.6);
 group.add(glowLight);
@@ -369,7 +455,17 @@ function flash(peak = 0.85) {
 const REST = computeSkeleton(makePose()).joints;
 const BRACES = [['shoulderL', 'shoulderR'], ['hipL', 'hipR'], ['shoulderL', 'hipR'], ['shoulderR', 'hipL'], ['head', 'chest'], ['chest', 'hipL'], ['chest', 'hipR']];
 const CONSTRAINTS = [...BONES, ...BRACES].map(([a, b]) => ({ a, b, len: REST[a].distanceTo(REST[b]) }));
-const particleR = (n) => (n === 'head' ? PROP.headR : (jointRadius[n] ?? 0.05));
+const PR_FIXED = { pelvis: 0.07, chest: 0.079, neck: 0.05, head: 0.15 };
+function particleR(n) {
+  if (PR_FIXED[n]) return PR_FIXED[n];
+  if (n.startsWith('shoulder')) return 0.044;
+  if (n.startsWith('elbow')) return 0.041;
+  if (n.startsWith('hand')) return 0.04;
+  if (n.startsWith('hip')) return 0.052;
+  if (n.startsWith('knee')) return 0.047;
+  if (n.startsWith('ankle')) return 0.044;
+  return 0.03;
+}
 let rag = null;
 
 function startRagdoll(J, worldY) {
@@ -415,7 +511,7 @@ function stepRagdoll(dt) {
         const r = particleR(n);
         if (pt.p.y < r) {
           pt.p.y = r;
-          pt.pp.x += (pt.p.x - pt.pp.x) * 0.3; // ground friction
+          pt.pp.x += (pt.p.x - pt.pp.x) * 0.3;
           pt.pp.z += (pt.p.z - pt.pp.z) * 0.3;
         }
       }
@@ -427,12 +523,12 @@ function stepRagdoll(dt) {
 }
 
 /* ------------------------------------------------------------ state -- */
-let mode = 'idle'; // idle | walk | run | cast | ragdoll | getup
+let mode = 'idle';
 let time = 0;
 let phase = 0;
 let runAmt = 0;
 let curPose = idlePose(0);
-let transition = null; // { from, t, dur }
+let transition = null;
 let airY = 0; let vy = 0; let airborne = false;
 let landT = -1;
 let castName = null; let castT = 0; let castFired = false; let returnMode = 'idle';
@@ -500,24 +596,20 @@ function applyTheme() {
     groundMat.color.set('#241335');
     gridMat.color.set('#be8cff'); gridMat.opacity = 0.35;
     hemi.intensity = 0.9; key.intensity = 2.4; rim.intensity = 1.6; rim.color.set('#b78cff');
-    bodyMat.emissiveIntensity = 0.18;
+    bodyMat.emissiveIntensity = 0.14;
   } else {
     scene.background = new THREE.Color('#b9cbd9');
     scene.fog = new THREE.Fog('#b9cbd9', 25, 80);
     groundMat.color.set('#a8b39a');
     gridMat.color.set('#3a4a3a'); gridMat.opacity = 0.28;
     hemi.intensity = 1.25; key.intensity = 2.6; rim.intensity = 0.5; rim.color.set('#ffffff');
-    bodyMat.emissiveIntensity = 0.05;
+    bodyMat.emissiveIntensity = 0.04;
   }
   document.getElementById('themeBtn').textContent = arenaTheme ? 'Latar: Arena' : 'Latar: Terang';
 }
 applyTheme();
 
 const panelEl = document.getElementById('panel');
-/**
- * Shift the rendered scene up by part of the panel's height so the fighter
- * stands in the visible area above the controls instead of behind them.
- */
 function updateViewOffset() {
   const shift = Math.min(panelEl.offsetHeight * 0.6, innerHeight * 0.24);
   if (shift > 4) camera.setViewOffset(innerWidth, innerHeight, 0, shift, innerWidth, innerHeight);
@@ -573,9 +665,9 @@ function targetPose(dt) {
   if (airborne) return airPose(THREE.MathUtils.clamp(vy / 7.4, -1, 1));
   if (mode === 'cast') return castPoseAt(CASTS[castName], castT);
   if (mode === 'walk' || mode === 'run') {
-    const speed = THREE.MathUtils.lerp(5.6, 9.0, runAmt); // short legs, quick steps
+    const speed = THREE.MathUtils.lerp(5.4, 8.6, runAmt);
     phase += speed * dt;
-    gridTex.offset.y -= THREE.MathUtils.lerp(1.6, 4.2, runAmt) * dt / 2;
+    gridTex.offset.y -= THREE.MathUtils.lerp(1.9, 5.0, runAmt) * dt / 2;
     return gaitPose(phase, runAmt);
   }
   return idlePose(time);
@@ -629,7 +721,7 @@ function tick() {
         const wy = group.position.y;
         if (c.fx === 'fireball') spawnFireball(Jc.handR.clone().setY(Jc.handR.y + wy));
         else if (c.fx === 'shell') { spawnShell(Jc.chest.clone().setY(Jc.chest.y + wy), c.color); shakeAmp = Math.max(shakeAmp, 0.05); hitstopT = Math.max(hitstopT, 0.04); }
-        else if (c.fx === 'ring') spawnRing(new THREE.Vector3(0, 1.2 + wy, 0), c.color, 2.8, 0.6);
+        else if (c.fx === 'ring') spawnRing(new THREE.Vector3(0, 1.15 + wy, 0), c.color, 2.8, 0.6);
         else if (c.fx === 'shockwave') {
           spawnRing(new THREE.Vector3(0, 0.03, 0.45), c.color, 4.6, 0.65);
           spawnRing(new THREE.Vector3(0, 0.05, 0.45), '#ffffff', 3.0, 0.5);
@@ -672,7 +764,7 @@ function tick() {
     glowR.position.copy(J.handR);
     glowLight.position.copy(J.chest).add(new THREE.Vector3(0, 0, 0.4));
   }
-  drawSkeleton(J, headQuat);
+  drawBody(J, headQuat);
 
   for (let i = fxList.length - 1; i >= 0; i--) {
     const f = fxList[i];
