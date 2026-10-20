@@ -10,6 +10,7 @@ export class Controls {
   viewRequested = false;
   shieldRequested = false;
   flightRequested = false;
+  paceRequested = false;
   jumpRequested = false;
   private riseHeld = false;
   private descendHeld = false;
@@ -111,7 +112,7 @@ export class Controls {
     this.keys.clear();
     this.shieldRequested = this.flightRequested = this.jumpRequested = false;
     this.shooting = this.shotRequested = this.focusRequested = this.mouseDown = false;
-    this.viewRequested = false;
+    this.viewRequested = this.paceRequested = false;
     this.riseHeld = this.descendHeld = this.dashRequested = false;
     document
       .querySelectorAll('#touch-controls button.held')
@@ -201,6 +202,7 @@ export class Controls {
     const b = this.bindings;
     if (e.code === b.dash || e.code === 'ShiftLeft' || e.code === 'ShiftRight')
       this.dashRequested = true;
+    if (e.code === b.pace) this.paceRequested = true;
     if (e.code === b.focus) this.focusRequested = true;
     if (e.code === b.view) this.viewRequested = true;
     if (e.code === b.shield) this.shieldRequested = true;
@@ -322,6 +324,7 @@ export class Controls {
     for (const [id, request] of [
       ['#shield-toggle', 'shieldRequested'],
       ['#flight-toggle', 'flightRequested'],
+      ['#pace-toggle', 'paceRequested'],
     ] as const)
       document.querySelector(id)!.addEventListener('pointerdown', (e) => {
         if (!this.enabled) return;

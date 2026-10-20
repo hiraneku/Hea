@@ -463,3 +463,49 @@ sampai tersedia Running khusus. Death melepas animasi ke bind; ragdoll existing
 menyembunyikan avatar seperti sebelumnya. Model non-HEA masih memakai clip adapter
 lama dan kegagalan load tetap mempertahankan box. Preview tetap tersedia untuk
 inspeksi, tetapi karakter ini sekarang aktif di arena utama.
+
+## Camera-led facing dan directional locomotion
+
+Implementasi bersama:
+
+- `CharacterFacing`: yaw view, yaw badan, yaw kepala terpisah. Saat diam yaw
+  badan ditahan sampai batas kepala ±60° terlewati. Respons 12–45/s menyesuaikan
+  kecepatan kamera dengan maksimum rotasi 3–12 rad/s. Wrap ±π tidak mengambil
+  lintasan putaran panjang; kepala tidak berpindah sisi mendadak di blind spot.
+- `CharacterLook`: additive Neck 65% / Head 35%, clear sebelum mixer, apply
+  sesudah gait. Pitch atas 35° / bawah 45°. Kamera tetap bebas melewati batas
+  anatomi, tetapi kepala tidak dipaksa mengikuti selebihnya.
+- `CharacterLocomotion`: rig privat normalized untuk two-bone IK. Gait runtime
+  memiliki stance/swing, fase melayang lari, toe-off, knee lift, counter-swing
+  lengan, siku lebih tertekuk, bounce/twist pelvis dan torso. Sprint menambah
+  dorongan/condong/ayunan. Gait arah kontinu menangani maju, samping, mundur,
+  diagonal, serta langkah kecil saat idle turning. Foot lanes tidak saling silang;
+  sole support diukur terhadap geometri dan foot pitch. Ini animasi procedural,
+  bukan motion capture atau clip Running/Strafing tambahan yang tersimpan di GLB.
+- `CharacterArenaDrive`: motor lantai preview. Facing, gait, look, pace dan
+  directional speed memakai kode yang sama dengan `Game` / `AvatarModel`.
+  Game tetap memakai physics dan collider asli; root animasi dibuang, bukan
+  dijumlahkan sebagai movement kedua.
+
+Kontrol game: T (dapat diremap di settings) atau tombol JALAN/LARI/SPRINT untuk
+siklus tiga pace. Shift tetap Dash, F tetap mode terbang, E tetap lock-on IGNIS.
+Kecepatan dasar ground 1,6 / 3,4 / 5,6 m/s. Lock-on memberi skala arah kontinu:
+maju 100%, samping 81%, mundur 62%, termasuk sprint. Di luar lock-on badan
+menghadap arah perjalanan. Saat lock-on badan boleh menyerong sampai sekitar
+17° terhadap kamera. Offset kamera kumulatif melewati 0,65 rad (sekitar 37°)
+melepaskan lock, bukan setiap gerakan kamera kecil.
+
+Preview: pilih Mainkan karakter; T atau tombol pace mengganti kecepatan; E atau
+Lock arah mempertahankan arah hadap view untuk tes strafe/mundur. Drag/orbit kamera
+untuk tes kepala dan putaran badan; perubahan yaw lebih dari 0,65 rad dari arah
+lock awal melepas lock arah. Preview lock adalah referensi arah, bukan target IGNIS
+karena arena preview tidak berisi boss. Space tetap Terbang/Turun. Slider kepala
+manual tetap untuk inspeksi, sedangkan mode main memakai view kamera otomatis.
+
+Bank flight ringan mengikuti gerak, bukan seluruh pitch pandangan. Turn-in-place
+mengangkat kaki bergantian; ini bukan sistem contact IK terrain/foot-lock penuh
+untuk semua pivot. Running/directional gait menggunakan lantai lokal karakter;
+physics menentukan tinggi karakter pada arena, belum terrain IK per telapak.
+Angka ini dapat disetel setelah review gameplay. Test teknis bukan jaminan kualitas
+visual di setiap sudut/perangkat; review renderer tersedia lewat
+`scripts/review-locomotion.mjs` (output di `.cache/motion-review`).

@@ -3428,3 +3428,25 @@ input[type='range'] {
   font-weight: 700;
   cursor: pointer;
 }
+
+.pace-toggle {
+  position: absolute;
+  left: 20px;
+  bottom: 235px;
+  z-index: 12;
+  padding: 10px 14px;
+  border: 1px solid #b5c9c566;
+  border-radius: 8px;
+  background: #18343ee6;
+  color: #fff;
+  font:
+    600 12px Inter,
+    sans-serif;
+  pointer-events: auto;
+  touch-action: manipulation;
+}
+@media (min-width: 800px) {
+  .pace-toggle {
+    bottom: 100px;
+  }
+}

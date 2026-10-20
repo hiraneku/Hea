@@ -7,6 +7,27 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Ditambahkan — camera-led facing, directional locomotion dan tiga pace
+
+- Kepala/leher mengikuti kamera sampai yaw ±60°, mendongak 35° dan menunduk
+  45°. Badan menyusul hanya melewati batas saat diam; respons adaptif dan
+  batas laju putar menghindari snap pada gerakan kamera cepat.
+- Di luar lock-on, badan menghadap perjalanan. Saat lock-on, strafe/mundur
+  mempertahankan arah view dengan allowance diagonal kecil. Lock dilepas setelah
+  offset pandangan sekitar 37°; koreksi kecil tidak langsung membatalkannya.
+- Tombol T/remappable dan tombol HUD bergilir JALAN → LARI → SPRINT. Kecepatan
+  dasar ground 1,6 / 3,4 / 5,6 m/s; saat lock-on samping 81%, mundur 62%.
+- Gait IK runtime khusus lari/sprint, strafe, mundur, diagonal dan langkah putar:
+  stance/swing, toe-off, knee lift, counter-swing lengan, pelvis/torso dan blending.
+  Tidak sekadar mempercepat Walking. Sole support diukur dari geometri sumber,
+  lane kaki dijaga terpisah, smoothing pelvis dan tungkai disinkronkan.
+- Preview memakai facing/look/gait/pace yang sama dengan arena; tombol T dan E
+  serta tombol sentuh tersedia untuk pace dan lock arah kamera pada preview.
+- Flight tetap hover netral dengan bank gerak ringan, tanpa pitch badan mengikuti
+  kamera saat diam. Fisika/camera/shield arena tetap memiliki referensinya sendiri.
+- Regresi tambahan untuk batas kepala, wrap yaw, arah bebas/lock, semua pace,
+  gerak berbagai arah, sole clearance, root tidak berganda dan kontrol browser.
+
 ### Diperbaiki — jangan tampilkan balok saat karakter belum siap
 
 - Boot menunggu model v9 siap sebelum membuka menu/main. Loading karakter kini

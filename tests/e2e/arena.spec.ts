@@ -219,6 +219,17 @@ test('mobile: simultaneous movement and casting, camera focus, landscape and res
     touchPoints: [{ id: 3, x: 320, y: 340 }],
   });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  // Small camera corrections retain lock; a deliberate large look releases it.
+  await expect.poll(async () => (await state(page)).lockedOn).toBe(true);
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchStart',
+    touchPoints: [{ id: 4, x: 350, y: 335 }],
+  });
+  await cdp.send('Input.dispatchTouchEvent', {
+    type: 'touchMove',
+    touchPoints: [{ id: 4, x: 40, y: 335 }],
+  });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await expect.poll(async () => (await state(page)).lockedOn).toBe(false);
   await page.locator('#touch-focus').tap();
   await expect.poll(async () => (await state(page)).lockedOn).toBe(true);
@@ -2222,4 +2233,42 @@ test('arena loads the white rigged gameplay avatar and drives its flight pose', 
   expect(avatar.height).toBeCloseTo(1.52, 2);
   expect(avatar.clips).toContain('walk');
   expect(errors).toEqual([]);
+});
+
+test('camera leads the head before the body and pace has three tiers in the arena', async ({
+  page,
+}) => {
+  await load(page);
+  await page.locator('#start-button').click();
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.freeze(true);
+    h.scenario('locomotion-review');
+    h.face(0);
+    h.step(0.3);
+  });
+  await page.locator('#pace-toggle').click();
+  await step(page, 0.05);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel.pace).toBe(1);
+  await page.locator('#pace-toggle').click();
+  await step(page, 0.05);
+  expect((await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel.pace).toBe(2);
+  const initialBody = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel
+    .bodyYaw;
+  await page.evaluate((body) => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.face(body + 0.6, 1);
+    h.step(1);
+  }, initialBody);
+  let avatar = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
+  expect(Math.abs(avatar.bodyYaw - initialBody)).toBeLessThan(0.05);
+  expect(avatar.headYaw).toBeGreaterThan(0.5);
+  await page.evaluate((body) => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.face(body + 2.1);
+    h.step(1);
+  }, initialBody);
+  avatar = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
+  expect(avatar.bodyYaw - initialBody).toBeGreaterThan(1);
+  expect(Math.abs(avatar.headYaw)).toBeLessThanOrEqual(Math.PI / 3 + 0.001);
 });

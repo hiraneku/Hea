@@ -1,3 +1,9 @@
+import {
+  CharacterFacing,
+  GROUND_PACES,
+  PACE_LABELS,
+  directionalSpeed,
+} from '../character/CharacterFacing';
 import * as THREE from 'three';
 import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
@@ -187,6 +193,10 @@ export class Game {
   private shadows: THREE.InstancedMesh;
   private stamp = new THREE.Object3D();
   private yaw = 0;
+  private characterFacing = new CharacterFacing();
+  private pace = 0;
+  private lockLookX = 0;
+  private lockLookY = 0;
   private pitch = 0.05;
   private roll = 0;
   private health = 100;
@@ -626,7 +636,12 @@ export class Game {
       },
       cameraPosition: this.camera.position.toArray(),
       avatarVisible: this.avatar.visible,
-      avatarModel: avatarReport(this.avatarModel),
+      avatarModel: {
+        ...avatarReport(this.avatarModel),
+        pace: this.pace,
+        bodyYaw: this.characterFacing.yaw,
+        headYaw: this.characterFacing.headYaw,
+      },
       nova: {
         hold: this.novaHold,
         holding: this.novaHolding,
@@ -846,6 +861,8 @@ export class Game {
     this.lockedOn = this.controls.touch;
     this.avatar.visible = true;
     this.avatar.rotation.set(0, 0, 0);
+    this.characterFacing.reset(this.yaw);
+    this.pace = this.lockLookX = this.lockLookY = 0;
     this.playerTrail.reset(this.player.clone().add(new THREE.Vector3(0, 0.8, 0)));
     this.aimAtBoss(1);
     this.facingQuaternion.setFromEuler(new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'));
@@ -1150,16 +1167,32 @@ export class Game {
     if (this.controls.focusRequested) {
       this.controls.focusRequested = false;
       this.lockedOn = !this.lockedOn;
+      this.lockLookX = this.lockLookY = 0;
     }
     if (this.controls.viewRequested) {
       this.controls.viewRequested = false;
       if (!this.outcome) this.toggleCamera();
     }
     const look = this.controls.look();
-    if (Math.abs(look.x) + Math.abs(look.y) > 2) this.lockedOn = false;
-    this.yaw -= look.x * this.settings.sensitivity * 0.0021;
-    this.pitch = clamp(this.pitch - look.y * this.settings.sensitivity * 0.0021, -1.25, 1.35);
-    if ((this.lockedOn || showcase) && this.boss.alive) this.aimAtBoss(1 - Math.exp(-dt * 10));
+    if (this.controls.paceRequested) {
+      this.controls.paceRequested = false;
+      this.pace = (this.pace + 1) % 3;
+    }
+    const paceButton = document.querySelector('#pace-toggle');
+    if (paceButton) paceButton.textContent = PACE_LABELS[this.pace];
+    const lookScale = this.settings.sensitivity * 0.0021;
+    this.yaw -= look.x * lookScale;
+    this.pitch = clamp(this.pitch - look.y * lookScale, -1.25, 1.35);
+    if (this.lockedOn && this.boss.alive && !showcase) {
+      this.lockLookX -= look.x * lookScale;
+      this.lockLookY -= look.y * lookScale;
+      if (Math.hypot(this.lockLookX, this.lockLookY) > 0.65) this.lockedOn = false;
+      else {
+        this.aimAtBoss(1);
+        this.yaw += this.lockLookX;
+        this.pitch = clamp(this.pitch + this.lockLookY, -1.25, 1.35);
+      }
+    } else if (showcase && this.boss.alive) this.aimAtBoss(1 - Math.exp(-dt * 10));
     // This is the avatar's actual facing (and the shield's reference), not its travel direction.
     const desiredFacing = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(this.pitch, this.yaw, 0, 'YXZ'),
@@ -1174,7 +1207,11 @@ export class Game {
       this.yaw,
       this.flightEnabled ? this.pitch : 0,
     );
-    if (!this.flightEnabled) wish.multiplyScalar(GROUND.speed / FLIGHT.speed);
+    if (!this.flightEnabled) {
+      const magnitude = Math.hypot(move.x, move.z);
+      const directional = this.lockedOn && magnitude > 0 ? directionalSpeed(move.z / magnitude) : 1;
+      wish.multiplyScalar((GROUND_PACES[this.pace] * directional) / FLIGHT.speed);
+    }
     // The dash leaves the motor running hot: once the burst itself is over, movement stays
     // markedly faster for half a second and then eases back over the next second, in the air
     // and on foot alike. The clock only runs after the burst so the plateau is felt in full.
@@ -1659,9 +1696,21 @@ export class Game {
       9,
       dt,
     );
-    const pose = this.facingQuaternion
-      .clone()
-      .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(this.bank.x, 0, this.bank.z)));
+    const groundVelocity = Math.hypot(this.velocity.x, this.velocity.z);
+    const travelYaw =
+      groundVelocity > 0.1
+        ? Math.atan2(-this.velocity.x, -this.velocity.z)
+        : this.characterFacing.yaw;
+    this.characterFacing.update(dt, this.yaw, groundVelocity > 0.15, travelYaw, this.lockedOn);
+    const visualVelocity = this.velocity.clone().applyAxisAngle(UP, -this.characterFacing.yaw);
+    const pose = new THREE.Quaternion().setFromEuler(
+      new THREE.Euler(
+        this.flightEnabled ? clamp(visualVelocity.z * 0.012, -0.12, 0.12) : 0,
+        this.characterFacing.yaw,
+        this.flightEnabled ? clamp(-visualVelocity.x * 0.012, -0.1, 0.1) : 0,
+        'YXZ',
+      ),
+    );
     this.avatar.quaternion.copy(this.playerTumble.step(dt, pose));
     // A slow hover bob while flying gently, fading out with speed.
     const cruise = Math.min(1, this.velocity.length() / FLIGHT.speed);
@@ -1689,16 +1738,27 @@ export class Game {
     this.avatar.visible = !this.ragdoll.active && !first;
     if (this.avatarModel.ready) this.retireAvatarBox();
     if (this.avatarModel.ready) {
+      const localVelocity = this.velocity.clone().applyAxisAngle(UP, -this.characterFacing.yaw);
       this.avatarModel.update(dt, {
         speed: this.velocity.length() + this.airDash.velocity.length(),
         airborne: this.flightEnabled || this.knockTime > 0 || !this.onGround,
         dead: this.health <= 0 || this.outcome === 'gameover',
+        localX: -localVelocity.x / 0.76,
+        localForward: -localVelocity.z / 0.76,
+        pace: this.pace,
+        headYaw: this.characterFacing.headYaw,
+        headPitch: -this.pitch,
+        turnRate: this.characterFacing.turnRate,
       });
     }
     // From the eyes the ribbon would only ever smear across the lower edge of the view.
-    this.playerTrail.mesh.visible = !first;
+    this.playerTrail.mesh.visible =
+      !first && (this.flightEnabled || this.airDash.active || this.flightBoost > 0);
     // A body dragged along the ground leaves a furrow, not a light trail.
-    if (this.playerTumble.physical && this.playerTumble.grounded)
+    if (
+      !this.playerTrail.mesh.visible ||
+      (this.playerTumble.physical && this.playerTumble.grounded)
+    )
       this.playerTrail.reset(this.avatar.position);
     else
       this.playerTrail.push(

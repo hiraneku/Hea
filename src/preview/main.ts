@@ -5,7 +5,8 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CharacterLook } from '../character/CharacterLook';
-import { CharacterTestDrive } from '../character/CharacterTestDrive';
+import { CharacterArenaDrive } from '../character/CharacterArenaDrive';
+import { PACE_LABELS } from '../character/CharacterFacing';
 import { CharacterPlayback } from '../character/CharacterPlayback';
 import type { CharacterAnatomy } from '../character/anatomy101172';
 import { RIGGED_CHARACTER, RIG_REVISION } from '../character/rig101172';
@@ -27,7 +28,7 @@ app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>
   <main>
     <section class="stage" aria-label="Preview karakter 3D">
-      <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION}</p></div>
+      <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION} · GERAK 1</p></div>
       <div id="viewport"></div><div id="joint-labels" class="joint-labels" aria-hidden="true" hidden></div>
       <div id="drive-pad" role="group" aria-label="Joystick gerak" hidden><span id="drive-knob"></span><small>GERAK</small></div>
       <button id="drive-flight" class="drive-flight" aria-label="Terbang" hidden disabled>TERBANG</button>
@@ -163,10 +164,11 @@ async function boot() {
       playback?.update(visibleDt);
       applyInspectionMotion?.();
     }
-    look?.apply(
-      THREE.MathUtils.degToRad(Number(yawInput.value)),
-      THREE.MathUtils.degToRad(Number(pitchInput.value)),
-    );
+    if (!driving)
+      look?.apply(
+        THREE.MathUtils.degToRad(Number(yawInput.value)),
+        THREE.MathUtils.degToRad(Number(pitchInput.value)),
+      );
     if (playback) {
       viewport.dataset.motion = playback.isFlying
         ? playback.flightStage
@@ -276,7 +278,32 @@ async function boot() {
     playback.update(0);
     look = new CharacterLook(model);
     headBone = model.getObjectByName('Head');
-    const drive = new CharacterTestDrive(holder, playback);
+    const drive = new CharacterArenaDrive(holder, playback);
+    const paceButton = document.createElement('button');
+    paceButton.id = 'drive-pace';
+    paceButton.textContent = 'JALAN · T';
+    paceButton.disabled = true;
+    const lockButton = document.createElement('button');
+    lockButton.id = 'drive-lock';
+    lockButton.textContent = 'Lock arah · E';
+    lockButton.disabled = true;
+    lockButton.setAttribute('aria-pressed', 'false');
+    const motionControls = document.createElement('div');
+    motionControls.className = 'directional-controls';
+    motionControls.append(paceButton, lockButton);
+    document.querySelector('#drive-toggle')!.parentElement!.append(motionControls);
+    paceButton.onclick = () => {
+      if (driving) drive.cyclePace();
+    };
+    lockButton.onclick = () => {
+      if (driving) drive.toggleLock();
+    };
+    window.addEventListener('keydown', (e) => {
+      if (!driving || e.repeat || /INPUT|SELECT|TEXTAREA/.test((e.target as HTMLElement).tagName))
+        return;
+      if (e.code === 'KeyT') drive.cyclePace();
+      if (e.code === 'KeyE') drive.toggleLock();
+    });
     applyInspectionMotion = () => {
       const delta = playback!
         .consumeRootMotion()
@@ -377,6 +404,11 @@ async function boot() {
         Number(keys.has('KeyW') || keys.has('ArrowUp')) -
         Number(keys.has('KeyS') || keys.has('ArrowDown'));
       const delta = drive.update(dt, x, y, camera);
+      paceButton.textContent = `${PACE_LABELS[drive.pace]} · T`;
+      lockButton.textContent = drive.locked ? 'Lock arah ON · E' : 'Lock arah OFF · E';
+      lockButton.setAttribute('aria-pressed', String(drive.locked));
+      viewport.dataset.pace = String(drive.pace);
+      viewport.dataset.locked = String(drive.locked);
       camera.position.add(delta);
       target.add(delta);
       controls.target.add(delta);
@@ -465,6 +497,7 @@ async function boot() {
     const driveButton = document.querySelector<HTMLButtonElement>('#drive-toggle')!;
     driveButton.onclick = () => {
       driving = !driving;
+      paceButton.disabled = lockButton.disabled = !driving;
       release();
       const elevation = holder.position.y;
       drive.resetMotion();
@@ -502,6 +535,7 @@ async function boot() {
       controls.target.sub(holder.position);
       holder.position.set(0, 0, 0);
       holder.quaternion.identity();
+      drive.facing.reset(0);
       document.querySelector<HTMLOutputElement>('#drive-status')!.value =
         `${driving ? 'Mode main' : 'Mode inspeksi'} · X 0.000 · Z 0.000`;
     };

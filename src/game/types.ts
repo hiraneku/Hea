@@ -19,6 +19,7 @@ export interface KeyBindings {
   rise: string;
   descend: string;
   dash: string;
+  pace: string;
   focus: string;
   shield: string;
   flight: string;
@@ -38,6 +39,7 @@ export const DEFAULT_BINDINGS: KeyBindings = {
   rise: 'Space',
   descend: 'KeyC',
   dash: 'ShiftLeft',
+  pace: 'KeyT',
   focus: 'KeyE',
   shield: 'KeyG',
   flight: 'KeyF',
@@ -58,6 +60,7 @@ export const BINDING_ACTIONS: { id: keyof KeyBindings; label: string }[] = [
   { id: 'rise', label: 'Naik / lompat' },
   { id: 'descend', label: 'Turun' },
   { id: 'dash', label: 'Dash' },
+  { id: 'pace', label: 'Jalan / lari / sprint' },
   { id: 'focus', label: 'Fokus boss' },
   { id: 'shield', label: 'Aegis ON/OFF' },
   { id: 'flight', label: 'Mode terbang / jalan' },

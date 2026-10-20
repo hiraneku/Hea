@@ -425,3 +425,13 @@ select:disabled {
 .drive-flight[hidden] {
   display: none;
 }
+
+.directional-controls {
+  display: flex;
+  gap: 8px;
+  grid-column: 1 / -1;
+}
+.directional-controls button {
+  flex: 1;
+  padding: 12px;
+}

@@ -9,6 +9,8 @@
  */
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CharacterLook } from '../character/CharacterLook';
+import { CharacterLocomotion } from '../character/CharacterLocomotion';
 import { CharacterPlayback } from '../character/CharacterPlayback';
 import { RIG_REVISION, RIGGED_CHARACTER } from '../character/rig101172';
 
@@ -21,6 +23,12 @@ export interface AvatarState {
   airborne: boolean;
   /** Health is gone. */
   dead: boolean;
+  localX?: number;
+  localForward?: number;
+  pace?: number;
+  headYaw?: number;
+  headPitch?: number;
+  turnRate?: number;
 }
 
 /**
@@ -54,6 +62,8 @@ export class AvatarModel {
   private mixer?: THREE.AnimationMixer;
   private playback?: CharacterPlayback;
   private wasAirborne = false;
+  private look?: CharacterLook;
+  private locomotion?: CharacterLocomotion;
   loadError?: string;
   private actions = new Map<AvatarPose, THREE.AnimationAction>();
   private pose: AvatarPose = 'idle';
@@ -149,6 +159,8 @@ export class AvatarModel {
         this.playback = new CharacterPlayback(model, gltf.animations);
         this.playback.rootMotionEnabled = true;
         this.playback.setMode('bind', true);
+        this.look = new CharacterLook(model);
+        this.locomotion = new CharacterLocomotion(model);
       } else this.actions.get('idle')?.play();
       this.pose = 'idle';
     } catch (error) {
@@ -168,8 +180,12 @@ export class AvatarModel {
     const next = avatarPose(state);
     if (this.playback) {
       const player = this.playback;
+      this.look?.clear();
       if (state.dead) {
-        if (this.pose !== 'dead') player.setMode('bind', true);
+        if (this.pose !== 'dead') {
+          player.setMode('bind', true);
+          this.locomotion?.reset();
+        }
         this.wasAirborne = false;
         this.pose = next;
         return;
@@ -177,12 +193,20 @@ export class AvatarModel {
       const moving = !state.airborne && state.speed > 0.15;
       // The source only supplies Walking: scale that gait to actual ground speed
       // rather than freeze at the run threshold when Running is absent.
-      player.speed = THREE.MathUtils.clamp(state.speed / this.walkSpeed, 0.15, 3);
+      if (moving) player.speed = THREE.MathUtils.clamp(state.speed / this.walkSpeed, 0.65, 3);
       if (state.airborne && !this.wasAirborne) player.fly(0);
       if (!state.airborne && this.wasAirborne) player.land();
       player.setMode(moving ? 'walk' : 'bind');
       player.update(dt);
       player.consumeRootMotion(); // discard: world movement already came from physics
+      this.locomotion?.apply(dt, {
+        x: state.localX ?? 0,
+        forward: state.localForward ?? state.speed / 0.76,
+        pace: state.pace ?? 0,
+        airborne: state.airborne,
+        turnRate: state.turnRate ?? 0,
+      });
+      this.look?.apply(state.headYaw ?? 0, state.headPitch ?? 0);
       this.wasAirborne = state.airborne;
       this.pose = next;
       return;

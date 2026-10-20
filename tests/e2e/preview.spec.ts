@@ -206,3 +206,23 @@ test('playable flight supports Space, steering, touch descent and safe reset', a
   await page.locator('#drive-toggle').click();
   await expect(fly).toBeHidden();
 });
+
+test('shared preview cycles walk/run/sprint and enables camera-relative lock', async ({ page }) => {
+  await page.goto('preview/');
+  await expect(page.locator('#load-status')).toBeHidden({ timeout: 30000 });
+  await page.locator('#drive-toggle').click();
+  await page.locator('#drive-pace').click();
+  await expect(page.locator('#drive-pace')).toContainText('LARI');
+  await page.locator('#drive-pace').click();
+  await expect(page.locator('#drive-pace')).toContainText('SPRINT');
+  await page.locator('#drive-lock').click();
+  await expect(page.locator('#drive-lock')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('canvas').focus();
+  await page.keyboard.down('a');
+  await expect
+    .poll(() => page.locator('#drive-status').textContent())
+    .not.toBe('Mode main · X 0.000 · Z 0.000');
+  await page.keyboard.up('a');
+  await page.locator('#drive-pace').click();
+  await expect(page.locator('#drive-pace')).toContainText('JALAN');
+});

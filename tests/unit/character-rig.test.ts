@@ -4,6 +4,8 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { armRegions101172 } from '../../src/character/skinRegions101172';
+import { CharacterLocomotion } from '../../src/character/CharacterLocomotion';
+import { CharacterArenaDrive } from '../../src/character/CharacterArenaDrive';
 import { CharacterLook } from '../../src/character/CharacterLook';
 import { CharacterTestDrive } from '../../src/character/CharacterTestDrive';
 import { taperForearms101172 } from '../../src/character/shape101172';
@@ -1233,6 +1235,73 @@ describe('portable 101172 rig and Walking asset', () => {
     player.dispose();
   });
 
+  it('builds distinct directional running/sprint poses without moving the physics root', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.setMode('bind', true);
+    const gait = new CharacterLocomotion(gltf.scene);
+    let minFloor = Infinity;
+    const positions = mesh.geometry.getAttribute('position');
+    const soles: number[] = [];
+    for (let i = 0; i < positions.count; i += 20) if (positions.getY(i) < 0.1) soles.push(i);
+    const hips = gltf.scene.getObjectByName('Hips')!;
+    const root = gltf.scene.getObjectByName('Root')!;
+    for (const pace of [0, 1, 2])
+      for (const angle of [0, Math.PI / 4, Math.PI / 2, Math.PI, -Math.PI / 2]) {
+        for (let i = 0; i < 100; i++) {
+          player.update(1 / 120);
+          gait.apply(1 / 120, {
+            x: Math.sin(angle) * 3,
+            forward: Math.cos(angle) * 3,
+            pace,
+            airborne: false,
+            turnRate: 0,
+          });
+          gltf.scene.updateMatrixWorld(true);
+          if (i > 50 && i % 10 === 0)
+            for (const vertex of soles) {
+              const p = mesh.applyBoneTransform(
+                vertex,
+                new THREE.Vector3().fromBufferAttribute(positions, vertex),
+              );
+              minFloor = Math.min(minFloor, p.y);
+            }
+          expect(root.position.length()).toBeLessThan(1e-6);
+          expect(hips.position.y).toBeGreaterThan(0.9);
+          mesh.skeleton.bones.forEach((b) =>
+            expect(Number.isFinite(b.quaternion.length())).toBe(true),
+          );
+        }
+      }
+    expect(minFloor).toBeGreaterThan(-0.005);
+    player.dispose();
+  });
+  it('preview uses camera-relative lock, all pace tiers, bounded head and idle turning', () => {
+    const body = new THREE.Group();
+    body.add(gltf.scene);
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.setMode('bind', true);
+    const drive = new CharacterArenaDrive(body, player);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(0, 1, -5);
+    camera.lookAt(0, 1, 0);
+    camera.updateMatrixWorld(true);
+    drive.toggleLock();
+    drive.cyclePace();
+    expect(drive.pace).toBe(1);
+    for (let i = 0; i < 60; i++) drive.update(1 / 60, 1, 0, camera);
+    expect(Math.abs(drive.facing.yaw)).toBeLessThan(0.31);
+    expect(Math.abs(body.position.x)).toBeGreaterThan(0.2);
+    drive.cyclePace();
+    expect(drive.pace).toBe(2);
+    drive.cyclePace();
+    expect(drive.pace).toBe(0);
+    camera.lookAt(5, 1, -5);
+    camera.updateMatrixWorld(true);
+    drive.update(1 / 60, 0, 0, camera);
+    expect(drive.locked).toBe(false);
+    drive.resetMotion();
+    player.dispose();
+  });
   it('loads the same exported GLB through the actual gameplay AvatarModel adapter', async () => {
     const loader = vi.spyOn(GLTFLoader.prototype, 'loadAsync').mockResolvedValue(gltf);
     try {

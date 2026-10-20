@@ -23,8 +23,8 @@ export class CharacterLook {
   /** Angles in radians, relative to the character's body, not the camera. */
   apply(yaw: number, pitch: number) {
     this.clear();
-    yaw = THREE.MathUtils.clamp(yaw, (-70 * Math.PI) / 180, (70 * Math.PI) / 180);
-    pitch = THREE.MathUtils.clamp(pitch, (-30 * Math.PI) / 180, (30 * Math.PI) / 180);
+    yaw = THREE.MathUtils.clamp(yaw, (-60 * Math.PI) / 180, (60 * Math.PI) / 180);
+    pitch = THREE.MathUtils.clamp(pitch, (-35 * Math.PI) / 180, (45 * Math.PI) / 180);
     for (const j of this.joints) {
       j.base.copy(j.bone.quaternion);
       j.bone.quaternion.multiply(
