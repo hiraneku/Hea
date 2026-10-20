@@ -7,7 +7,7 @@ test('temporary character preview loads the GLB without booting the game', async
   await expect(page.locator('#load-status')).toBeHidden({ timeout: 30_000 });
   await expect(page.locator('#model-info')).toContainText('Siap diperiksa');
   await expect(page.locator('#model-info')).toContainText('28 tulang · 1 skinned mesh');
-  await expect(page.locator('#model-info')).toContainText('Walking · 1.12 s');
+  await expect(page.locator('#model-info')).toContainText('Walking · 1.20 s');
   await expect(page.locator('#rig-note')).toContainText('Aset gameplay sungguhan');
   await expect(page.locator('canvas')).toBeVisible();
   await expect(page.locator('#start-button')).toHaveCount(0);
@@ -55,12 +55,12 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   await expect(phase).toHaveValue('0');
   await expect(page.getByRole('link', { name: 'Unduh GLB rig + Walking' })).toHaveAttribute(
     'href',
-    /models\/101172-rigged\.glb$/,
+    /models\/101172-rigged\.glb\?revision=2$/,
   );
 });
 
 test('missing rigged asset reports a useful loading error', async ({ page }) => {
-  await page.route('**/models/101172-rigged.glb', (route) => route.abort());
+  await page.route('**/models/101172-rigged.glb*', (route) => route.abort());
   await page.goto('preview/');
   await expect(page.locator('#load-status')).toContainText('Model gagal dimuat');
   await expect(page.locator('#play')).toBeDisabled();

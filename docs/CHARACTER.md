@@ -30,22 +30,44 @@ jadi belum ada rig jari. Tulang terminal dipakai sebagai ujung rantai, bukan sem
 harus memiliki weight. Jumlah geometri masih **188.524 segitiga / 116.724 vertex**;
 ini belum aset low-poly yang dioptimalkan untuk HP.
 
-## Walking v1
+## Walking v2 — koreksi setelah review visual
 
-- Loop **1,12 detik**, in-place, tanpa translasi Root di dunia.
-- Perpindahan satu siklus **1,04 m** pada skala aset (kecepatan acuan ±0,929 m/s).
-- Siklus kaki berlawanan 50%; stance 62% memberi fase tumpuan ganda.
+- Loop **1,20 detik**, in-place, tanpa translasi Root di dunia.
+- Perpindahan satu siklus **0,82 m** pada skala aset (kecepatan acuan ±0,683 m/s).
+- Siklus kaki berlawanan 50%; stance 52% memberi transisi tumpuan singkat pada model bergaya stickman ini.
 - IK dua tulang dibake saat authoring untuk menjaga lutut menekuk ke depan.
-- Kontak tumit → telapak → toe-off; clearance swing dan koreksi permukaan telapak
-  dibake terhadap lantai datar (target clearance kontak 2 mm).
+- Roll pergelangan dibuat kecil untuk telapak model yang membulat. Belum mengklaim
+  artikulasi tumit–jari manusia yang sempurna. Clearance swing 5,5 cm dan koreksi
+  permukaan telapak dibake terhadap lantai datar (target clearance kontak 2 mm).
 - Panggul memiliki bob/sway dan rotasi kecil; dada berputar berlawanan, kepala
   dikompensasi, lengan berayun berlawanan dengan kaki, siku dan pergelangan melunak.
 - 120 interval sampling per siklus; track quaternion dengan interpolasi standar
   dan endpoint yang menyambung. Tidak memerlukan solver khusus saat dimainkan.
 
-Ini **versi pertama untuk direview**, bukan klaim motion capture atau rig final
+Ini **revisi yang masih perlu direview**, bukan klaim motion capture atau rig final
 untuk semua pose. Perlu penilaian visual pengguna, tuning weight saat pose ekstrem,
 dan kelak animasi idle/run/air/cast. Belum ada foot IK runtime untuk tangga/lereng.
+
+### Mengapa v1 ditolak dan apa yang diperbaiki
+
+V1 memiliki postur berjalan jongkok: panggul terlalu rendah, landmark lutut dan
+pergelangan terlalu ke luar/rendah, dan dua jalur kaki terlalu sempit. Gerak lolos
+pemeriksaan kontak/loop tetapi tetap tampak salah. Itu kegagalan validasi visual,
+bukan bukti bahwa model sumber rusak.
+
+V2 mengoreksi landmark berdasarkan penampang mesh, menaikkan panggul, memusatkan
+kontak kaki terhadap panggul, memperlebar jalur, serta mengurangi stride dan
+angkatannya. Weight telapak kini dibatasi pada Foot/Toes di bawah pergelangan agar
+shin tidak menarik dan mengerutkan telapak. Rotasi jari yang berlebihan dihapus;
+model ini tidak memiliki jari terpisah.
+
+Tes regresi baru mengukur sudut lutut kaki penopang, jarak jalur kaki, dan bentuk
+permukaan telapak (jarak antar-landmark mesh), bukan hanya koordinat tulang.
+`npm run character:review` merender 8 fase dari depan, samping dan tiga perempat
+pada aset ekspor. PNG dan metrik berada di `.cache/character-review/`, tidak di Git.
+Ini bahan inspeksi manusia, **bukan tes otomatis bahwa gerakannya sudah natural**.
+Preview menandai v2 sebagai masih direview; query revisi aset mencegah cache GLB v1
+tercampur dengan UI yang baru.
 
 ## Pemakaian dalam gameplay
 
@@ -66,7 +88,7 @@ kembali ke bind pose. Ini placeholder sampai clip idle/air dibuat. Pengujian mem
 GLB yang sebenarnya melalui adapter tersebut, bukan hanya model palsu di viewer.
 
 **Penting:** kecepatan ground motor saat ini 8,5 m/s, jauh di atas jalan santai.
-Pada tinggi pemain 1,52 m, kecepatan acuan Walking menjadi ±0,706 m/s. Sebelum
+Pada tinggi pemain 1,52 m, kecepatan acuan Walking menjadi ±0,519 m/s. Sebelum
 mengaktifkan karakter ini di game, selaraskan motor locomotion atau tambahkan run
 beserta blending-nya. Clamp playback bukan solusi foot sliding pada kecepatan itu.
 Juga belum menghubungkan ragdoll blocky lama ke skeleton baru.
@@ -81,6 +103,7 @@ Hindari menyalin gerakan sin/cos dari preview; semua pose ada dalam aset.
 ```bash
 npm ci
 npm run character:build
+npm run character:review
 npm test
 npm run build
 npm run test:e2e -- tests/e2e/preview.spec.ts

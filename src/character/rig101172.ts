@@ -5,7 +5,16 @@ import * as THREE from 'three';
  * This asset is authored facing +Z, with the floor at Y=0 and no root translation.
  * Do not apply these weights/landmarks to an arbitrary humanoid.
  */
-export const WALK = { duration: 1.12, stride: 1.04, height: 2, samples: 120 } as const;
+export const WALK = {
+  duration: 1.2,
+  stride: 0.82,
+  height: 2,
+  samples: 120,
+  stance: 0.52,
+  contactAdvance: 0.25,
+  clearance: 0.055,
+} as const;
+export const RIG_REVISION = 2;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;
@@ -39,11 +48,11 @@ for (const [side, sign] of [
     { name: `${side}ForeArm`, parent: `${side}UpperArm`, at: [sign * 0.205, 1.17, -0.02] },
     { name: `${side}Hand`, parent: `${side}ForeArm`, at: [sign * 0.255, 0.91, -0.025] },
     { name: `${side}HandEnd`, parent: `${side}Hand`, at: [sign * 0.26, 0.82, -0.025] },
-    { name: `${side}Thigh`, parent: 'Hips', at: [sign * 0.075, 0.94, -0.025] },
-    { name: `${side}Shin`, parent: `${side}Thigh`, at: [sign * 0.185, 0.49, -0.035] },
-    { name: `${side}Foot`, parent: `${side}Shin`, at: [sign * 0.29, 0.085, 0.045] },
-    { name: `${side}Toes`, parent: `${side}Foot`, at: [sign * 0.3, 0.032, 0.125] },
-    { name: `${side}ToeEnd`, parent: `${side}Toes`, at: [sign * 0.3, 0.028, 0.15] },
+    { name: `${side}Thigh`, parent: 'Hips', at: [sign * 0.075, 0.95, -0.03] },
+    { name: `${side}Shin`, parent: `${side}Thigh`, at: [sign * 0.16, 0.51, -0.01] },
+    { name: `${side}Foot`, parent: `${side}Shin`, at: [sign * 0.24, 0.16, 0.03] },
+    { name: `${side}Toes`, parent: `${side}Foot`, at: [sign * 0.25, 0.045, 0.12] },
+    { name: `${side}ToeEnd`, parent: `${side}Toes`, at: [sign * 0.25, 0.04, 0.145] },
   );
 }
 export const JOINT_NAMES = joints.map((joint) => joint.name);
@@ -74,13 +83,14 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
   scene.name = 'HEA_101172';
   scene.userData = {
     heaCharacter: {
-      version: 1,
+      version: RIG_REVISION,
       height: 2,
       forward: '+Z',
       up: '+Y',
       rootMotion: false,
       walkSpeed: WALK.stride / WALK.duration,
       walkDuration: WALK.duration,
+      walkStance: WALK.stance,
       source: '101172.glb',
       rig: 'HEA humanoid 28',
       clip: 'Walking',
@@ -177,6 +187,15 @@ function weightSkin(geometry: THREE.BufferGeometry) {
         const leg = /Thigh|Shin|Foot|Toes/.test(segment.name);
         let mask = arm ? armMask : leg ? legMask : (1 - armMask) * (1 - legMask);
         if (side && side * p.x < 0) mask = 0;
+        if (leg) {
+          // Distance alone let the shin pull the sole when bending the knee.
+          // Keep the heel/sole on the foot and blend only through the ankle.
+          const footMask = 1 - smooth(0.12, 0.23, p.y);
+          const toeMask = smooth(0.055, 0.115, p.z);
+          if (segment.name.endsWith('Foot')) mask *= footMask * (1 - toeMask);
+          else if (segment.name.endsWith('Toes')) mask *= footMask * toeMask;
+          else mask *= 1 - footMask;
+        }
         new THREE.Line3(segment.a, segment.b).closestPointToPoint(p, true, nearest);
         const d2 = p.distanceToSquared(nearest);
         // Compact smooth falloff around each segment; a small finite kernel blends joints.
@@ -253,8 +272,10 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
     }
     // Double support at contacts, body highest over the planted foot. Small lateral
     // transfer, pelvis yaw and counter-rotating chest make the gait read as weight.
-    hips.position.y = 0.91 - 0.013 * Math.cos(2 * t);
-    hips.position.x = 0.018 * Math.sin(t);
+    // The old 0.91 m pelvis shortened the supporting leg by ~8 cm and
+    // forced a permanent crouch. Mid-stance now approaches full extension.
+    hips.position.y = 0.965 - 0.012 * Math.cos(2 * t);
+    hips.position.x = 0.008 * Math.sin(t);
     hips.rotation.set(0.018, 0.045 * Math.cos(t), -0.018 * Math.sin(t));
     bones.get('Spine')!.rotation.set(0.012, -0.018 * Math.cos(t), 0.012 * Math.sin(t));
     bones.get('SpineUpper')!.rotation.set(-0.008, -0.03 * Math.cos(t), 0.009 * Math.sin(t));
@@ -267,31 +288,34 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
       ['Right', -1, 0.5],
     ] as const) {
       const p = (phase + offset) % 1;
-      const stance = 0.62;
-      const half = (WALK.stride * stance) / 2;
+      const stance = WALK.stance;
+      // A half-cycle separates contacts: at contact the front and rear ankles
+      // must straddle the hips. Centring on stance/2 biases both feet forward.
+      const front = WALK.stride * WALK.contactAdvance;
+      const back = WALK.stride * (WALK.contactAdvance - stance);
       let z: number, lift: number, roll: number;
       if (p < stance) {
         const u = p / stance;
-        z = half - WALK.stride * p;
+        z = front - WALK.stride * p;
         lift = 0;
-        // Heel strike -> flat -> toe-off; only the ankle rotates, not the shin.
-        roll = -0.12 * (1 - smooth(0, 0.18, u)) + 0.23 * smooth(0.72, 1, u);
+        // Small ankle roll only: this source has a rounded foot, not a flat human sole.
+        roll = -0.06 * (1 - smooth(0, 0.18, u)) + 0.04 * smooth(0.72, 1, u);
       } else {
         const u = (p - stance) / (1 - stance);
         // Cubic Hermite keeps fore/aft velocity continuous at toe-off and contact.
         const m = -WALK.stride * (1 - stance);
         z =
-          (2 * u * u * u - 3 * u * u + 1) * -half +
+          (2 * u * u * u - 3 * u * u + 1) * back +
           (u * u * u - 2 * u * u + u) * m +
-          (-2 * u * u * u + 3 * u * u) * half +
+          (-2 * u * u * u + 3 * u * u) * front +
           (u * u * u - u * u) * m;
-        lift = 0.105 * Math.sin(Math.PI * u) ** 2;
-        roll = THREE.MathUtils.lerp(0.23, -0.12, smooth(0, 1, u)) + 0.13 * Math.sin(Math.PI * u);
+        lift = WALK.clearance * Math.sin(Math.PI * u) ** 2;
+        roll = THREE.MathUtils.lerp(0.04, -0.06, smooth(0, 1, u)) + 0.08 * Math.sin(Math.PI * u);
       }
       const ankle = new THREE.Vector3(
-        sign * (0.092 + 0.008 * Math.sin(Math.PI * p) ** 2),
-        0.085 + lift + Math.abs(Math.sin(roll)) * 0.065,
-        z + 0.045,
+        sign * (0.135 + 0.006 * Math.sin(Math.PI * p) ** 2),
+        0.16 + lift + Math.abs(Math.sin(roll)) * 0.065,
+        z - 0.03,
       );
       // Bake flat-floor IK and sole contact into ordinary quaternion tracks. The
       // gameplay runtime does not need this authoring solver or the source mesh.
@@ -303,10 +327,7 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
         foot.quaternion
           .copy(parentQ.invert())
           .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(roll, sign * -0.04, 0)));
-        bones.get(side + 'Toes')!.rotation.x =
-          p < stance
-            ? -0.13 * smooth(0.76, 1, p / stance)
-            : -0.13 * (1 - smooth(0, 0.2, (p - stance) / (1 - stance)));
+        bones.get(side + 'Toes')!.rotation.x = 0;
         scene.updateMatrixWorld(true);
         if (correction < 2) {
           let bottom = Infinity;

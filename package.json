@@ -14,7 +14,8 @@
     "format:check": "prettier --check src tests *.ts *.json eslint.config.js index.html README.md CHANGELOG.md docs",
     "lint": "eslint src tests *.ts eslint.config.js",
     "test:coverage": "vitest run --coverage",
-    "character:build": "node --experimental-strip-types scripts/build-character.mjs"
+    "character:build": "node --experimental-strip-types scripts/build-character.mjs",
+    "character:review": "node --experimental-strip-types scripts/review-character.mjs"
   },
   "dependencies": {
     "@fontsource/barlow-condensed": "^5.2.8",

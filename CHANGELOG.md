@@ -7,6 +7,17 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — postur Walking yang jongkok dan telapak yang terdeformasi
+
+- Walking v2 mengoreksi landmark lutut/pergelangan, tinggi panggul, pusat dan lebar
+  jalur kaki, stride, serta clearance swing. Weight telapak tidak lagi ditarik shin.
+- Roll telapak dibatasi sesuai bentuk model yang membulat; rotasi jari berlebihan
+  dihapus. Clip tetap GLB gameplay yang sama, tanpa mengganti pemain aktif.
+- Menambahkan pemeriksaan regresi sudut lutut, separasi kaki, dan bentuk telapak,
+  serta render QA multi-fase dari tiga arah. V1 lolos tes teknis tetapi gagal
+  review visual; v2 masih ditandai untuk review, bukan dianggap final.
+- Query revisi pada URL GLB preview menghindari pemakaian cache model v1.
+
 ### Ditambahkan — rig 101172 dan Walking v1
 
 - Aset `101172-rigged.glb` mandiri dengan skeleton 28 tulang, skin weights, dan

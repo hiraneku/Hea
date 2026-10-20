@@ -8,14 +8,16 @@ import { mkdir, writeFile } from 'node:fs/promises';
 const server = await createServer({ server: { host: '127.0.0.1', port: 0, open: false } });
 let browser;
 try {
-  server.middlewares.use('/__character_build', (_req, res) => {
-    res.setHeader('Content-Type', 'text/html');
-    res.end('<!doctype html><html><body>Character authoring</body></html>');
-  });
   await server.listen();
   const address = server.httpServer.address();
   browser = await chromium.launch(await browserOptions());
   const page = await browser.newPage();
+  await page.route('**/__character_build', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<!doctype html><html><body style="margin:0"></body></html>',
+    }),
+  );
   page.on('console', (message) => console.log(message.text()));
   // No preview/game is booted. Vite transforms the reusable authoring module.
   await page.goto(`http://localhost:${address.port}/__character_build`);

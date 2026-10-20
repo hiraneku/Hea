@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CharacterPlayback } from '../character/CharacterPlayback';
-import { RIGGED_CHARACTER } from '../character/rig101172';
+import { RIGGED_CHARACTER, RIG_REVISION } from '../character/rig101172';
 import './preview.css';
 
 // This is a separate build entry inside HEA, deliberately independent of Game.
@@ -16,15 +16,17 @@ previewURL.hash = '';
 if (!previewURL.pathname.endsWith('/') && !previewURL.pathname.endsWith('.html'))
   previewURL.pathname += '/';
 const siteRoot = new URL('../', previewURL);
+const modelURL = new URL(RIGGED_CHARACTER, siteRoot);
+modelURL.searchParams.set('revision', String(RIG_REVISION));
 const app = document.querySelector<HTMLDivElement>('#preview-app')!;
 app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>
   <main>
     <section class="stage" aria-label="Preview karakter 3D">
-      <div class="stage-heading"><span class="eyebrow">MODEL STUDY / 001</span><h1>KENALI<br><em>KARAKTERMU.</em></h1><p>101172-rigged.glb <span>·</span> Rig &amp; walk / v1</p></div>
+      <div class="stage-heading"><span class="eyebrow">MODEL STUDY / 001</span><h1>KENALI<br><em>KARAKTERMU.</em></h1><p>101172-rigged.glb <span>·</span> Walk v2 · koreksi postur</p></div>
       <div id="viewport"></div>
       <div id="load-status" role="status">Memuat model…</div>
-      <div class="stage-footer"><span><i></i> RIG HUMANOID · WALKING / IN-PLACE</span><span>Y ↑</span></div>
+      <div class="stage-footer"><span><i></i> WALK V2 · IN-PLACE · MASIH DIREVIEW</span><span>Y ↑</span></div>
     </section>
     <aside>
       <span class="eyebrow">INSPEKSI MODEL</span><h2>Character preview</h2><p class="intro">Periksa bentuk dan material sebelum integrasi. Halaman ini tidak mengubah karakter dalam game.</p>
@@ -36,7 +38,7 @@ app.innerHTML = `
       <label><span>Kecepatan</span><output id="speed-value">1.00×</output></label><input id="speed" aria-label="Kecepatan animasi" type="range" min="0.25" max="1.5" step="0.05" value="1" disabled />
       <label><span>Siklus langkah</span><output id="phase-value">0%</output></label><input id="phase" aria-label="Posisi siklus langkah" type="range" min="0" max="1000" step="1" value="0" disabled />
       <label><span>Tampilkan skeleton</span><input id="skeleton" type="checkbox" disabled /></label>
-      <a class="download" href="${new URL(RIGGED_CHARACTER, siteRoot).href}" download="101172-rigged.glb">↓ Unduh GLB rig + Walking</a>
+      <a class="download" href="${modelURL.href}" download="101172-rigged.glb">↓ Unduh GLB rig + Walking</a>
       <h3>TAMPILAN</h3><label><span>Putar otomatis</span><input id="rotate" type="checkbox" /></label><label><span>Wireframe</span><input id="wireframe" type="checkbox" /></label><label><span>Lantai & grid</span><input id="grid" type="checkbox" checked /></label>
       <label class="background"><span>Latar</span><select id="background"><option value="#182321">Gelap</option><option value="#d8dfdc">Terang</option><option value="#69736f">Abu-abu</option></select></label>
       <div class="note" id="rig-note">Membaca struktur GLB…</div>
@@ -142,14 +144,11 @@ async function boot() {
       );
   });
   try {
-    const gltf = await new GLTFLoader().loadAsync(
-      new URL(RIGGED_CHARACTER, siteRoot).href,
-      (event) => {
-        status.textContent = event.total
-          ? `Memuat model… ${Math.round((event.loaded / event.total) * 100)}%`
-          : 'Memuat model…';
-      },
-    );
+    const gltf = await new GLTFLoader().loadAsync(modelURL.href, (event) => {
+      status.textContent = event.total
+        ? `Memuat model… ${Math.round((event.loaded / event.total) * 100)}%`
+        : 'Memuat model…';
+    });
     const model = gltf.scene;
     const bounds = new THREE.Box3().setFromObject(model);
     const size = bounds.getSize(new THREE.Vector3());
@@ -246,6 +245,10 @@ async function boot() {
     info.replaceChildren();
     for (const [label, value] of [
       ['Status', 'Siap diperiksa'],
+      [
+        'Revisi rig',
+        `v${model.getObjectByName('HEA_101172')?.userData.heaCharacter.version ?? '?'}`,
+      ],
       ['Mesh', String(meshes)],
       ['Segitiga', Math.round(triangles).toLocaleString('id-ID')],
       ['Rig / tulang', bones ? `${bones} tulang · ${skinned} skinned mesh` : 'Tidak ada'],
@@ -264,7 +267,7 @@ async function boot() {
       info.append(row);
     }
     note.textContent =
-      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
+      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. Revisi v2 mengoreksi postur jongkok dan jalur kaki v1; belum dianggap final. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
     document.querySelector<HTMLInputElement>('#wireframe')!.onchange = (e) => {
       for (const material of materials) material.wireframe = (e.target as HTMLInputElement).checked;
     };
