@@ -58,7 +58,7 @@ export class AvatarModel {
 
   constructor(
     parent: THREE.Object3D,
-    private readonly url = '/models/avatar.glb',
+    private readonly url = '/models/101172.glb',
     /** Metres from the soles to the crown the model is scaled to. */
     private readonly height = 1.52,
   ) {
