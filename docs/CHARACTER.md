@@ -76,7 +76,7 @@ masih perlu dinilai visual; belum ada idle/run/air/cast atau IK runtime untuk le
 PNG/metrik berada di `.cache/character-review/`, tidak di Git. Untuk membandingkan
 sumber: `npm run character:review -- public/models/101172.glb` (bind pose).
 Panah di lantai menunjukkan +Z. Ini inspeksi manusia, **bukan tes bahwa motion natural**.
-Preview memakai revisi URL v4 untuk menghindari cache lama. Overlay skeleton
+Preview memakai revisi URL v5 untuk menghindari cache lama. Overlay skeleton
 menambahkan titik panggul/lutut/pergelangan dengan label dan panah arah depan;
 semuanya hanya alat inspeksi, bukan bagian yang menggerakkan karakter.
 
@@ -99,6 +99,29 @@ dari **Jeda animasi**, yang hanya membekukan fase aktif. Dropdown pose tetap sin
 dengan tombol; scrub mengaktifkan Walking untuk inspeksi fase. Hanya Walking
 tersedia saat ini, tidak ada clip idle/run/jump palsu. Pilihan gerakan lain dapat
 ditambahkan saat clip-nya selesai. Perubahan UI tidak mengganti pemain default.
+
+## Bahu dan siku v5
+
+Bahu v4 di Y=1,46 m terlalu dekat ketiak. V5 memproyeksikan centerline lengan
+atas dan mencocokkan radius penampang dengan kontur cap bahu membulat. Hasil
+kiri/kanan: bahu Y=**1,560 m**, |X|≈**0,08784 m** (tinggi model 2 m).
+Chest menjadi Y=1,545 m, clavicle Y=1,555 m, SpineUpper mengikuti jarak ke Chest,
+dan Neck Y=1,65 m; bukan sekadar menggeser garis lengan tanpa rantai tubuh.
+
+Siku lama Y=1,16 m terlalu rendah terhadap transisi shaft model ini. Penampang
+lengan asli disampel tiap 5 mm; minimum luas bbox kontur pada pita shaft
+Y=1,25–1,42 m menempatkan siku di **Y=1,350 m**, |X|≈**0,13869 m**.
+Model bergaya ini tidak mempunyai crease siku tajam: minimum shaft adalah
+landmark geometris yang dipakai untuk authoring, bukan klaim sendi biologis yang
+bisa diketahui persis dari permukaan. Rentang fit khusus model ini dapat diaudit
+di `anatomy101172.ts`; profil serta landmark kedua lengan ikut metadata GLB.
+
+Blend UpperArm/ForeArm sekarang dibatasi ±4 cm terhadap siku terukur, dengan
+transisi terpisah ke Hand. Pemisahan komponen lengan–paha v4 tetap digunakan.
+Walking diekspor ulang dengan skeleton/weights baru; tidak ada koreksi khusus
+viewer. Overlay menambahkan label BAHU dan SIKU di posisi bone yang sebenarnya.
+Tes mengukur ulang sumber, membandingkan pivot ekspor, memeriksa weight forearm,
+dan mempertahankan regresi paha/telapak. Gerakan Jalan toggle tetap berfungsi.
 
 ## Pemakaian dalam gameplay
 

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import { armRegions101172 } from '../../src/character/skinRegions101172';
 import { CharacterPlayback } from '../../src/character/CharacterPlayback';
 import { AvatarModel } from '../../src/game/Avatar';
 import {
@@ -123,6 +124,62 @@ describe('portable 101172 rig and Walking asset', () => {
       expect(Math.abs(knee.z - contour!.z)).toBeLessThan(contour!.depth / 4);
       expect(ankle.distanceTo(new THREE.Vector3(...anatomy.ankle))).toBeLessThan(1e-5);
     }
+  });
+
+  it('fits shoulders above the armpits and elbows at the source arm shaft transition', () => {
+    for (const [side, arm] of [
+      ['Left', measured.arms.left],
+      ['Right', measured.arms.right],
+    ] as const) {
+      expect(Math.abs(arm.tip[0])).toBeGreaterThan(0.2);
+      expect(
+        new THREE.Vector3(...arm.tip).distanceTo(new THREE.Vector3(...arm.wrist)),
+      ).toBeLessThan(0.12);
+      expect(Math.abs(arm.tip[0])).toBeGreaterThan(0.2);
+      expect(
+        new THREE.Vector3(...arm.tip).distanceTo(new THREE.Vector3(...arm.wrist)),
+      ).toBeLessThan(0.12);
+      expect(arm.shoulder[1]).toBeGreaterThan(1.53);
+      expect(arm.shoulder[1]).toBeLessThan(1.59);
+      expect(arm.elbow[1]).toBeGreaterThan(1.3);
+      expect(arm.elbow[1]).toBeLessThan(1.4);
+      const waist = arm.profile
+        .filter((s) => s.y >= 1.25 && s.y <= 1.42)
+        .reduce((a, b) => (a.width * a.depth < b.width * b.depth ? a : b));
+      expect(arm.elbow).toEqual([waist.x, waist.y, waist.z]);
+      for (const [name, point] of [
+        ['UpperArm', arm.shoulder],
+        ['ForeArm', arm.elbow],
+        ['Hand', arm.wrist],
+      ] as const) {
+        const bone = gltf.scene.getObjectByName(side + name)!;
+        expect(
+          bone.getWorldPosition(new THREE.Vector3()).distanceTo(new THREE.Vector3(...point)),
+        ).toBeLessThan(1e-5);
+      }
+      const chest = gltf.scene.getObjectByName('Chest')!.getWorldPosition(new THREE.Vector3());
+      expect(Math.abs(chest.y - arm.shoulder[1])).toBeLessThan(0.025);
+    }
+  });
+
+  it('assigns the lower arm to ForeArm below the measured elbow transition', () => {
+    const regions = armRegions101172(sourceGeometry);
+    const positions = mesh.geometry.getAttribute('position');
+    const weights = mesh.geometry.getAttribute('skinWeight');
+    const indices = mesh.geometry.getAttribute('skinIndex');
+    let checked = 0;
+    for (let i = 0; i < positions.count; i++) {
+      const y = positions.getY(i);
+      if (!regions[i] || y < 1.12 || y > 1.25) continue;
+      let forearmWeight = 0;
+      for (let slot = 0; slot < 4; slot++) {
+        if (mesh.skeleton.bones[indices.array[i * 4 + slot]].name.endsWith('ForeArm'))
+          forearmWeight += weights.array[i * 4 + slot];
+      }
+      expect(forearmWeight).toBeGreaterThan(0.99);
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(100);
   });
 
   it('has finite normalized four-slot skin weights and valid bone indices at every vertex', () => {

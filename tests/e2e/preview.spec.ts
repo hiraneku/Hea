@@ -48,6 +48,8 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   await page.locator('#skeleton').check();
   await expect(page.locator('#joint-labels')).toBeVisible();
   await expect(page.locator('#joint-labels')).toContainText('LUTUT');
+  await expect(page.locator('#joint-labels')).toContainText('BAHU');
+  await expect(page.locator('#joint-labels')).toContainText('SIKU');
   await page.locator('#animation').selectOption('bind');
   await expect(page.locator('#animation')).toHaveValue('bind');
   await page.locator('#animation').selectOption('walk');
@@ -57,7 +59,7 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   await expect(phase).toHaveValue('0');
   await expect(page.getByRole('link', { name: 'Unduh GLB rig + Walking' })).toHaveAttribute(
     'href',
-    /models\/101172-rigged\.glb\?revision=4$/,
+    /models\/101172-rigged\.glb\?revision=5$/,
   );
 });
 

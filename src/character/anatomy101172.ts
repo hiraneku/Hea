@@ -16,7 +16,16 @@ export interface LegAnatomy {
   tip: Point3;
   profile: Section[];
 }
+export interface ArmAnatomy {
+  shoulder: Point3;
+  elbow: Point3;
+  wrist: Point3;
+  tip: Point3;
+  profile: Section[];
+  shoulderRadius: number;
+}
 export interface CharacterAnatomy {
+  arms: { left: ArmAnatomy; right: ArmAnatomy };
   pelvis: Point3;
   crotch: number;
   left: LegAnatomy;
@@ -203,7 +212,56 @@ export function measure101172(geometry: THREE.BufferGeometry): CharacterAnatomy 
       profile,
     };
   }
+  function arm(sign: number): ArmAnatomy {
+    const armSection = (y: number) => {
+      const candidate = largest(
+        section(y).filter((s) => s.x * sign > (y < 1.1 ? 0.16 : 0.09) && s.width < 0.12),
+      );
+      if (!candidate) throw new Error(`Missing separate arm contour at ${y}`);
+      return candidate;
+    };
+    const profile: Section[] = [];
+    for (let step = 0; step <= 68; step++) profile.push(armSection(1.1 + step * 0.005));
+    // The elbow is the narrow shaft transition before the forearm widens, not
+    // the wrist/hand bulge below Y=1.1. This stylized mesh has no sharp elbow crease.
+    const elbowSection = profile
+      .filter((s) => s.y >= 1.25 && s.y <= 1.42)
+      .reduce((a, b) => (a.width * a.depth < b.width * b.depth ? a : b));
+    const upper = profile.filter((s) => s.y >= 1.37);
+    const xLine = fit(upper, 'x'),
+      zLine = fit(upper, 'z');
+    const radius = upper.reduce((sum, s) => sum + s.width / 2, 0) / upper.length;
+    // Fit the rounded shoulder cap above the armpit to the extrapolated arm
+    // centreline. The armpit contour merge itself is NOT the shoulder pivot.
+    let bestY = 0,
+      bestError = Infinity;
+    for (let step = 0; step <= 100; step++) {
+      const y = 1.53 + step * 0.0005;
+      let error = 0;
+      for (let sample = 0; sample <= 4; sample++) {
+        const cap = largest(section(1.58 + sample * 0.005).filter((s) => Math.abs(s.x) < 0.01));
+        if (!cap) throw new Error('Missing shoulder cap contour');
+        const outerX = cap.x + (sign * cap.width) / 2;
+        error += (Math.hypot(outerX - at(xLine, y), cap.y - y) - radius) ** 2;
+      }
+      if (error < bestError) {
+        bestError = error;
+        bestY = y;
+      }
+    }
+    const wrist = armSection(0.98),
+      tip = armSection(0.88);
+    return {
+      shoulder: [at(xLine, bestY), bestY, at(zLine, bestY)],
+      elbow: [elbowSection.x, elbowSection.y, elbowSection.z],
+      wrist: [wrist.x, wrist.y, wrist.z],
+      tip: [tip.x, tip.y, tip.z],
+      profile,
+      shoulderRadius: radius,
+    };
+  }
   return {
+    arms: { left: arm(1), right: arm(-1) },
     pelvis: [body.x, pelvisY, body.z],
     crotch,
     left: leg(1),

@@ -7,6 +7,16 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — posisi bahu, dada dan siku 101172 (v5)
+
+- Fit cap bahu terhadap centerline/radius kontur lengan asli; naikkan pivot bahu
+  dari 1,46 ke 1,56 m pada skala model 2 m. Sesuaikan Chest/Clavicle/SpineUpper/Neck.
+- Ukur transisi shaft siku pada kontur asli (Y=1,35 m, sebelumnya 1,16 m),
+  pusatkan blend UpperArm/ForeArm di pivot baru, dan bake ulang Walking/GLB.
+- Tambahkan metadata profil lengan, regresi landmark dan weight forearm, serta
+  penanda BAHU/SIKU di overlay preview. Perbaikan weight paha v4 tetap dipertahankan.
+- Model sumber/pemain default tidak diubah; preview dan unduhan memakai revisi v5.
+
 ### Diperbaiki — paha tertarik oleh tangan saat Walking (v4)
 
 - Pisahkan area lengan di bawah bahu berdasarkan konektivitas segitiga dengan

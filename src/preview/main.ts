@@ -207,6 +207,8 @@ async function boot() {
     scene.add(helper);
     const markerGeometry = new THREE.SphereGeometry(0.015, 10, 8);
     for (const [joint, title, color] of [
+      ['UpperArm', 'BAHU', '#ff94bd'],
+      ['ForeArm', 'SIKU', '#c4a7ff'],
       ['Thigh', 'PANGGUL', '#ffca80'],
       ['Shin', 'LUTUT', '#80d8ff'],
       ['Foot', 'PERGELANGAN', '#d5f38a'],
@@ -352,7 +354,7 @@ async function boot() {
       info.append(row);
     }
     note.textContent =
-      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V4 memisahkan weight lengan dan paha menurut konektivitas mesh, serta mengukur kontur mesh asli untuk panggul, lutut dan pergelangan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
+      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V5 menyesuaikan bahu dan siku terhadap kontur lengan asli, dengan weight tekukan siku yang diperbarui. Pemisahan weight lengan/paha tetap dipertahankan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
     document.querySelector<HTMLInputElement>('#wireframe')!.onchange = (e) => {
       for (const material of materials) material.wireframe = (e.target as HTMLInputElement).checked;
     };

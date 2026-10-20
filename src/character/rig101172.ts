@@ -16,7 +16,7 @@ export const WALK = {
   contactAdvance: 0.25,
   clearance: 0.12,
 } as const;
-export const RIG_REVISION = 4;
+export const RIG_REVISION = 5;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;
@@ -31,26 +31,32 @@ interface Joint {
   at: Point;
 }
 function createJoints(anatomy: CharacterAnatomy): Joint[] {
+  const shoulderY = (anatomy.arms.left.shoulder[1] + anatomy.arms.right.shoulder[1]) / 2;
   const joints: Joint[] = [
     { name: 'Root', parent: null, at: [0, 0, 0] },
     { name: 'Hips', parent: 'Root', at: anatomy.pelvis },
     { name: 'Spine', parent: 'Hips', at: [0, 1.24, 0.008] },
-    { name: 'SpineUpper', parent: 'Spine', at: [0, 1.36, 0.008] },
-    { name: 'Chest', parent: 'SpineUpper', at: [0, 1.48, 0.005] },
-    { name: 'Neck', parent: 'Chest', at: [0, 1.61, 0.002] },
+    { name: 'SpineUpper', parent: 'Spine', at: [0, (1.24 + shoulderY - 0.015) / 2, 0.008] },
+    { name: 'Chest', parent: 'SpineUpper', at: [0, shoulderY - 0.015, 0.005] },
+    { name: 'Neck', parent: 'Chest', at: [0, 1.65, 0.002] },
     { name: 'Head', parent: 'Neck', at: [0, 1.7, 0] },
     { name: 'HeadEnd', parent: 'Head', at: [0, 1.97, 0] },
   ];
-  for (const [side, sign, leg] of [
-    ['Left', 1, anatomy.left],
-    ['Right', -1, anatomy.right],
+  for (const [side, leg] of [
+    ['Left', anatomy.left],
+    ['Right', anatomy.right],
   ] as const) {
+    const arm = anatomy.arms[side === 'Left' ? 'left' : 'right'];
     joints.push(
-      { name: `${side}Clavicle`, parent: 'Chest', at: [sign * 0.05, 1.49, 0.005] },
-      { name: `${side}UpperArm`, parent: `${side}Clavicle`, at: [sign * 0.109, 1.46, 0.004] },
-      { name: `${side}ForeArm`, parent: `${side}UpperArm`, at: [sign * 0.191, 1.16, 0.007] },
-      { name: `${side}Hand`, parent: `${side}ForeArm`, at: [sign * 0.225, 0.98, 0.008] },
-      { name: `${side}HandEnd`, parent: `${side}Hand`, at: [sign * 0.224, 0.88, 0.009] },
+      {
+        name: `${side}Clavicle`,
+        parent: 'Chest',
+        at: [arm.shoulder[0] * 0.45, shoulderY - 0.005, arm.shoulder[2]],
+      },
+      { name: `${side}UpperArm`, parent: `${side}Clavicle`, at: arm.shoulder },
+      { name: `${side}ForeArm`, parent: `${side}UpperArm`, at: arm.elbow },
+      { name: `${side}Hand`, parent: `${side}ForeArm`, at: arm.wrist },
+      { name: `${side}HandEnd`, parent: `${side}Hand`, at: arm.tip },
       { name: `${side}Thigh`, parent: 'Hips', at: leg.hip },
       { name: `${side}Shin`, parent: `${side}Thigh`, at: leg.knee },
       { name: `${side}Foot`, parent: `${side}Shin`, at: leg.ankle },
@@ -225,6 +231,14 @@ function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: Ch
         const leg = /Thigh|Shin|Foot|Toes/.test(segment.name);
         let mask = arm ? armMask : leg ? legMask : (1 - armMask) * (1 - legMask);
         if (side && side * p.x < 0) mask = 0;
+        if (arm) {
+          const limb = anatomy.arms[side > 0 ? 'left' : 'right'];
+          const upper = smooth(limb.elbow[1] - 0.04, limb.elbow[1] + 0.04, p.y);
+          const hand = 1 - smooth(limb.wrist[1] - 0.035, limb.wrist[1] + 0.035, p.y);
+          if (segment.name.endsWith('UpperArm')) mask *= upper;
+          else if (segment.name.endsWith('ForeArm')) mask *= (1 - upper) * (1 - hand);
+          else if (segment.name.endsWith('Hand')) mask *= hand;
+        }
         if (leg) {
           // Distance alone let the shin pull the sole when bending the knee.
           // Keep the heel/sole on the foot and blend only through the ankle.
