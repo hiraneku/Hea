@@ -9,7 +9,7 @@ const hermite = (a: number, b: number, v0: number, v1: number, u: number, t: num
   (u ** 3 - 2 * u * u + u) * v0 * t +
   (-2 * u ** 3 + 3 * u * u) * b +
   (u ** 3 - u * u) * v1 * t;
-export interface JumpPlan {
+export interface FlightPlan {
   clip: THREE.AnimationClip;
   gather: number;
   charge: number;
@@ -20,20 +20,20 @@ export interface JumpPlan {
   height: number;
   rootEnd: THREE.Vector3;
 }
-/** Flat-floor arcane vault: gather/coil, palm-driven release, asymmetric airborne
- * silhouette, impact absorption and recovery. Standard baked tracks, no viewer IK.
+/** Flat-floor flight envelope: slight knee bend, lift, sustained hover pose and
+ * gentle descent/recovery. Playback holds the apex until landing is requested. Standard baked tracks, no viewer IK.
  * Root Y is the trajectory; a motor must consume it exactly once, without gravity
  * or a second vertical impulse. Not a collision/terrain/air-control implementation.
  */
-export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): JumpPlan {
-  if (!Number.isFinite(forwardSpeed)) throw new Error('Jump speed must be finite.');
+export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): FlightPlan {
+  if (!Number.isFinite(forwardSpeed)) throw new Error('Flight speed must be finite.');
   const scene = clone(model);
   scene.position.set(0, 0, 0);
   scene.quaternion.identity();
   scene.scale.setScalar(1);
   const anatomy = scene.getObjectByName('HEA_101172')?.userData.heaCharacter?.anatomy as
     CharacterAnatomy | undefined;
-  if (!anatomy) throw new Error('Arcane jump requires the 101172 anatomy.');
+  if (!anatomy) throw new Error('Flight requires the 101172 anatomy.');
   const bones = new Map<string, THREE.Bone>();
   let skin!: THREE.SkinnedMesh;
   scene.traverse((o) => {
@@ -74,16 +74,16 @@ export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): Jump
       },
     ]),
   ) as Record<'Left' | 'Right', { p: THREE.Vector3; q: THREE.Quaternion }>;
-  const gather = 0.18,
-    charge = 0.36,
-    takeoff = 0.5,
-    landing = 1.4,
-    impact = 1.54,
-    duration = 1.94,
-    height = 0.72;
+  const gather = 0.1,
+    charge = 0.16,
+    takeoff = 0.28,
+    landing = 1.16,
+    impact = 1.3,
+    duration = 1.64,
+    height = 0.62;
   const flight = landing - takeoff,
     apex = takeoff + flight / 2,
-    velocity = (4 * height) / flight;
+    velocity = 0;
   const speed = THREE.MathUtils.clamp(forwardSpeed, 0, 1.5);
   const prepTravel = speed * 0.08 * (1 - Math.exp(-takeoff / 0.08));
   const rootEnd = new THREE.Vector3(0, 0, prepTravel + speed * 0.65);
@@ -100,7 +100,7 @@ export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): Jump
     ) /
       2 -
     0.012;
-  const chargedY = Math.min(rest.get('Hips')!.p.y, standingY) - 0.22;
+  const chargedY = Math.min(rest.get('Hips')!.p.y, standingY) - 0.075;
   const targets = Object.fromEntries(
     sides.map((s) => [
       s,
@@ -135,56 +135,55 @@ export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): Jump
         ) - 0.008,
     ),
   );
-  // Keyed upper-body poses: the palms coil in front, sweep down on release,
-  // then spread asymmetrically to shape the airborne arc (not a generic squat).
+  // Compact takeoff and open, relaxed flight silhouette: no casting/coil gesture.
   const poses = [
     {
       t: gather,
-      spine: 0.08,
-      twist: 0.04,
-      arm: [-0.22, -0.18],
-      elbow: [-0.45, -0.36],
-      spread: [-0.1, 0.1],
+      spine: 0.025,
+      twist: 0,
+      arm: [-0.035, -0.035],
+      elbow: [-0.12, -0.12],
+      spread: [0.06, -0.06],
     },
     {
       t: charge,
-      spine: 0.18,
-      twist: 0.1,
-      arm: [-0.76, -0.58],
-      elbow: [-1.05, -0.9],
-      spread: [-0.17, 0.12],
+      spine: 0.045,
+      twist: 0,
+      arm: [-0.06, -0.06],
+      elbow: [-0.16, -0.16],
+      spread: [0.08, -0.08],
     },
     {
       t: takeoff,
-      spine: -0.045,
-      twist: -0.035,
-      arm: [0.18, 0.24],
-      elbow: [-0.2, -0.16],
-      spread: [0.14, -0.17],
+      spine: -0.015,
+      twist: 0,
+      arm: [0.015, 0.015],
+      elbow: [-0.12, -0.12],
+      spread: [0.18, -0.18],
     },
     {
       t: apex,
       spine: -0.025,
-      twist: -0.075,
-      arm: [-0.32, -0.08],
-      elbow: [-0.74, -0.4],
-      spread: [0.3, -0.22],
+      twist: 0,
+      arm: [-0.035, -0.035],
+      elbow: [-0.18, -0.18],
+      spread: [0.28, -0.28],
     },
     {
       t: landing,
-      spine: 0.055,
+      spine: 0.025,
       twist: 0,
-      arm: [-0.18, -0.2],
-      elbow: [-0.36, -0.32],
-      spread: [0.08, -0.08],
+      arm: [-0.04, -0.04],
+      elbow: [-0.18, -0.18],
+      spread: [0.14, -0.14],
     },
     {
       t: impact,
-      spine: 0.17,
+      spine: 0.06,
       twist: 0,
-      arm: [-0.4, -0.37],
-      elbow: [-0.63, -0.58],
-      spread: [-0.04, 0.04],
+      arm: [-0.06, -0.06],
+      elbow: [-0.22, -0.22],
+      spread: [0.08, -0.08],
     },
     {
       t: duration,
@@ -235,9 +234,7 @@ export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): Jump
     const u = THREE.MathUtils.clamp((t - takeoff) / flight, 0, 1);
     root.position.set(
       0,
-      t > takeoff && t < landing
-        ? 4 * height * u * (1 - u) + 0.055 * Math.sin(Math.PI * u) ** 4
-        : 0,
+      t > takeoff && t < landing ? height * (u <= 0.5 ? ease(u * 2) : 1 - ease((u - 0.5) * 2)) : 0,
       t < takeoff
         ? speed * 0.08 * (1 - Math.exp(-t / 0.08))
         : prepTravel + (rootEnd.z - prepTravel) * ease(u),
@@ -259,7 +256,7 @@ export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): Jump
     else if (t < impact)
       hips.position.y = hermite(
         standingY - 0.03,
-        standingY - 0.19,
+        standingY - 0.085,
         -velocity,
         0,
         (t - landing) / (impact - landing),
@@ -267,7 +264,7 @@ export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): Jump
       );
     else
       hips.position.y = THREE.MathUtils.lerp(
-        standingY - 0.19,
+        standingY - 0.085,
         standingY,
         ease((t - impact) / (duration - impact)),
       );
@@ -289,11 +286,11 @@ export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): Jump
           ankle = start[s].p.clone().lerp(targets[s], ease(u));
           const tuck = Math.sin(Math.PI * u) ** 2;
           const airQ = new THREE.Quaternion().setFromEuler(
-            new THREE.Euler((i === 0 ? 0.22 : 0.14) * tuck, 0, 0),
+            new THREE.Euler((i === 0 ? 0.12 : 0.1) * tuck, 0, 0),
           );
           q.slerp(airQ, ease(u / 0.18));
-          ankle.z -= (i === 0 ? 0.1 : 0.055) * tuck;
-          ankle.y = floorY(s, q) + root.position.y + (i === 0 ? 0.18 : 0.105) * tuck;
+          ankle.z -= (i === 0 ? 0.04 : 0.035) * tuck;
+          ankle.y = floorY(s, q) + root.position.y + (i === 0 ? 0.065 : 0.055) * tuck;
           if (t >= landing) ankle.copy(targets[s]);
         }
         solveLeg(s, ankle, bones, scene);
@@ -334,10 +331,10 @@ export function makeCharacterJump(model: THREE.Object3D, forwardSpeed = 0): Jump
     apex,
     landing,
     impact,
-    height: height + 0.055,
+    height: height,
     rootEnd,
     clip: new THREE.AnimationClip(
-      'ArcaneJump',
+      'Flight',
       duration,
       [...values].map(([n, v]) =>
         n.endsWith('.position')

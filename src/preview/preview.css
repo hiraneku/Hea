@@ -404,7 +404,7 @@ select:disabled {
   padding-bottom: 12px;
 }
 
-.drive-jump {
+.drive-flight {
   position: absolute;
   right: 22px;
   bottom: 65px;
@@ -419,9 +419,9 @@ select:disabled {
   letter-spacing: 0.08em;
   touch-action: manipulation;
 }
-.drive-jump:disabled {
+.drive-flight:disabled {
   opacity: 0.5;
 }
-.drive-jump[hidden] {
+.drive-flight[hidden] {
   display: none;
 }

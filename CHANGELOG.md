@@ -7,6 +7,19 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diganti / diperbaiki — flight, skin v7 dan stickman putih
+
+- Ganti ArcaneJump yang ditolak dengan tekukan singkat, naik dan sustained hover.
+  Tambah bob/napas halus, turun atas permintaan, gentle landing dan recovery;
+  joystick/WASD bisa mengarahkan saat hover, Spasi/tombol melakukan toggle.
+- Isolasi weight Head/Neck dari vertex bahu; batasi Clavicle pada lengan atas.
+  Pertahankan region arm/thigh yang terpisah dan gunakan pose lengan terbuka.
+  Verifikasi deformasi vertex bahu, bukan hanya bone yang tidak bergeser.
+- Ekspor material putih di derivative v7, tanpa tekstur ungu. Source tidak disentuh,
+  geometry/UV tetap dan Walking tidak diganti; default gameplay tetap seperti semula.
+- Ganti pengujian jump dengan flight/hover/descent, tambah regresi weight dan warna,
+  cache-busting rig v7, renderer QA serta kontrol desktop/HP.
+
 ### Ditambahkan — ArcaneJump di preview karakter
 
 - Bake lompatan bergaya arcane dari pose terkini: charge, sapuan tangan saat

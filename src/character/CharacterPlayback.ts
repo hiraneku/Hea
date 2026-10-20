@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { makeCharacterJump, type JumpPlan } from './CharacterJump';
+import { makeCharacterFlight, type FlightPlan } from './CharacterFlight';
 import { makeCharacterStart, type StartPlan } from './CharacterStart';
 import { makeCharacterStop, type StopPlan } from './CharacterStop';
 import { resolveWalkingGait, type WalkingGait, type WalkingGaitSpec } from './WalkingGait';
@@ -13,44 +13,73 @@ export class CharacterPlayback {
   get action() {
     return this.walkAction;
   }
-  private vault?: JumpPlan;
-  private jumpAction?: THREE.AnimationAction;
-  private jumpTime = 0;
-  private resumeAfterJump = false;
-  get isJumping() {
-    return !!this.vault && this.jumpTime < this.vault.clip.duration - 1e-7;
+  private flightEnvelope?: FlightPlan;
+  private flightAction?: THREE.AnimationAction;
+  private flightTime = 0;
+  private resumeAfterFlight = false;
+  private hoverClock = 0;
+  private descending = false;
+  private landingQueued = false;
+  private hoverBob = 0;
+  private landingBob = 0;
+  private breath = 0;
+  private landingBreath = 0;
+  private hoverPose: { bone: THREE.Object3D; sample: THREE.QuaternionLinearInterpolant }[] = [];
+  get isLanding() {
+    return this.isFlying && (this.descending || this.landingQueued);
   }
-  get jumpPlan() {
-    return this.vault;
+  land() {
+    if (!this.isFlying || this.isLanding) return false;
+    this.landingQueued = true;
+    if (this.flightTime >= this.flightEnvelope!.apex - 1e-7) {
+      this.descending = true;
+      this.landingBob = this.hoverBob;
+      this.landingBreath = this.breath;
+    }
+    return true;
   }
-  get jumpStage() {
-    if (!this.isJumping) return 'grounded';
-    const p = this.vault!;
-    return this.jumpTime < p.charge
-      ? 'charge'
-      : this.jumpTime < p.takeoff
-        ? 'release'
-        : this.jumpTime < p.apex
-          ? 'rise'
-          : this.jumpTime < p.landing
-            ? 'fall'
-            : this.jumpTime < p.impact
-              ? 'impact'
-              : 'recover';
+  get isFlying() {
+    return !!this.flightEnvelope && this.flightTime < this.flightEnvelope.clip.duration - 1e-7;
   }
-  private discardJump() {
-    if (this.jumpAction) {
-      const clip = this.jumpAction.getClip();
-      this.jumpAction.stop();
+  get flightPlan() {
+    return this.flightEnvelope;
+  }
+  get flightStage() {
+    if (!this.isFlying) return 'grounded';
+    const p = this.flightEnvelope!;
+    if (this.flightTime >= p.apex - 1e-7 && !this.descending) return 'hover';
+    return this.flightTime < p.takeoff
+      ? 'prepare'
+      : this.flightTime < p.apex
+        ? 'rise'
+        : this.flightTime < p.landing
+          ? 'descend'
+          : this.flightTime < p.impact
+            ? 'impact'
+            : 'recover';
+  }
+
+  private discardFlight() {
+    if (this.flightAction) {
+      const clip = this.flightAction.getClip();
+      this.flightAction.stop();
       this.mixer.uncacheClip(clip);
     }
-    this.vault = undefined;
-    this.jumpAction = undefined;
-    this.jumpTime = 0;
+    this.flightEnvelope = undefined;
+    this.flightAction = undefined;
+    this.flightTime = 0;
+    this.hoverClock = 0;
+    this.descending = false;
+    this.landingQueued = false;
+    this.hoverBob = 0;
+    this.landingBob = 0;
+    this.breath = 0;
+    this.landingBreath = 0;
+    this.hoverPose = [];
   }
-  /** One authored flat-floor vault; rejects re-trigger while airborne/recovering. */
-  jump(forwardSpeed?: number) {
-    if (this.isJumping) return false;
+  /** Lift into sustained flight. land() requests descent; no repeat airborne impulse. */
+  fly(forwardSpeed?: number) {
+    if (this.isFlying) return false;
     const resume = this.mode === 'walk' && this.playing;
     let speed = forwardSpeed ?? (resume ? this.authoredWalkSpeed * this.speed : 0);
     if (forwardSpeed === undefined && this.rootCurve && (this.launch || this.plan)) {
@@ -59,12 +88,17 @@ export class CharacterPlayback {
       const b = new THREE.Vector3().fromArray(this.rootCurve.evaluate(t + 0.002));
       speed = Math.max(0, (b.z - a.z) / 0.004) * (this.launch ? this.speed : 1);
     }
-    const plan = makeCharacterJump(this.model, speed);
-    this.discardJump();
+    const plan = makeCharacterFlight(this.model, speed);
+    this.discardFlight();
     this.discardStart();
     this.discardStop();
-    this.vault = plan;
-    this.resumeAfterJump = resume;
+    this.flightEnvelope = plan;
+    this.hoverPose = ['Spine', 'SpineUpper', 'LeftForeArm', 'RightForeArm'].map((name) => {
+      const track = plan.clip.tracks.find((t) => t.name === name + '.quaternion')!;
+      const sample = new THREE.QuaternionLinearInterpolant(track.times, track.values, 4);
+      return { bone: this.model.getObjectByName(name)!, sample };
+    });
+    this.resumeAfterFlight = resume;
     this.targetWeight = 0;
     this.weight = 0;
     this.playing = true;
@@ -73,10 +107,10 @@ export class CharacterPlayback {
     const track = plan.clip.tracks.find((t) => t.name === 'Root.position')!;
     this.rootCurve = new THREE.LinearInterpolant(track.times, track.values, 3);
     this.previousRoot.set(0, 0, 0);
-    this.jumpAction = this.mixer.clipAction(plan.clip).setLoop(THREE.LoopOnce, 1);
-    this.jumpAction.clampWhenFinished = true;
-    this.jumpAction.play();
-    this.jumpAction.paused = true;
+    this.flightAction = this.mixer.clipAction(plan.clip).setLoop(THREE.LoopOnce, 1);
+    this.flightAction.clampWhenFinished = true;
+    this.flightAction.play();
+    this.flightAction.paused = true;
     this.mixer.update(0);
     this.model.updateMatrixWorld(true);
     return true;
@@ -120,7 +154,7 @@ export class CharacterPlayback {
     return this.action.getClip().duration;
   }
   get phase() {
-    if (this.vault) return this.jumpTime / this.vault.clip.duration;
+    if (this.flightEnvelope) return this.flightTime / this.flightEnvelope.clip.duration;
     if (this.isStarting) return this.startTime / this.launch!.clip.duration;
     return this.targetWeight === 0 && this.plan
       ? Math.min(1, this.stopTime / this.plan.clip.duration)
@@ -146,7 +180,7 @@ export class CharacterPlayback {
   /** Replace a clip only while idle. Analyze first so invalid input leaves the
    * current playback untouched. Pass exact authoring markers if analysis is uncertain. */
   replaceWalking(clip: THREE.AnimationClip, markers?: WalkingGaitSpec) {
-    if (this.mode === 'walk' || this.isStopping || this.isJumping)
+    if (this.mode === 'walk' || this.isStopping || this.isFlying)
       throw new Error('Stop completely or reset to bind before replacing Walking.');
     const gait = resolveWalkingGait(this.model, clip, markers);
     this.setMode('bind', true);
@@ -192,7 +226,7 @@ export class CharacterPlayback {
   setMode(mode: 'walk' | 'bind', immediate = false) {
     const target = mode === 'walk' ? 1 : 0;
     if (immediate) {
-      this.discardJump();
+      this.discardFlight();
       this.discardStart();
       this.discardStop();
       this.targetWeight = target;
@@ -206,15 +240,15 @@ export class CharacterPlayback {
       this.model.updateMatrixWorld(true);
       return;
     }
-    if (this.isJumping) {
-      this.resumeAfterJump = target === 1;
+    if (this.isFlying) {
+      this.resumeAfterFlight = target === 1;
       return;
     }
     if (target === this.targetWeight) return;
     this.targetWeight = target;
     if (target === 1) {
       const launch = makeCharacterStart(this.model, this.action.getClip(), this.walkGait);
-      this.discardJump();
+      this.discardFlight();
       this.discardStop();
       this.discardStart();
       this.launch = launch;
@@ -278,7 +312,7 @@ export class CharacterPlayback {
     }
   }
   seek(phase: number) {
-    if (this.isJumping) return;
+    if (this.isFlying) return;
     if (this.launch) {
       this.discardStart();
       this.targetWeight = 1;
@@ -307,19 +341,65 @@ export class CharacterPlayback {
   }
   update(dt: number) {
     dt = Math.max(0, dt);
-    if (this.jumpAction && this.vault) {
-      const old = this.jumpTime;
-      this.jumpTime = Math.min(this.vault.clip.duration, this.jumpTime + (this.playing ? dt : 0));
-      this.jumpAction.time = this.jumpTime;
+    if (this.flightAction && this.flightEnvelope) {
+      const p = this.flightEnvelope;
+      let remaining = this.playing ? dt : 0;
+      if (!this.descending) {
+        const used = Math.min(remaining, Math.max(0, p.apex - this.flightTime));
+        this.flightTime += used;
+        remaining -= used;
+        if (this.flightTime >= p.apex - 1e-7) {
+          if (this.landingQueued) {
+            this.descending = true;
+            this.landingBob = this.hoverBob;
+            this.landingBreath = this.breath;
+          } else {
+            this.hoverClock += remaining;
+            remaining = 0;
+          }
+        }
+      }
+      if (this.descending) {
+        const used = Math.min(remaining, p.clip.duration - this.flightTime);
+        this.flightTime += used;
+        remaining -= used;
+      }
+      this.flightAction.time = this.flightTime;
       this.mixer.update(0);
-      this.rootSample(this.jumpTime);
-      if (this.rootMotionEnabled) this.root?.position.set(0, 0, 0);
+      for (const entry of this.hoverPose)
+        entry.bone.quaternion.fromArray(entry.sample.evaluate(this.flightTime));
+      const hover = this.flightTime >= p.apex - 1e-7 && !this.descending;
+      const ramp = THREE.MathUtils.smootherstep(Math.min(1, this.hoverClock / 0.45), 0, 1);
+      this.hoverBob = hover ? 0.014 * Math.sin((2 * Math.PI * this.hoverClock) / 2.8) * ramp : 0;
+      const decay =
+        1 -
+        THREE.MathUtils.smootherstep(
+          THREE.MathUtils.clamp((this.flightTime - p.apex) / (p.landing - p.apex), 0, 1),
+          0,
+          1,
+        );
+      this.breath = hover
+        ? 0.009 * Math.sin((2 * Math.PI * this.hoverClock) / 3.2) * ramp
+        : this.landingBreath * decay;
+      if (hover || this.descending)
+        for (const [i, entry] of this.hoverPose.entries())
+          entry.bone.quaternion.multiply(
+            new THREE.Quaternion().setFromEuler(
+              new THREE.Euler(this.breath * (i < 2 ? 0.5 : 1), 0, 0),
+            ),
+          );
+      const authored = new THREE.Vector3().fromArray(this.rootCurve!.evaluate(this.flightTime));
+      authored.y += hover ? this.hoverBob : this.landingBob * decay;
+      if (this.rootMotionEnabled) {
+        this.motion.add(authored.clone().sub(this.previousRoot));
+        this.previousRoot.copy(authored);
+        this.root?.position.set(0, 0, 0);
+      } else this.root?.position.copy(authored);
       this.model.updateMatrixWorld(true);
-      if (!this.isJumping && this.resumeAfterJump) {
-        const carry = this.playing ? Math.max(0, dt - (this.jumpTime - old)) : 0;
-        this.resumeAfterJump = false;
+      if (!this.isFlying && this.resumeAfterFlight) {
+        this.resumeAfterFlight = false;
         this.setMode('walk');
-        if (carry > 0) this.update(carry);
+        if (remaining > 0) this.update(remaining);
       }
       return;
     }

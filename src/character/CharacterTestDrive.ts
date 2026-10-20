@@ -5,8 +5,8 @@ import type { CharacterPlayback } from './CharacterPlayback';
  * launching the first step or closing the last two steps. The controller must not damp/slide planted feet. */
 export class CharacterTestDrive {
   private lastSpeed = 0;
-  requestJump() {
-    return this.playback.jump(this.lastSpeed);
+  requestFlight() {
+    return this.playback.isFlying ? this.playback.land() : this.playback.fly(this.lastSpeed);
   }
   resetMotion() {
     this.lastSpeed = 0;
@@ -35,9 +35,21 @@ export class CharacterTestDrive {
     if (direction.length() > 1) direction.normalize();
     if (direction.length() > 0 && direction.length() < 0.35) direction.setLength(0.35);
     this.playback.playing = true;
-    const jumping = this.playback.isJumping;
-    if (jumping) {
+    const flying = this.playback.isFlying;
+    if (flying) {
       this.playback.setMode(direction.lengthSq() > 0 ? 'walk' : 'bind');
+      if (
+        this.playback.flightStage === 'hover' &&
+        !this.playback.isLanding &&
+        direction.lengthSq() > 0
+      ) {
+        const target = new THREE.Quaternion().setFromAxisAngle(
+          new THREE.Vector3(0, 1, 0),
+          Math.atan2(direction.x, direction.z),
+        );
+        this.body.quaternion.slerp(target, 1 - Math.exp(-6 * dt));
+        this.body.position.addScaledVector(direction, this.walkSpeed * 0.8 * dt);
+      }
       this.playback.update(dt);
     } else if (direction.lengthSq() > 0) {
       const initiating = this.playback.mode === 'bind';

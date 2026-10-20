@@ -103,6 +103,7 @@ beforeEach(async () => {
 describe('portable 101172 rig and Walking asset', () => {
   it('contains a real humanoid skeleton, bind matrices, UVs and the gameplay clip name', () => {
     expect(mesh).toBeInstanceOf(THREE.SkinnedMesh);
+
     expect(mesh.skeleton.bones.map((bone) => bone.name).sort()).toEqual([...JOINT_NAMES].sort());
     expect(mesh.skeleton.boneInverses).toHaveLength(28);
     expect(mesh.geometry.getAttribute('uv').count).toBe(116724);
@@ -831,7 +832,7 @@ describe('portable 101172 rig and Walking asset', () => {
     );
   });
 
-  it('bakes an arcane jump with real height, pinned charge/landing feet and smooth pose samples', () => {
+  it('bakes a compact flight envelope with height, pinned takeoff/landing feet and smooth poses', () => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
     player.rootMotionEnabled = true;
     const body = new THREE.Group();
@@ -848,11 +849,12 @@ describe('portable 101172 rig and Walking asset', () => {
         player.seek(phase);
       }
       const initial = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
-      expect(player.jump(phase === undefined ? 0 : 0.65)).toBe(true);
-      expect(player.jump()).toBe(false);
+      expect(player.fly(phase === undefined ? 0 : 0.65)).toBe(true);
+      expect(player.fly()).toBe(false);
       // Force an idle exit; held movement is covered by the motor test below.
       player.setMode('bind');
-      const plan = player.jumpPlan!;
+      player.land();
+      const plan = player.flightPlan!;
       mesh.skeleton.bones.forEach((b, i) =>
         expect(b.quaternion.clone().normalize().angleTo(initial[i])).toBeLessThan(1e-5),
       );
@@ -895,8 +897,8 @@ describe('portable 101172 rig and Walking asset', () => {
             minFloor = Math.min(minFloor, p.y);
           }
       }
-      expect(player.isJumping).toBe(false);
-      expect(maxHeight).toBeGreaterThan(0.75);
+      expect(player.isFlying).toBe(false);
+      expect(maxHeight).toBeGreaterThan(0.6);
       expect(minFloor).toBeGreaterThan(-0.003);
       expect(pin).toBeLessThan(0.003);
       expect(worstAngle).toBeLessThan(0.17);
@@ -911,7 +913,7 @@ describe('portable 101172 rig and Walking asset', () => {
     }
     player.dispose();
   });
-  it('owns jump root motion once in a scaled motor, queues Walking after landing and resets midair', () => {
+  it('holds flight in a scaled motor, lands on request, resumes Walking and resets midair', () => {
     const body = new THREE.Group();
     body.scale.setScalar(0.76);
     body.add(gltf.scene);
@@ -923,33 +925,40 @@ describe('portable 101172 rig and Walking asset', () => {
     camera.updateMatrixWorld(true);
     drive.resetMotion();
     for (let i = 0; i < 100; i++) drive.update(1 / 60, 0, 1, camera);
-    expect(drive.requestJump()).toBe(true);
-    const plan = player.jumpPlan!;
+    expect(drive.requestFlight()).toBe(true);
+    const plan = player.flightPlan!;
     const initial = body.position.clone();
-    for (let i = 0; i < 50; i++) drive.update(0.02, 0, 1, camera);
+    for (let i = 0; i < 50; i++) drive.update(0.02, 0, 0, camera);
     expect(body.position.y).toBeGreaterThan(0.4);
-    expect(drive.requestJump()).toBe(false);
+    expect(drive.requestFlight()).toBe(true);
+    expect(drive.requestFlight()).toBe(false);
     for (let i = 0; i < 47; i++) drive.update(0.02, 0, 1, camera);
     expect(body.position.y).toBeCloseTo(0, 5);
-    expect(body.position.z - initial.z).toBeCloseTo(-plan.rootEnd.z * 0.76, 4);
+    const nextTrack = player.startPlan!.clip.tracks.find((t) => t.name === 'Root.position')!;
+    const carry = new THREE.Vector3().fromArray(
+      new THREE.LinearInterpolant(nextTrack.times, nextTrack.values, 3).evaluate(
+        0.02 * player.speed,
+      ),
+    );
+    expect(body.position.z - initial.z).toBeCloseTo(-(plan.rootEnd.z + carry.z) * 0.76, 5);
     expect(player.isStarting).toBe(true);
     drive.update(0.6, 0, 1, camera);
-    drive.requestJump();
+    drive.requestFlight();
     drive.update(0.8, 0, 0, camera);
     expect(body.position.y).toBeGreaterThan(0.3);
     // resetMotion clears animation/motion; owner resets the body's position.
     drive.resetMotion();
     body.position.set(0, 0, 0);
     drive.update(0.1, 0, 0, camera);
-    expect(player.isJumping).toBe(false);
+    expect(player.isFlying).toBe(false);
     expect(body.position.length()).toBe(0);
     player.dispose();
   });
-  it('pauses jump playback without root rollback or allowing a second airborne impulse', () => {
+  it('pauses sustained flight without root rollback or a second airborne impulse', () => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
     player.rootMotionEnabled = true;
     player.setMode('bind', true);
-    player.jump();
+    player.fly();
     player.update(0.8);
     player.consumeRootMotion();
     const phase = player.phase;
@@ -957,9 +966,89 @@ describe('portable 101172 rig and Walking asset', () => {
     player.update(0.4);
     expect(player.phase).toBe(phase);
     expect(player.consumeRootMotion().length()).toBe(0);
-    expect(player.jump()).toBe(false);
+    expect(player.fly()).toBe(false);
     player.setMode('bind', true);
-    expect(player.isJumping).toBe(false);
+    expect(player.isFlying).toBe(false);
+    player.dispose();
+  });
+
+  it('exports white derivative materials without overwriting source geometry', () => {
+    const file = readFileSync('public/models/101172-rigged.glb');
+    const length = file.readUInt32LE(12);
+    const json = JSON.parse(file.subarray(20, 20 + length).toString());
+    expect(json.materials[0].pbrMetallicRoughness.baseColorFactor ?? [1, 1, 1, 1]).toEqual([
+      1, 1, 1, 1,
+    ]);
+    expect(json.materials[0].pbrMetallicRoughness.baseColorTexture).toBeUndefined();
+  });
+  it('isolates shoulder vertices from head pitch/yaw and separates forearm/thigh influences', () => {
+    const positions = mesh.geometry.getAttribute('position'),
+      weights = mesh.geometry.getAttribute('skinWeight'),
+      indices = mesh.geometry.getAttribute('skinIndex');
+    const shoulder: number[] = [];
+    let arms = 0;
+    for (let i = 0; i < positions.count; i++) {
+      const y = positions.getY(i),
+        x = Math.abs(positions.getX(i));
+      if (y > 1.38 && y < 1.59) {
+        shoulder.push(i);
+        for (let slot = 0; slot < 4; slot++) {
+          const name = mesh.skeleton.bones[indices.array[i * 4 + slot]].name;
+          if (['Neck', 'Head'].includes(name)) expect(weights.array[i * 4 + slot]).toBe(0);
+        }
+      }
+      if (y > 0.93 && y < 1.2 && x > 0.2) {
+        arms++;
+        let armWeight = 0;
+        for (let slot = 0; slot < 4; slot++)
+          if (/Clavicle|Arm|Hand/.test(mesh.skeleton.bones[indices.array[i * 4 + slot]].name))
+            armWeight += weights.array[i * 4 + slot];
+        expect(armWeight).toBeGreaterThan(0.999);
+      }
+    }
+    expect(arms).toBeGreaterThan(500);
+    expect(shoulder.length).toBeGreaterThan(1000);
+    const before = shoulder.map((i) =>
+      mesh.applyBoneTransform(i, new THREE.Vector3().fromBufferAttribute(positions, i)),
+    );
+    const look = new CharacterLook(gltf.scene);
+    for (const pitch of [-Math.PI / 6, Math.PI / 6]) {
+      look.apply(0.7, pitch);
+      let worst = 0;
+      shoulder.forEach((i, j) => {
+        const p = mesh.applyBoneTransform(i, new THREE.Vector3().fromBufferAttribute(positions, i));
+        worst = Math.max(worst, p.distanceTo(before[j]));
+      });
+      expect(worst).toBeLessThan(1e-6);
+      look.clear();
+    }
+  });
+  it('keeps hovering until descent is explicitly requested', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.rootMotionEnabled = true;
+    player.setMode('bind', true);
+    player.fly();
+    let height = 0;
+    for (let i = 0; i < 500; i++) {
+      player.update(0.02);
+      height += player.consumeRootMotion().y;
+    }
+    expect(player.isFlying).toBe(true);
+    expect(player.flightStage).toBe('hover');
+    expect(height).toBeGreaterThan(0.59);
+    expect(height).toBeLessThan(0.65);
+    const hoverPose = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+    expect(player.land()).toBe(true);
+    expect(player.land()).toBe(false);
+    player.update(0);
+    expect(player.consumeRootMotion().length()).toBeLessThan(1e-9);
+    mesh.skeleton.bones.forEach((b, i) =>
+      expect(b.quaternion.clone().normalize().angleTo(hoverPose[i])).toBeLessThan(1e-6),
+    );
+    player.update(2);
+    height += player.consumeRootMotion().y;
+    expect(height).toBeCloseTo(0, 5);
+    expect(player.isFlying).toBe(false);
     player.dispose();
   });
 

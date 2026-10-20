@@ -370,58 +370,52 @@ mengecek interval asimetris/wrap, menolak clip tidak didukung, serta memastikan
 replacement yang gagal tidak merusak action lama. GLB v6 ditambah metadata saja;
 binary chunk mesh, skin, skeleton dan keyframe-nya tetap identik.
 
-## ArcaneJump — lompatan bergaya HEA untuk review
+## V7 — putih, isolasi bahu/leher, dan flight menggantikan jump
 
-`CharacterJump.ts` membake clip standar `ArcaneJump` dari pose aktual (diam,
-Walking, start atau stop), bukan memindahkan mesh statis ke atas. Siluet: gather
-0,18 s, coil/charge 0,36 s, sapuan telapak dan takeoff 0,50 s, apex 0,95 s,
-landing 1,40 s, impact 1,54 s, recovery selesai 1,94 s. Flight memakai arc naik/turun
-dengan sedikit pelebaran apex; tinggi Root maksimum sekitar 0,775 unit aset.
-Lengan/torso berputar halus dan asimetris, kaki tuck berbeda, tanpa VFX yang
-menutupi pose. Pelvis dipersiapkan sebelum kontak dan menyerap kecepatan turun
-sesudah kontak; kaki mendarat sejajar lalu dipin hingga recovery selesai.
-
-Foot IK dibake berdasarkan anatomi dan telapak karakter yang sama. Jangkauan
-pelvis dihitung dari panjang tungkai dan target ankle, dengan margin agar knee
-tidak snap dekat ekstensi penuh. Pose awal cocok dengan pose yang ditangkap;
-pose akhir bisa menjadi sumber Starting bila input jalan masih ditahan.
-
-API reusable:
+Review pengguna menolak ArcaneJump. UI dan API jump dihapus, diganti flight:
+**tekukan kaki singkat → naik → hover terus → turun atas permintaan → recovery**.
+`CharacterFlight.ts` membake envelope `Flight` dari pose aktual. Tidak ada lagi
+pose merapal, ayunan lengan ekstrem atau jatuh otomatis setelah apex. Tinggi hover
+0,62 unit aset, takeoff 0,28 s dan mencapai hover 0,72 s. Hover bertahan tanpa batas;
+root bob 1,4 cm dengan ramp halus serta napas kecil pada torso/lengan.
 
 ```ts
 playback.rootMotionEnabled = true;
-playback.jump(); // false bila lompatan/recovery masih berlangsung
-// Opsional: jump(forwardSpeedInAssetUnits) menentukan travel ke depan.
+playback.fly(); // false jika masih terbang/recovery
+playback.land(); // antre turun jika masih dalam fase naik
 playback.update(dt);
-const delta = playback.consumeRootMotion(); // XYZ; motor mengalikan skala/orientasi
-// Inspeksi: isJumping, jumpStage, jumpPlan (clip + waktu tiap event).
+const delta = playback.consumeRootMotion(); // XYZ: skala/orientasi oleh motor
+// isFlying, isLanding, flightStage, flightPlan untuk inspeksi.
 ```
 
-`CharacterTestDrive.requestJump()` memakai kecepatan horizontal terakhir. Selama
-jump, motor menahan heading dan tidak menambahkan gerak jalan/gravity/impulse lain.
-Input gerak dapat berubah selama airborne, tetapi hanya menentukan diam/jalan
-setelah recovery; bukan air steering. Held input masuk ke Starting, bukan langsung
-memutar Walking di fase sembarang. Retrigger ditolak sampai recovery selesai.
-`setMode()` selama jump hanya memperbarui tujuan setelah landing; reset eksplisit
-boleh membatalkan jump. Pemilik motor harus mereset posisi tubuh dan kamera juga.
+`CharacterTestDrive.requestFlight()` melakukan toggle terbang/turun. Dalam mode
+main, joystick/WASD menggeser dan mengarahkan karakter saat hover. Tidak ada gerak
+jalan biasa yang diduplikasi selama takeoff/landing. Heading ditahan saat kaki
+menapak; input menentukan apakah sesudah recovery diam atau masuk Starting.
+Spasi atau tombol TERBANG/Turun pada stage; tombol Terbang/Turun juga tersedia
+untuk inspeksi. Landing request mempertahankan offset bob agar tidak snap; reset
+membersihkan trajectory dan state, pemilik mereset posisi/kamera.
 
-Preview: tombol **Loncat arcane** pada pilihan gerakan; mode main juga memakai
-**Spasi** atau tombol **LONCAT** di stage untuk HP. Scrub/ganti Walking/speed dikunci
-selama jump; pause inspeksi tetap tersedia. Clock jump tidak mengikuti cadence
-analog jalan, sehingga input pelan tidak mengubah durasi fisik flight. Tidak ada
-perubahan input/gameplay pemain default.
+Ini **flight preview di lantai datar**, belum flight physics/collision milik game
+aktif: tidak ada ceiling/platform/terrain/collision avoidance. Jangan menjalankan
+gravity lain bersamaan dengan authored root Y. Flight clip dibuat runtime, bukan
+clip baru di GLB unduhan; unduhan tetap berisi rig dan Walking. Gameplay default
+belum diganti. Clock flight independen cadence jalan; pause inspeksi tetap bekerja.
 
-Ini authoring/root-motion untuk lantai datar, **bukan collision solver**: tidak ada
-platform, ceiling collision, terrain, jatuh dari tebing, lompat ganda, air steering,
-atau physics jump milik game aktif. Travel depan dari jalan sengaja direm saat
-charge lalu didorong saat flight (vault arcane), bukan lompatan momentum realistis.
-Jangan menjalankan gravity/controller jump lain bersamaan dengan trajectory ini.
-Batas arena yang menolak root motion tetap membatasi jaminan foot-lock.
+Perbaikan skin/material pada GLB turunan v7:
 
-Clip dibake runtime dan reusable sebagai AnimationClip, **belum disimpan dalam
-GLB unduhan** (label tetap GLB rig + Walking). Model asli, derivative mesh/rig,
-Walking dan profil gait tidak diubah oleh fitur ini. `character:stop-review` juga
-merender tujuh tahap jump diam/bergerak dari tiga sudut ke cache. Unit menguji
-pose capture, kontak/floor, perubahan joint, height, displacement sekali pada motor
-diskalakan, recovery, pause/retrigger dan reset. Kualitas gerak tetap perlu review
-pengguna; kelulusan tes tidak dianggap persetujuan visual.
+- Weight Head/Neck dibatasi ke leher/kepala; vertex bahu di bawah Y 1,59 tidak
+  menerima pengaruh kedua tulang itu. Kepala tetap menoleh dengan Neck/Head,
+  bukan menggerakkan mesh bahu lewat kernel Head yang terlalu lebar.
+- Pengaruh Clavicle dipadamkan sebelum lengan bawah, pemisahan lengan/paha
+  berbasis konektivitas tetap dipertahankan. Pose flight memakai lengan terbuka
+  dan elbow ringan untuk menghindari persilangan/pelebaran pose jump lama.
+- Material derivative putih tanpa base-color texture ungu; file sumber, posisi
+  vertex, topology dan UV tetap dipertahankan. Geometry taper v6 tidak ditambah.
+  Landmark siku/bahu tetap; Walking dan marker gait tetap kompatibel.
+
+Regresi mengukur posisi vertex bahu pada pitch ±30°/yaw, tidak hanya posisi bone;
+menguji nol weight kepala pada bahu dan pemisahan weight forearm/thigh, material
+GLB putih, flight height/floor/pose, hover 10 detik tanpa auto-land, bob/descent,
+scaled root consumer, input setelah landing, pause dan reset. Renderer QA juga
+memeriksa envelope flight dari tiga sudut. Kualitas gerak tetap perlu review pengguna.

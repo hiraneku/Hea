@@ -19,7 +19,7 @@ export const WALK = {
   contactAdvance: 0.25,
   clearance: 0.12,
 } as const;
-export const RIG_REVISION = 6;
+export const RIG_REVISION = 7;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;
@@ -156,6 +156,14 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
   const material = Array.isArray(original.material)
     ? original.material.map((m) => m.clone())
     : original.material.clone();
+  for (const m of Array.isArray(material) ? material : [material])
+    if (m instanceof THREE.MeshStandardMaterial) {
+      m.color.set('#ffffff');
+      m.map = null;
+      m.emissive.set(0);
+      m.roughness = 0.68;
+      m.metalness = 0;
+    }
   const mesh = new THREE.SkinnedMesh(geometry, material);
   mesh.name = 'CharacterSkin';
   mesh.add(bones.get('Root')!);
@@ -237,10 +245,19 @@ function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: Ch
         const leg = /Thigh|Shin|Foot|Toes/.test(segment.name);
         let mask = arm ? armMask : leg ? legMask : (1 - armMask) * (1 - legMask);
         if (side && side * p.x < 0) mask = 0;
+        // Head's wide distance kernel must never pull the shoulder/trapezius.
+        // Neck flex is confined to the neck shaft, not the chest surface.
+        if (segment.name === 'Head') mask *= smooth(1.665, 1.715, p.y);
+        if (segment.name === 'Neck')
+          mask *= smooth(1.59, 1.655, p.y) * (1 - smooth(1.705, 1.75, p.y));
+        if (['Root', 'Hips', 'Spine', 'SpineUpper', 'Chest'].includes(segment.name))
+          mask *= 1 - smooth(1.665, 1.73, p.y);
         if (arm) {
           const limb = anatomy.arms[side > 0 ? 'left' : 'right'];
           const upper = smooth(limb.elbow[1] - 0.04, limb.elbow[1] + 0.04, p.y);
           const hand = 1 - smooth(limb.wrist[1] - 0.035, limb.wrist[1] + 0.035, p.y);
+          if (segment.name.endsWith('Clavicle'))
+            mask *= smooth(limb.elbow[1] + 0.06, limb.shoulder[1] - 0.025, p.y);
           if (segment.name.endsWith('UpperArm')) mask *= upper;
           else if (segment.name.endsWith('ForeArm')) mask *= (1 - upper) * (1 - hand);
           else if (segment.name.endsWith('Hand')) mask *= hand;

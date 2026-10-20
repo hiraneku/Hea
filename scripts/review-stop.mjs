@@ -69,7 +69,7 @@ try {
         ],
       };
     };
-    window.beginJump = (moving) => {
+    window.beginFlight = (moving) => {
       player.setMode('bind', true);
       gltf.scene.position.set(0, 0, 0);
       player.speed = 1;
@@ -77,10 +77,11 @@ try {
         player.setMode('walk', true);
         player.seek(0.25);
       }
-      player.jump(moving ? 0.65 : 0);
+      player.fly(moving ? 0.65 : 0);
+      player.land();
       player.setMode('bind');
       time = 0;
-      const p = player.jumpPlan;
+      const p = player.flightPlan;
       camera.top = 1.75;
       camera.bottom = -1.75;
       camera.left = -1.475;
@@ -160,15 +161,15 @@ try {
       ['side', Math.PI / 2],
       ['three-quarter', Math.PI / 6],
     ]) {
-      const plan = await page.evaluate((m) => window.beginJump(m), moving);
+      const plan = await page.evaluate((m) => window.beginFlight(m), moving);
       for (let i = 0; i < plan.times.length; i++) {
         await page.evaluate(({ t, angle, caption }) => window.renderStop(t, angle, caption), {
           t: plan.times[i],
           angle,
-          caption: `Arcane jump · ${moving ? 'moving' : 'standing'} · ${view} · stage ${i}`,
+          caption: `Flight · ${moving ? 'moving' : 'standing'} · ${view} · stage ${i}`,
         });
         await page.screenshot({
-          path: `.cache/stop-review/jump-${moving ? 'moving' : 'standing'}-${view}-${i}.png`,
+          path: `.cache/stop-review/flight-${moving ? 'moving' : 'standing'}-${view}-${i}.png`,
         });
       }
     }

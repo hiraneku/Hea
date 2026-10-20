@@ -62,7 +62,7 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   await expect(phase).toHaveValue('0');
   await expect(page.getByRole('link', { name: 'Unduh GLB rig + Walking' })).toHaveAttribute(
     'href',
-    /models\/101172-rigged\.glb\?revision=6&gait=1$/,
+    /models\/101172-rigged\.glb\?revision=7&gait=1$/,
   );
 });
 
@@ -140,60 +140,69 @@ test('playable preview moves with keyboard and joystick, releases input, and tes
   await expect(page.locator('#animation')).toHaveValue('bind');
 });
 
-test('arcane jump gathers, pauses, lands and rejoins Walking in the character preview', async ({
+test('flight lifts smoothly, hovers until requested and lands back into Walking', async ({
   page,
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
   await page.goto('preview/');
   await expect(page.locator('#load-status')).toBeHidden({ timeout: 30000 });
-  const jump = page.locator('#movement-jump'),
+  const fly = page.locator('#movement-flight'),
     stage = page.locator('#viewport');
-  await jump.click();
-  await expect(jump).toBeDisabled();
-  await expect(stage).toHaveAttribute('data-motion', /charge|release|rise|fall|impact|recover/);
+  await fly.click();
+  await expect(stage).toHaveAttribute('data-motion', /prepare|rise|hover/);
   await expect(page.locator('#movement-walk')).toBeDisabled();
   await page.locator('#play').click();
   const paused = await page.locator('#phase').inputValue();
   await page.waitForTimeout(250);
   expect(await page.locator('#phase').inputValue()).toBe(paused);
   await page.locator('#play').click();
-  await expect(jump).toBeEnabled({ timeout: 25000 });
+  await expect(stage).toHaveAttribute('data-motion', 'hover', { timeout: 25000 });
+  await expect(fly).toHaveText('Turun');
+  await page.waitForTimeout(1200);
+  await expect(stage).toHaveAttribute('data-motion', 'hover');
+  await fly.click();
+  await expect(fly).toBeDisabled();
+  await expect(fly).toBeEnabled({ timeout: 25000 });
   await expect(stage).toHaveAttribute('data-motion', 'bind');
   await expect(page.locator('#phase')).toHaveValue('1000');
   await page.locator('#movement-walk').click();
   await expect.poll(() => page.locator('#phase').inputValue()).not.toBe('0');
-  await jump.click();
-  await expect(jump).toBeDisabled();
-  await expect(jump).toBeEnabled({ timeout: 25000 });
+  await fly.click();
+  await expect(stage).toHaveAttribute('data-motion', 'hover', { timeout: 25000 });
+  await fly.click();
+  await expect(fly).toBeEnabled({ timeout: 25000 });
   await expect(stage).toHaveAttribute('data-motion', /starting|walk/);
   expect(errors).toEqual([]);
 });
 
-test('playable arcane jump supports Space, the touch button and a safe midair reset', async ({
-  page,
-}) => {
+test('playable flight supports Space, steering, touch descent and safe reset', async ({ page }) => {
   await page.goto('preview/');
   await expect(page.locator('#load-status')).toBeHidden({ timeout: 30000 });
   await page.locator('#drive-toggle').click();
-  const jump = page.locator('#drive-jump'),
+  const fly = page.locator('#drive-flight'),
     stage = page.locator('#viewport');
-  await expect(jump).toBeVisible();
+  await expect(fly).toBeVisible();
   const padBounds = await page.locator('#drive-pad').boundingBox(),
-    jumpBounds = await jump.boundingBox();
-  expect(padBounds!.x + padBounds!.width).toBeLessThan(jumpBounds!.x);
+    flyBounds = await fly.boundingBox();
+  expect(padBounds!.x + padBounds!.width).toBeLessThan(flyBounds!.x);
   await page.locator('canvas').focus();
   await page.keyboard.press('Space');
-  await expect(jump).toBeDisabled();
-  await expect(stage).toHaveAttribute('data-motion', /charge|release|rise|fall|impact|recover/);
+  await expect(stage).toHaveAttribute('data-motion', 'hover', { timeout: 25000 });
   await page.locator('#drive-reset').click();
-  await expect(jump).toBeEnabled();
   await expect(stage).toHaveAttribute('data-motion', 'bind');
   await expect(page.locator('#drive-status')).toHaveText(/X 0.000 · Z 0.000/);
-  await jump.click();
-  await expect(jump).toBeDisabled();
-  await expect(jump).toBeEnabled({ timeout: 25000 });
+  await fly.click();
+  await expect(stage).toHaveAttribute('data-motion', 'hover', { timeout: 25000 });
+  const before = await page.locator('#drive-status').textContent();
+  await page.locator('canvas').focus();
+  await page.keyboard.down('w');
+  await expect.poll(() => page.locator('#drive-status').textContent()).not.toBe(before);
+  await page.keyboard.up('w');
+  await fly.click();
+  await expect(fly).toBeDisabled();
+  await expect(fly).toBeEnabled({ timeout: 25000 });
   await expect(stage).toHaveAttribute('data-motion', 'bind');
   await page.locator('#drive-toggle').click();
-  await expect(jump).toBeHidden();
+  await expect(fly).toBeHidden();
 });

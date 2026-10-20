@@ -30,7 +30,7 @@ app.innerHTML = `
       <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION}</p></div>
       <div id="viewport"></div><div id="joint-labels" class="joint-labels" aria-hidden="true" hidden></div>
       <div id="drive-pad" role="group" aria-label="Joystick gerak" hidden><span id="drive-knob"></span><small>GERAK</small></div>
-      <button id="drive-jump" class="drive-jump" aria-label="Loncat arcane" hidden disabled>LONCAT</button>
+      <button id="drive-flight" class="drive-flight" aria-label="Terbang" hidden disabled>TERBANG</button>
       <div id="load-status" role="status">Memuat model…</div>
       <div class="stage-footer"><span><i></i> HEA · PREVIEW</span><span>Y ↑</span></div>
     </section>
@@ -40,13 +40,13 @@ app.innerHTML = `
       <h3>SUDUT PANDANG</h3><div class="view-buttons"><button data-view="front">Depan</button><button data-view="side">Samping</button><button data-view="back">Belakang</button><button id="reset">Reset kamera</button></div>
       <h3>MAIN</h3>
       <div class="view-buttons"><button id="drive-toggle" aria-pressed="false" disabled>Mainkan karakter</button><button id="drive-reset" disabled>Reset posisi</button></div>
-      <p class="movement-help">Joystick / WASD · Spasi untuk loncat.</p>
+      <p class="movement-help">Joystick / WASD · Spasi untuk terbang / turun.</p>
       <h3>ARAH KEPALA</h3>
       <label for="look-yaw"><span>Menoleh kiri / kanan</span><output id="look-yaw-value">0°</output></label><input id="look-yaw" type="range" min="-70" max="70" value="0" aria-label="Menoleh kiri kanan" disabled />
       <label for="look-pitch"><span>Tunduk / mendongak</span><output id="look-pitch-value">0°</output></label><input id="look-pitch" type="range" min="-30" max="30" value="0" aria-label="Tunduk mendongak" disabled />
       <button id="look-reset" disabled>Luruskan kepala</button>
       <h3>COBA GERAKAN</h3>
-      <div class="view-buttons" id="movement-options" aria-label="Pilihan gerakan"><button id="movement-walk" aria-pressed="false" disabled>Jalan</button><button id="movement-jump" disabled>Loncat arcane</button></div>
+      <div class="view-buttons" id="movement-options" aria-label="Pilihan gerakan"><button id="movement-walk" aria-pressed="false" disabled>Jalan</button><button id="movement-flight" disabled>Terbang</button></div>
       <p class="movement-help">Klik untuk jalan, klik lagi untuk berhenti.</p>
       <h3>ANIMASI</h3>
       <label><span>Pose / animasi</span><select id="animation" disabled><option value="walk">Berjalan</option><option value="bind">Diam / berhenti</option></select></label>
@@ -168,20 +168,28 @@ async function boot() {
       THREE.MathUtils.degToRad(Number(pitchInput.value)),
     );
     if (playback) {
-      viewport.dataset.motion = playback.isJumping
-        ? playback.jumpStage
+      viewport.dataset.motion = playback.isFlying
+        ? playback.flightStage
         : playback.isStarting
           ? 'starting'
           : playback.isStopping
             ? 'stopping'
             : playback.mode;
-      for (const id of ['movement-jump', 'drive-jump'])
-        (document.getElementById(id) as HTMLButtonElement).disabled = playback.isJumping;
+      for (const id of ['movement-flight', 'drive-flight']) {
+        const button = document.getElementById(id) as HTMLButtonElement;
+        button.disabled = playback.isLanding;
+        button.textContent = playback.isFlying
+          ? 'Turun'
+          : id === 'drive-flight'
+            ? 'TERBANG'
+            : 'Terbang';
+        button.setAttribute('aria-label', playback.isFlying ? 'Turun dan mendarat' : 'Terbang');
+      }
       for (const id of ['animation', 'speed', 'phase', 'movement-walk', 'restart-animation'])
-        (document.getElementById(id) as HTMLInputElement).disabled = driving || playback.isJumping;
+        (document.getElementById(id) as HTMLInputElement).disabled = driving || playback.isFlying;
       if (!driving)
         document.querySelector<HTMLButtonElement>('#play')!.textContent =
-          playback.playing && (playback.isJumping || playback.mode === 'walk')
+          playback.playing && (playback.isFlying || playback.mode === 'walk')
             ? 'Jeda animasi'
             : 'Putar animasi';
       phaseInput.value = String(Math.round(playback.phase * 1000));
@@ -294,13 +302,14 @@ async function boot() {
     document.addEventListener('visibilitychange', () => {
       if (document.hidden) release();
     });
-    const launchJump = () => {
+    const toggleFlight = () => {
       look?.clear();
-      if (driving) drive.requestJump();
-      else playback!.jump();
+      if (driving) drive.requestFlight();
+      else if (playback!.isFlying) playback!.land();
+      else playback!.fly();
     };
-    document.querySelector<HTMLButtonElement>('#movement-jump')!.onclick = launchJump;
-    document.querySelector<HTMLButtonElement>('#drive-jump')!.onclick = launchJump;
+    document.querySelector<HTMLButtonElement>('#movement-flight')!.onclick = toggleFlight;
+    document.querySelector<HTMLButtonElement>('#drive-flight')!.onclick = toggleFlight;
     window.addEventListener('keydown', (e) => {
       if (
         !driving ||
@@ -309,7 +318,7 @@ async function boot() {
       )
         return;
       e.preventDefault();
-      if (!e.repeat) launchJump();
+      if (!e.repeat) toggleFlight();
     });
     const movementKeys = [
       'KeyW',
@@ -427,7 +436,7 @@ async function boot() {
     landmarks.add(forward);
     document
       .querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
-        '#movement-jump, #drive-jump, #animation, #play, #restart-animation, #speed, #phase, #skeleton, #movement-walk, #drive-toggle, #drive-reset, #look-yaw, #look-pitch, #look-reset',
+        '#movement-flight, #drive-flight, #animation, #play, #restart-animation, #speed, #phase, #skeleton, #movement-walk, #drive-toggle, #drive-reset, #look-yaw, #look-pitch, #look-reset',
       )
       .forEach((el) => {
         el.disabled = false;
@@ -464,7 +473,7 @@ async function boot() {
       target.y -= elevation;
       controls.target.y -= elevation;
       pad.hidden = !driving;
-      document.querySelector<HTMLButtonElement>('#drive-jump')!.hidden = !driving;
+      document.querySelector<HTMLButtonElement>('#drive-flight')!.hidden = !driving;
       driveButton.setAttribute('aria-pressed', String(driving));
       driveButton.textContent = driving ? 'Selesai main' : 'Mainkan karakter';
       controls.autoRotate = false;
@@ -498,7 +507,7 @@ async function boot() {
     };
     movementButton.onclick = () => selectMovement(playback!.mode === 'walk' ? 'bind' : 'walk');
     playButton.onclick = () => {
-      if (playback!.isJumping) {
+      if (playback!.isFlying) {
         playback!.playing = !playback!.playing;
         playButton.textContent = playback!.playing ? 'Jeda animasi' : 'Putar animasi';
         return;
@@ -593,7 +602,7 @@ async function boot() {
       info.append(row);
     }
     note.textContent =
-      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V6 menurunkan siku 4 cm dari v5 dan merampingkan radius lengan bawah hingga 12% pada aset turunan. Leher dan kepala bisa diuji menoleh; mode main memakai clip Walking yang sama. Pemisahan weight lengan/paha tetap dipertahankan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
+      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V7 mengisolasi skin leher dari bahu, membatasi weight lengan, dan memakai material putih pada aset turunan. Leher dan kepala bisa diuji menoleh; mode main memakai clip Walking yang sama. Pemisahan weight lengan/paha tetap dipertahankan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
     document.querySelector<HTMLInputElement>('#wireframe')!.onchange = (e) => {
       for (const material of materials) material.wireframe = (e.target as HTMLInputElement).checked;
     };
