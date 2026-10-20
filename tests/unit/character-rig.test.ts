@@ -8,6 +8,15 @@ import { CharacterLook } from '../../src/character/CharacterLook';
 import { CharacterTestDrive } from '../../src/character/CharacterTestDrive';
 import { taperForearms101172 } from '../../src/character/shape101172';
 import { CharacterPlayback } from '../../src/character/CharacterPlayback';
+import { makeCharacterStop } from '../../src/character/CharacterStop';
+import {
+  resolveWalkingGait,
+  stampWalkingGait,
+  nextFootContact,
+  isFootPlanted,
+  phaseDistance,
+  type WalkingGaitSpec,
+} from '../../src/character/WalkingGait';
 import { AvatarModel } from '../../src/game/Avatar';
 import {
   measure101172,
@@ -43,6 +52,28 @@ async function loadRig(path = 'public/models/101172-rigged.glb') {
   return new GLTFLoader().parseAsync(
     buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength),
     '',
+  );
+}
+/** Re-time and re-phase every track, retaining an actual cyclic skinned walk. */
+function changedWalking(source: THREE.AnimationClip, durationScale: number, shift: number) {
+  const duration = source.duration * durationScale;
+  return new THREE.AnimationClip(
+    'Walking',
+    duration,
+    source.tracks.map((track) => {
+      const interpolant = track.name.endsWith('.quaternion')
+        ? new THREE.QuaternionLinearInterpolant(track.times, track.values, 4)
+        : new THREE.LinearInterpolant(track.times, track.values, 3);
+      const times: number[] = [],
+        values: number[] = [];
+      for (let i = 0; i <= 240; i++) {
+        times.push((i / 240) * duration);
+        values.push(...interpolant.evaluate(((i / 240 + shift) % 1) * source.duration));
+      }
+      return track.name.endsWith('.quaternion')
+        ? new THREE.QuaternionKeyframeTrack(track.name, times, values)
+        : new THREE.VectorKeyframeTrack(track.name, times, values);
+    }),
   );
 }
 let sourceGeometry: THREE.BufferGeometry;
@@ -627,6 +658,177 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(player.isStarting).toBe(false);
     expect(body.position.z).toBeCloseTo(-1.4 * plan.rootEnd.z - speed * player.speed * 0.04, 5);
     player.dispose();
+  });
+
+  it('loads exact contact markers from GLB animation extras, independently of legacy metadata', () => {
+    const gait = resolveWalkingGait(gltf.scene, gltf.animations[0]);
+    expect(gait.source).toBe('markers');
+    expect(gait.feet.Left.contact).toBe(0);
+    expect(gait.feet.Right.contact).toBe(0.5);
+    expect(gait.feet.Left.liftOff).toBe(WALK.stance);
+    expect(gait.speed).toBeCloseTo(WALK.stride / WALK.duration, 6);
+  });
+
+  it('automatically adapts start, stop, foot locks and motor speed to a slower re-phased Walking', () => {
+    const walk = changedWalking(gltf.animations[0], 1.65, 0.23);
+    // Deliberately stale rig metadata must not drive the replacement gait.
+    const legacy = gltf.scene.getObjectByName('HEA_101172')!.userData.heaCharacter;
+    legacy.walkSpeed = 999;
+    legacy.walkStance = 0.01;
+    const player = new CharacterPlayback(gltf.scene, [walk]);
+    const gait = player.gait;
+    expect(gait.source).toBe('analysis');
+    expect(gait.speed).toBeCloseTo(WALK.stride / WALK.duration / 1.65, 2);
+    const phaseError = (a: number, b: number) => Math.min(phaseDistance(a, b), phaseDistance(b, a));
+    expect(phaseError(gait.feet.Left.contact, 0.77)).toBeLessThan(0.02);
+    expect(phaseError(gait.feet.Right.contact, 0.27)).toBeLessThan(0.02);
+    const body = new THREE.Group();
+    body.add(gltf.scene);
+    player.rootMotionEnabled = true;
+    player.setMode('bind', true);
+    player.setMode('walk');
+    const launch = player.startPlan!;
+    expect(phaseError(launch.joinPhase, 0.77)).toBeLessThan(0.02);
+    const positions = mesh.geometry.getAttribute('position');
+    const vertex = (i: number) =>
+      mesh.localToWorld(
+        mesh.applyBoneTransform(i, new THREE.Vector3().fromBufferAttribute(positions, i)),
+      );
+    body.updateMatrixWorld(true);
+    const anchor = vertex(launch.supportVertex);
+    let pin = 0;
+    for (let frame = 0; frame < 150; frame++) {
+      player.update(launch.clip.duration / 150);
+      body.position.add(player.consumeRootMotion());
+      body.updateMatrixWorld(true);
+      const p = vertex(launch.supportVertex);
+      pin = Math.max(pin, Math.hypot(p.x - anchor.x, p.z - anchor.z));
+    }
+    expect(pin).toBeLessThan(0.003);
+    player.update(1e-6);
+    body.position.add(player.consumeRootMotion());
+    expect(player.isStarting).toBe(false);
+    player.speed = 1;
+    player.seek(0.4);
+    player.setMode('bind');
+    const stop = player.stopPlan!;
+    // Old fixed-half-cycle selection would wrongly choose Right here.
+    expect(stop.lead).toBe('Left');
+    expect(stop.firstContact).toBeGreaterThan(0.55);
+    const support = 'RightFoot';
+    const original = gltf.scene.getObjectByName(support)!.getWorldPosition(new THREE.Vector3());
+    let drift = 0;
+    for (let i = 0; i < 120; i++) {
+      player.update(stop.clip.duration / 120);
+      body.position.add(player.consumeRootMotion());
+      body.updateMatrixWorld(true);
+      if (((i + 1) * stop.clip.duration) / 120 < stop.followStart - 0.02)
+        drift = Math.max(
+          drift,
+          gltf.scene
+            .getObjectByName(support)!
+            .getWorldPosition(new THREE.Vector3())
+            .distanceTo(original),
+        );
+    }
+    expect(drift).toBeLessThan(0.003);
+    expect(player.isStopping).toBe(false);
+    player.dispose();
+  });
+
+  it('uses asymmetric contact markers and wrapping stance windows rather than half-cycle assumptions', () => {
+    const gait: WalkingGaitSpec = {
+      speed: 0.8,
+      feet: { Left: { contact: 0.81, liftOff: 0.56 }, Right: { contact: 0.43, liftOff: 0.94 } },
+    };
+    expect(nextFootContact(gait, 0.35)).toBe('Right');
+    expect(nextFootContact(gait, 0.6)).toBe('Left');
+    expect(nextFootContact(gait, 0.9)).toBe('Right');
+    expect(isFootPlanted(gait, 'Left', 0.02)).toBe(true);
+    expect(isFootPlanted(gait, 'Left', 0.7)).toBe(false);
+    expect(phaseDistance(gait.feet.Right.contact, gait.feet.Left.contact)).toBeCloseTo(0.38);
+  });
+
+  it('schedules a 70/30 contact pattern without clamping it to a half-cycle', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.seek(0.05);
+    const gait = {
+      ...player.gait,
+      feet: { Left: { contact: 0, liftOff: 0.78 }, Right: { contact: 0.7, liftOff: 0.08 } },
+    };
+    // Isolate the event scheduler; these supplied events are not a new visual clip.
+    const plan = makeCharacterStop(
+      gltf.scene,
+      gltf.animations[0],
+      0.05,
+      gait.speed,
+      undefined,
+      gait,
+    );
+    expect(plan.lead).toBe('Right');
+    expect(plan.firstContact).toBeCloseTo(0.65 * player.duration, 5);
+    expect(plan.secondContact - plan.followStart).toBeCloseTo(0.3 * player.duration * 0.86, 5);
+    const body = new THREE.Group();
+    body.scale.setScalar(0.76);
+    const motor = new CharacterTestDrive(body, player);
+    const old = motor.walkSpeed;
+    player.setMode('bind', true);
+    player.replaceWalking(changedWalking(gltf.animations[0], 2, 0.1));
+    expect(motor.walkSpeed).toBeCloseTo(old / 2, 2);
+    player.dispose();
+  });
+
+  it('invalidates stale embedded markers when keyframes change and replaces clips only while idle', () => {
+    const original = gltf.animations[0].clone();
+    const player = new CharacterPlayback(gltf.scene, [original]);
+    expect(player.gait.source).toBe('markers');
+    expect(() => player.replaceWalking(original)).toThrow(/Stop completely/);
+    player.setMode('bind', true);
+    const metadata = (original as THREE.AnimationClip & { userData: Record<string, unknown> })
+      .userData;
+    const replacement = changedWalking(original, 0.8, 0.37);
+    Object.assign(replacement, { userData: metadata }); // old signature intentionally copied
+    player.replaceWalking(replacement);
+    expect(player.gait.source).toBe('analysis');
+    expect(player.authoredWalkSpeed).toBeCloseTo(WALK.stride / WALK.duration / 0.8, 2);
+    expect(
+      Math.min(
+        phaseDistance(player.gait.feet.Left.contact, 0.63),
+        phaseDistance(0.63, player.gait.feet.Left.contact),
+      ),
+    ).toBeLessThan(0.02);
+    expect(player.mode).toBe('bind');
+    expect(player.action.getClip()).toBe(replacement);
+    // Invalid input must not destroy the working clip.
+    const bad = replacement.clone();
+    bad.tracks.push(
+      new THREE.VectorKeyframeTrack('Root.position', [0, bad.duration], [0, 0, 0, 0, 0, 1]),
+    );
+    expect(() => player.replaceWalking(bad)).toThrow(/in-place/);
+    expect(player.action.getClip()).toBe(replacement);
+    player.dispose();
+  });
+
+  it('rejects invalid profiles and unsupported clips instead of silently using the old Walking phases', () => {
+    const clip = gltf.animations[0].clone();
+    expect(() =>
+      stampWalkingGait(clip, {
+        speed: 0,
+        feet: { Left: { contact: 0, liftOff: 0.6 }, Right: { contact: 0.5, liftOff: 0.1 } },
+      }),
+    ).toThrow(/positive/);
+    expect(() =>
+      stampWalkingGait(clip, {
+        speed: 1,
+        feet: { Left: { contact: 0, liftOff: 0.3 }, Right: { contact: 0.5, liftOff: 0.8 } },
+      }),
+    ).toThrow(/double support/);
+    const staticClip = new THREE.AnimationClip('Walking', 1, [
+      new THREE.QuaternionKeyframeTrack('Root.quaternion', [0, 1], [0, 0, 0, 1, 0, 0, 0, 1]),
+    ]);
+    expect(() => resolveWalkingGait(gltf.scene, staticClip)).toThrow(
+      /identify planted|lifted step/,
+    );
   });
 
   it('lands the phase-selected foot first, closes the other beside it, and pins planted feet', () => {

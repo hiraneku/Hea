@@ -11,9 +11,13 @@ export class CharacterTestDrive {
   constructor(
     readonly body: THREE.Object3D,
     readonly playback: CharacterPlayback,
-    readonly walkSpeed: number,
+    private readonly requestedWalkSpeed?: number,
   ) {
     playback.rootMotionEnabled = true;
+  }
+  /** Default follows a newly replaced clip; optional override is a world-speed request. */
+  get walkSpeed() {
+    return this.requestedWalkSpeed ?? this.playback.authoredWalkSpeed * this.body.scale.x;
   }
   update(dt: number, x: number, forward: number, camera: THREE.Camera) {
     const old = this.body.position.clone();
@@ -39,11 +43,12 @@ export class CharacterTestDrive {
         this.body.quaternion.slerp(target, 1 - Math.exp(-14 * dt));
       this.playback.setMode('walk');
       const authoredLaunch = this.playback.isStarting;
-      this.playback.locomotion(dt, this.walkSpeed * direction.length(), true, this.walkSpeed);
+      const authoredWorldSpeed = this.playback.authoredWalkSpeed * this.body.scale.x;
+      this.playback.locomotion(dt, this.walkSpeed * direction.length(), true, authoredWorldSpeed);
       if (!authoredLaunch)
         this.body.position.addScaledVector(
           direction.clone().normalize(),
-          this.walkSpeed * this.playback.speed * dt,
+          authoredWorldSpeed * this.playback.speed * dt,
         );
     } else {
       this.playback.setMode('bind');

@@ -1,13 +1,24 @@
 import * as THREE from 'three';
 import { makeCharacterStart, type StartPlan } from './CharacterStart';
 import { makeCharacterStop, type StopPlan } from './CharacterStop';
+import { resolveWalkingGait, type WalkingGait, type WalkingGaitSpec } from './WalkingGait';
 
 /** DOM-independent mixer controller. Start/stop tracks are baked from the current
  * phase and pose, then played like ordinary AnimationClips (no runtime IK).
  */
 export class CharacterPlayback {
   readonly mixer: THREE.AnimationMixer;
-  readonly action: THREE.AnimationAction;
+  private walkAction: THREE.AnimationAction;
+  get action() {
+    return this.walkAction;
+  }
+  private walkGait: WalkingGait;
+  get gait() {
+    return this.walkGait;
+  }
+  get authoredWalkSpeed() {
+    return this.walkGait.speed;
+  }
   playing = true;
   speed = 1;
   rootMotionEnabled = false;
@@ -52,12 +63,31 @@ export class CharacterPlayback {
   constructor(
     readonly model: THREE.Object3D,
     clips: THREE.AnimationClip[],
+    markers?: WalkingGaitSpec,
   ) {
     const walk = THREE.AnimationClip.findByName(clips, 'Walking');
     if (!walk) throw new Error('Character has no Walking animation.');
+    this.walkGait = resolveWalkingGait(model, walk, markers);
     this.mixer = new THREE.AnimationMixer(model);
-    this.action = this.mixer.clipAction(walk).setLoop(THREE.LoopRepeat, Infinity).play();
+    this.walkAction = this.mixer.clipAction(walk).setLoop(THREE.LoopRepeat, Infinity).play();
     this.root = model.getObjectByName('Root');
+    this.mixer.update(0);
+  }
+  /** Replace a clip only while idle. Analyze first so invalid input leaves the
+   * current playback untouched. Pass exact authoring markers if analysis is uncertain. */
+  replaceWalking(clip: THREE.AnimationClip, markers?: WalkingGaitSpec) {
+    if (this.mode === 'walk' || this.isStopping)
+      throw new Error('Stop completely or reset to bind before replacing Walking.');
+    const gait = resolveWalkingGait(this.model, clip, markers);
+    this.setMode('bind', true);
+    const old = this.action.getClip();
+    this.action.stop();
+    this.mixer.uncacheClip(old);
+    this.walkAction = this.mixer.clipAction(clip).setLoop(THREE.LoopRepeat, Infinity).play();
+    this.action.setEffectiveWeight(0);
+    this.action.paused = true;
+    this.speed = 1;
+    this.walkGait = gait;
     this.mixer.update(0);
   }
   private discardStop() {
@@ -108,7 +138,7 @@ export class CharacterPlayback {
     if (target === this.targetWeight) return;
     this.targetWeight = target;
     if (target === 1) {
-      const launch = makeCharacterStart(this.model, this.action.getClip());
+      const launch = makeCharacterStart(this.model, this.action.getClip(), this.walkGait);
       this.discardStop();
       this.discardStart();
       this.launch = launch;
@@ -126,14 +156,16 @@ export class CharacterPlayback {
       this.mixer.update(0);
     } else if (this.weight > 0.001 || this.startAction) {
       const incoming = this.launch
-        ? { clip: this.launch.clip, time: this.startTime, joinPhase: this.launch.joinPhase }
+        ? {
+            clip: this.launch.clip,
+            time: this.startTime,
+            joinPhase: this.launch.joinPhase,
+            lead: this.launch.lead,
+            endRate: this.launch.endRate,
+          }
         : undefined;
-      const phase = this.launch
-        ? (this.launch.joinPhase + 0.5 + (0.5 * this.startTime) / this.launch.clip.duration) % 1
-        : this.action.time / this.duration;
-      let incomingSpeed =
-        this.model.getObjectByName('HEA_101172')!.userData.heaCharacter.walkSpeed *
-        THREE.MathUtils.clamp(this.speed, 0.35, 1.8);
+      const phase = this.action.time / this.duration;
+      let incomingSpeed = this.authoredWalkSpeed * Math.max(0.05, this.speed);
       if (this.launch && this.rootCurve) {
         const before = new THREE.Vector3().fromArray(
           this.rootCurve.evaluate(Math.max(0, this.startTime - 0.002)),
@@ -149,6 +181,8 @@ export class CharacterPlayback {
         phase,
         incomingSpeed,
         incoming,
+        this.walkGait,
+        Math.max(0.05, this.speed),
       );
       this.discardStart();
       this.discardStop();
@@ -221,11 +255,7 @@ export class CharacterPlayback {
         this.action.paused = !this.playing;
         this.action.timeScale = this.speed;
         this.mixer.update(0);
-        if (this.rootMotionEnabled)
-          this.motion.z +=
-            this.model.getObjectByName('HEA_101172')!.userData.heaCharacter.walkSpeed *
-            this.speed *
-            carry;
+        if (this.rootMotionEnabled) this.motion.z += this.authoredWalkSpeed * this.speed * carry;
       }
     } else if (this.targetWeight === 0 && this.stopAction && this.plan) {
       this.stopTime = Math.min(this.plan.clip.duration, this.stopTime + dt);

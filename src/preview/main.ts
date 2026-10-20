@@ -21,6 +21,7 @@ if (!previewURL.pathname.endsWith('/') && !previewURL.pathname.endsWith('.html')
 const siteRoot = new URL('../', previewURL);
 const modelURL = new URL(RIGGED_CHARACTER, siteRoot);
 modelURL.searchParams.set('revision', String(RIG_REVISION));
+modelURL.searchParams.set('gait', '1');
 const app = document.querySelector<HTMLDivElement>('#preview-app')!;
 app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>
@@ -250,7 +251,7 @@ async function boot() {
     playback.update(0);
     look = new CharacterLook(model);
     headBone = model.getObjectByName('Head');
-    const drive = new CharacterTestDrive(holder, playback, metadata.walkSpeed * scale);
+    const drive = new CharacterTestDrive(holder, playback);
     applyInspectionMotion = () => {
       const delta = playback!
         .consumeRootMotion()

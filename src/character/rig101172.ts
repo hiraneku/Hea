@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { solveLeg } from './legIK';
+import { stampWalkingGait } from './WalkingGait';
 import { taperForearms101172 } from './shape101172';
 import { armRegions101172 } from './skinRegions101172';
 import { measure101172, type CharacterAnatomy } from './anatomy101172';
@@ -409,7 +410,7 @@ function makeWalk(
     bone.position.copy(original.get(name)!);
   }
   scene.updateMatrixWorld(true);
-  return new THREE.AnimationClip(
+  const clip = new THREE.AnimationClip(
     'Walking',
     WALK.duration,
     [...values].map(([key, data]) =>
@@ -418,4 +419,12 @@ function makeWalk(
         : new THREE.QuaternionKeyframeTrack(key, times, data),
     ),
   );
+  stampWalkingGait(clip, {
+    speed: WALK.stride / WALK.duration,
+    feet: {
+      Left: { contact: 0, liftOff: WALK.stance },
+      Right: { contact: 0.5, liftOff: (WALK.stance + 0.5) % 1 },
+    },
+  });
+  return clip;
 }

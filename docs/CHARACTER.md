@@ -300,3 +300,72 @@ kelanjutan counter-swing saat stop, dan leftover frame pada tubuh diskalakan.
 `npm run character:stop-review` kini juga merender tujuh tahap start sampai masuk
 Walking dari depan/samping/tiga-perempat. PNG di cache hanya untuk QA; kelulusan
 teknis tidak menggantikan penilaian gerak oleh pengguna.
+
+## Profil gait per clip — sinkronisasi setelah Walking diganti
+
+Start/stop tidak lagi mengasumsikan kontak di fase 0 / 0,5 atau mengambil
+`walkSpeed` / `walkStance` lama dari rig. `WalkingGait.ts` menjadi sumber bersama
+untuk fase kontak/lift-off tiap kaki, kecepatan acuan, durasi, dan clearance.
+Start memilih pose join dari marker kaki yang benar; rentang pergeseran join
+mengikuti double support clip itu. Stop memilih kontak berikutnya, menghitung
+sisa waktu dan interval menuju kontak kaki kedua, termasuk cadence playback.
+
+Urutan pemilihan profil:
+
+1. Marker eksplisit dari pemanggil, bila disediakan.
+2. `animation.extras.heaGait` di GLB, jika fingerprint cocok dengan clip.
+3. Analisis clip aktual: sampel telapak dan kecepatan ankle sepanjang satu siklus,
+   estimasi kecepatan in-place, lalu identifikasi interval tumpuan setiap kaki.
+
+`rig101172.ts` kini menulis marker eksak melalui `stampWalkingGait()`. GLTFExporter
+menyimpannya di animation extras; GLTFLoader memulihkannya sebagai clip userData.
+Fingerprint mencakup durasi dan track names/times/values; marker lama tidak dipakai
+ketika clip berubah. Analisis di-cache per clip dan geometry, bukan tiap frame.
+Jika ambigu, sistem melaporkan error yang meminta profil yang benar—tidak diam-diam
+kembali ke fase Walking lama. Marker eksplisit juga diperiksa terhadap pose/speed.
+
+Contoh authoring clip baru pada rig yang sama:
+
+```ts
+import { stampWalkingGait } from '../character/WalkingGait';
+
+// Isi dari marker authoring animasi baru, bukan menyalin angka Walking lama.
+stampWalkingGait(newWalk, {
+  speed: authoredForwardSpeed, // unit aset/detik; sebelum skala tubuh
+  feet: {
+    Left: { contact: leftContactPhase, liftOff: leftLiftOffPhase },
+    Right: { contact: rightContactPhase, liftOff: rightLiftOffPhase },
+  },
+});
+// Ekspor newWalk bersama rig menggunakan GLTFExporter seperti pipeline sekarang.
+```
+
+Jika hanya mengganti file GLB dengan clip baru bernama `Walking`, loader memproses
+profilnya otomatis. Untuk mengganti clip pada instance yang sudah hidup:
+
+```ts
+// Panggil setelah stop selesai; saat masih berjalan/transisi akan ditolak.
+playback.replaceWalking(newWalk); // atau replaceWalking(newWalk, exactMarkers)
+// Inspeksi hasil: playback.gait, playback.authoredWalkSpeed.
+```
+
+Jangan mengedit track instance yang sedang dimainkan secara in-place; buat clip
+baru dan gunakan API replacement agar action mixer dan profil diperbarui bersama.
+Replacement mereset ke bind inspection. `CharacterTestDrive(body, playback)` tanpa
+argumen speed mengikuti kecepatan profil baru dan skala tubuh secara dinamis.
+Argumen speed ketiga opsional adalah permintaan kecepatan dunia; cadence disesuaikan
+terhadap kecepatan asli clip, bukan mengganti metadata gait-nya.
+
+**Batas dukungan:** walking siklik in-place maju +Z, rig/anatomi 101172 yang sama,
+pose translation limb sesuai bind, satu contact/lift-off per kaki per siklus,
+dengan double support dan kecepatan stance kira-kira konstan di lantai datar.
+Bukan jaminan untuk rig lain, strafing/backwalk, run/airborne, root-motion Walking,
+atau clip yang sudah salah foot sliding. Clip tersebut perlu retargeting atau
+adapter tersendiri. Marker manual harus sesuai animasi, bukan sekadar angka valid.
+`AvatarModel` adapter lama/default gameplay tidak dialihkan ke motor baru ini.
+
+Regresi memuat marker melalui GLB aktual, mengubah durasi dan offset fase clip,
+mengecek foot-lock start/stop, mengabaikan metadata rig yang sengaja dibuat basi,
+mengecek interval asimetris/wrap, menolak clip tidak didukung, serta memastikan
+replacement yang gagal tidak merusak action lama. GLB v6 ditambah metadata saja;
+binary chunk mesh, skin, skeleton dan keyframe-nya tetap identik.

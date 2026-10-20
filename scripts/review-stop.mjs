@@ -95,10 +95,7 @@ try {
       player.update(t - time);
       gltf.scene.position.add(player.consumeRootMotion());
       if (!starting && player.mode === 'walk')
-        gltf.scene.position.z +=
-          (t - time) *
-          player.speed *
-          gltf.scene.getObjectByName('HEA_101172').userData.heaCharacter.walkSpeed;
+        gltf.scene.position.z += (t - time) * player.speed * player.authoredWalkSpeed;
       time = t;
       camera.position.set(Math.sin(angle) * 5, 1.1, Math.cos(angle) * 5 + 0.2);
       camera.lookAt(0, 1.1, 0.2);

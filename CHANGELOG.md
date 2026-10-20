@@ -7,6 +7,20 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Ditambahkan — sinkronisasi gait per clip Walking
+
+- Jadikan fase contact/lift-off tiap kaki, kecepatan acuan, durasi dan clearance
+  sebagai profil bersama start/stop/motor; hilangkan asumsi kontak 0 / 0,5 dan
+  penggunaan metadata kecepatan/stance lama pada sistem ini.
+- Simpan marker authoring di glTF animation extras dengan fingerprint track.
+  Bila marker hilang/basi, analisis gait dari clip baru; hasil ambigu atau clip
+  di luar dukungan ditolak secara eksplisit, bukan memakai fase lama.
+- Tambahkan API replaceWalking saat idle dan validasi profil. Motor default
+  mengikuti kecepatan clip baru, termasuk skala tubuh dan cadence saat stop.
+- Uji clip aktual yang diperlambat/digeser fase, marker GLB, foot-lock, metadata
+  basi, interval asimetris/wrap dan replacement aman. GLB hanya bertambah extras;
+  binary mesh/rig/Walking dan model sumber tidak berubah, gameplay default tetap.
+
 ### Ditambahkan / diperbaiki — start bertahap dan stop mengikuti ritme Walking
 
 - Tambahkan clip Starting runtime: transfer berat, langkah pertama terangkat,

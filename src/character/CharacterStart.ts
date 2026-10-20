@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import type { CharacterAnatomy } from './anatomy101172';
 import { solveLeg } from './legIK';
+import {
+  resolveWalkingGait,
+  doubleSupportAfter,
+  wrapPhase,
+  phaseDistance,
+  type WalkingGait,
+} from './WalkingGait';
 
 const smooth = (t: number) => THREE.MathUtils.smootherstep(THREE.MathUtils.clamp(t, 0, 1), 0, 1);
 const hermite = (a: number, b: number, v0: number, v1: number, u: number, duration: number) =>
@@ -24,7 +31,11 @@ export interface StartPlan {
  * incoming cadence. The motor
  * consumes root motion during the launch instead of instantly setting velocity.
  */
-export function makeCharacterStart(model: THREE.Object3D, walk: THREE.AnimationClip): StartPlan {
+export function makeCharacterStart(
+  model: THREE.Object3D,
+  walk: THREE.AnimationClip,
+  gait: WalkingGait = resolveWalkingGait(model, walk),
+): StartPlan {
   const scene = clone(model);
   scene.position.set(0, 0, 0);
   scene.quaternion.identity();
@@ -78,7 +89,7 @@ export function makeCharacterStart(model: THREE.Object3D, walk: THREE.AnimationC
   };
   const lead = start.Right.p.y - floorY('Right', start.Right.q) > 0.025 ? 'Right' : 'Left';
   const support = lead === 'Left' ? 'Right' : 'Left';
-  let joinPhase = lead === 'Left' ? 0 : 0.5;
+  let joinPhase = gait.feet[lead].contact;
   const probe = clone(scene),
     mixer = new THREE.AnimationMixer(probe),
     action = mixer.clipAction(walk).play();
@@ -106,8 +117,12 @@ export function makeCharacterStart(model: THREE.Object3D, walk: THREE.AnimationC
   // than the normal contact pose. Join slightly later in double support instead
   // of ever pulling the character backwards to fit a fixed phase.
   const contactPhase = joinPhase;
-  for (let offset = 0.005; rootEnd.z < 0.01 && offset <= 0.0751; offset += 0.005) {
-    joinPhase = contactPhase + offset;
+  for (
+    let offset = 0.005;
+    rootEnd.z < 0.01 && offset <= doubleSupportAfter(gait, lead) * 0.95;
+    offset += 0.005
+  ) {
+    joinPhase = wrapPhase(contactPhase + offset);
     action.time = joinPhase * walk.duration;
     mixer.update(0);
     probe.updateMatrixWorld(true);
@@ -128,18 +143,20 @@ export function makeCharacterStart(model: THREE.Object3D, walk: THREE.AnimationC
       .sub(endFoot[support].p.clone().add(pivot.p.clone().applyQuaternion(endFoot[support].q)));
   }
   rootEnd.y = 0;
+  const stepDuration =
+    phaseDistance(gait.feet[support].contact, gait.feet[lead].contact) * walk.duration;
   const duration = THREE.MathUtils.clamp(
-    (2 * Math.max(0.005, rootEnd.z)) / data.walkSpeed,
-    0.42,
-    0.82,
+    (2 * Math.max(0.005, rootEnd.z)) / gait.speed,
+    stepDuration * 0.724,
+    stepDuration * 1.414,
   );
   const endRate = THREE.MathUtils.clamp(
-    (2 * Math.max(0.005, rootEnd.z)) / (duration * data.walkSpeed),
+    (2 * Math.max(0.005, rootEnd.z)) / (duration * gait.speed),
     0.02,
     1,
   );
-  const endVelocity = data.walkSpeed * endRate;
-  const anticipation = Math.min(0.09, duration * 0.18);
+  const endVelocity = gait.speed * endRate;
+  const anticipation = Math.min(stepDuration * 0.1552, duration * 0.18);
   const times: number[] = [],
     values = new Map<string, number[]>();
   const frames = Math.ceil(duration * 90);
@@ -184,7 +201,10 @@ export function makeCharacterStart(model: THREE.Object3D, walk: THREE.AnimationC
         } else {
           const destination = endFoot[s].p.clone().add(rootEnd);
           ankle = start[s].p.clone().lerp(destination, smooth(step));
-          ankle.y = Math.max(ankle.y, floorY(s, q)) + 0.11 * Math.sin(Math.PI * step) ** 3;
+          ankle.y =
+            Math.max(ankle.y, floorY(s, q)) +
+            THREE.MathUtils.clamp(gait.clearance[lead] * 0.92, 0.03, 0.22) *
+              Math.sin(Math.PI * step) ** 3;
         }
         solveLeg(s, ankle, bones, scene);
         scene.updateMatrixWorld(true);

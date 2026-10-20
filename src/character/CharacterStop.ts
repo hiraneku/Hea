@@ -2,6 +2,14 @@ import * as THREE from 'three';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 import type { CharacterAnatomy } from './anatomy101172';
 import { solveLeg } from './legIK';
+import {
+  resolveWalkingGait,
+  nextFootContact,
+  isFootPlanted,
+  phaseDistance,
+  type WalkingGait,
+  type FootSide,
+} from './WalkingGait';
 
 const smooth = (u: number) => THREE.MathUtils.smootherstep(THREE.MathUtils.clamp(u, 0, 1), 0, 1);
 function hermite(a: number, b: number, v0: number, v1: number, t: number, duration: number) {
@@ -31,7 +39,15 @@ export function makeCharacterStop(
   walk: THREE.AnimationClip,
   phase: number,
   speed: number,
-  incoming?: { clip: THREE.AnimationClip; time: number; joinPhase: number },
+  incoming?: {
+    clip: THREE.AnimationClip;
+    time: number;
+    joinPhase: number;
+    lead: FootSide;
+    endRate: number;
+  },
+  gait: WalkingGait = resolveWalkingGait(model, walk),
+  cadenceRate = 1,
 ): StopPlan {
   const scene = clone(model);
   scene.position.set(0, 0, 0);
@@ -54,7 +70,7 @@ export function makeCharacterStop(
   root.position.set(0, 0, 0);
   scene.updateMatrixWorld(true);
   const sides = ['Left', 'Right'] as const;
-  const lead = phase < 0.5 ? 'Right' : 'Left';
+  const lead = incoming?.lead ?? nextFootContact(gait, phase);
   const follow = lead === 'Left' ? 'Right' : 'Left';
   const start = Object.fromEntries(
     sides.map((side) => [
@@ -74,6 +90,7 @@ export function makeCharacterStop(
   const incomingAction = incoming ? probeMixer.clipAction(incoming.clip).play() : undefined;
   if (incomingAction) probeAction.setEffectiveWeight(0);
   const sampleContinuation = (elapsed: number) => {
+    elapsed *= cadenceRate;
     if (incoming && incomingAction && incoming.time + elapsed < incoming.clip.duration) {
       incomingAction.setEffectiveWeight(1);
       probeAction.setEffectiveWeight(0);
@@ -86,7 +103,8 @@ export function makeCharacterStop(
       incomingAction?.setEffectiveWeight(0);
       probeAction.setEffectiveWeight(1);
       const time = incoming
-        ? incoming.joinPhase * walk.duration + incoming.time + elapsed - incoming.clip.duration
+        ? incoming.joinPhase * walk.duration +
+          (incoming.time + elapsed - incoming.clip.duration) * incoming.endRate
         : phase * walk.duration + elapsed;
       probeAction.time = ((time % walk.duration) + walk.duration) % walk.duration;
     }
@@ -98,8 +116,7 @@ export function makeCharacterStop(
     sampleContinuation(offset);
     samples.push(probe.getObjectByName(lead + 'Foot')!.getWorldPosition(new THREE.Vector3()));
   }
-  const leadPhase = (phase + (lead === 'Right' ? 0.5 : 0)) % 1;
-  if (incoming || leadPhase > data.walkStance) {
+  if (incoming || !isFootPlanted(gait, lead, phase)) {
     start[lead].velocity.copy(samples[1]).sub(samples[0]).divideScalar(0.004);
     if (!incoming) start[lead].velocity.z += speed;
     start[lead].velocity.clampLength(0, 2.5);
@@ -114,10 +131,18 @@ export function makeCharacterStop(
       },
     ]),
   );
-  const t1 = THREE.MathUtils.clamp((1 - leadPhase) * walk.duration, 0.18, 0.56);
-  const transfer = 0.04,
-    t2 = walk.duration * 0.43,
-    settle = 0.2;
+  const cadence = Math.max(0.05, cadenceRate);
+  const remaining = incoming
+    ? incoming.clip.duration - incoming.time
+    : (phaseDistance(phase, gait.feet[lead].contact) || 1) * walk.duration;
+  const previousStep =
+    phaseDistance(gait.feet[follow].contact, gait.feet[lead].contact) * walk.duration;
+  const nextStep =
+    phaseDistance(gait.feet[lead].contact, gait.feet[follow].contact) * walk.duration;
+  const t1 = THREE.MathUtils.clamp(remaining, previousStep * 0.31, previousStep * 0.966) / cadence;
+  const transfer = (nextStep * 0.07) / cadence,
+    t2 = (nextStep * 0.86) / cadence,
+    settle = (nextStep * 0.3448) / cadence;
   const followStart = t1 + transfer,
     secondContact = followStart + t2,
     duration = secondContact + settle;
@@ -180,7 +205,8 @@ export function makeCharacterStop(
     const u = time / duration;
     const cadenceElapsed = duration * (u - u * u * u + 0.5 * u * u * u * u);
     sampleContinuation(cadenceElapsed);
-    const relax = smooth((time - 0.06) / (duration - 0.06));
+    const delay = (walk.duration * 0.0517) / cadence;
+    const relax = smooth((time - delay) / (duration - delay));
     for (const [name, bone] of bones) {
       if (/Thigh|Shin|Foot|Toes|ToeEnd/.test(name)) continue;
       const neutral = new THREE.Quaternion();
@@ -191,7 +217,7 @@ export function makeCharacterStop(
       // them out. Capture correction handles partially blended/interrupted starts.
       const sampled = probe.getObjectByName(name)!.quaternion.clone();
       const correction = releasePose.get(name)!.q.clone().invert().multiply(rest.get(name)!.q);
-      correction.slerp(new THREE.Quaternion(), smooth(time / 0.2));
+      correction.slerp(new THREE.Quaternion(), smooth(time / ((walk.duration * 0.1724) / cadence)));
       bone.quaternion.copy(sampled.multiply(correction)).slerp(neutral, relax);
     }
     if (time <= t1) {
@@ -216,7 +242,7 @@ export function makeCharacterStop(
         : THREE.MathUtils.lerp(contactY, standingY, smooth((time - t1) / (duration - t1)));
     const hipWave = probe.getObjectByName('Hips')!.position.clone().sub(releasePose.get('Hips')!.p);
     hips.position.x += hipWave.x * (1 - relax);
-    hips.position.y += hipWave.y * (1 - smooth(time / 0.24));
+    hips.position.y += hipWave.y * (1 - smooth(time / ((walk.duration * 0.207) / cadence)));
     hips.position.z = THREE.MathUtils.lerp(hipStart.z, anatomy.pelvis[2], relax);
     if (frame > 0)
       for (const side of sides) {
@@ -245,7 +271,13 @@ export function makeCharacterStop(
               ending - beginning,
             );
           } else ankle.lerp(targets[side], eased);
-          const lift = (side === lead ? 0.045 : 0.085) * Math.sin(Math.PI * u) ** 3;
+          const lift =
+            THREE.MathUtils.clamp(
+              gait.clearance[side] * (side === lead ? 0.375 : 0.7083),
+              0.025,
+              0.14,
+            ) *
+            Math.sin(Math.PI * u) ** 3;
           ankle.y = Math.max(ankle.y, floorY(side, q)) + lift;
         }
         solveLeg(side, ankle, bones, scene);
