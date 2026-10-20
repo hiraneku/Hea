@@ -1,5 +1,9 @@
 /**
- * Stickman skeleton + procedural poses, Hyun's-Dojo style.
+ * Stickman skeleton + procedural poses, Hyun's-Dojo (RHG) style.
+ *
+ * Proportions follow the classic Dojo fighter: a big round head (~1/4.7 of
+ * the height) sitting almost neckless on a short thick torso, long limbs
+ * that end in plain rounded stumps — no fingers, no feet.
  *
  * A pose is a flat bag of numbers: pelvis height/orientation, spine lean,
  * head tilt, and — most importantly — target positions for both hands and
@@ -9,23 +13,22 @@
  * go*, never by guessing joint angles. Poses lerp key-by-key, which makes
  * keyframed cast gestures trivial.
  *
- * Pure three.js maths, no renderer — the tests drive this headlessly and
- * pin bone lengths / IK reach / ground contact before anything is drawn.
+ * Pure three.js maths, no renderer — tests drive this headlessly and pin
+ * bone lengths / IK reach / ground contact before anything is drawn.
  */
 import * as THREE from 'three';
 
 export const PROP = {
-  torso: 0.52, // pelvis -> chest (shoulder line)
-  neck: 0.13,
-  headR: 0.155,
-  shoulderHalf: 0.21,
-  upperArm: 0.32,
-  foreArm: 0.30,
-  hipHalf: 0.11,
-  thigh: 0.48,
-  shin: 0.48,
-  ankleH: 0.07, // ankle height when the foot is planted
-  foot: 0.16, // ankle -> toe
+  torso: 0.44, // pelvis -> chest (shoulder line); short, Dojo-style
+  neck: 0.055, // nearly neckless — the head sits on the torso
+  headR: 0.19, // the signature big round head
+  shoulderHalf: 0.165,
+  upperArm: 0.34,
+  foreArm: 0.32,
+  hipHalf: 0.09,
+  thigh: 0.52,
+  shin: 0.52, // long legs: 1.04 m of the ~1.79 m figure
+  ankleH: 0.055, // ankle height planted (the rounded leg-end touches down)
 };
 
 /** Joint pairs drawn as bones, and used as ragdoll constraints. */
@@ -37,14 +40,14 @@ export const BONES = [
   ['shoulderL', 'elbowL'], ['elbowL', 'handL'],
   ['shoulderR', 'elbowR'], ['elbowR', 'handR'],
   ['pelvis', 'hipL'], ['pelvis', 'hipR'],
-  ['hipL', 'kneeL'], ['kneeL', 'ankleL'], ['ankleL', 'toeL'],
-  ['hipR', 'kneeR'], ['kneeR', 'ankleR'], ['ankleR', 'toeR'],
+  ['hipL', 'kneeL'], ['kneeL', 'ankleL'],
+  ['hipR', 'kneeR'], ['kneeR', 'ankleR'],
 ];
 
 export const JOINTS = [
   'pelvis', 'chest', 'neck', 'head',
   'shoulderL', 'elbowL', 'handL', 'shoulderR', 'elbowR', 'handR',
-  'hipL', 'kneeL', 'ankleL', 'toeL', 'hipR', 'kneeR', 'ankleR', 'toeR',
+  'hipL', 'kneeL', 'ankleL', 'hipR', 'kneeR', 'ankleR',
 ];
 
 /**
@@ -52,15 +55,14 @@ export const JOINTS = [
  * Every pose in this file is BASE plus overrides.
  */
 export const BASE = {
-  rootY: 0.94,
+  rootY: 0.98,
   pelvisPitch: 0.0, pelvisYaw: 0.10, pelvisRoll: 0.0,
   lean: 0.14, spineYaw: -0.06, spineRoll: 0.0,
   headPitch: 0.05, headYaw: 0.0,
-  hLx: 0.27, hLy: 1.16, hLz: 0.30,
-  hRx: -0.27, hRy: 1.08, hRz: 0.22,
-  fLx: 0.16, fLy: PROP.ankleH, fLz: 0.14,
-  fRx: -0.16, fRy: PROP.ankleH, fRz: -0.12,
-  toeL: 0.38, toeR: 0.38, // toe pitch, + = toe tips down toward the ground
+  hLx: 0.24, hLy: 1.14, hLz: 0.28,
+  hRx: -0.24, hRy: 1.06, hRz: 0.20,
+  fLx: 0.15, fLy: PROP.ankleH, fLz: 0.13,
+  fRx: -0.15, fRy: PROP.ankleH, fRz: -0.11,
 };
 
 export function makePose(overrides = {}) {
@@ -118,8 +120,8 @@ const q = (x, y, z) => new THREE.Quaternion().setFromEuler(new THREE.Euler(x, y,
 const axis = (x, y, z, quat) => new THREE.Vector3(x, y, z).applyQuaternion(quat);
 
 /**
- * Pose -> joint world positions (character space). Returns fresh vectors in
- * `joints`, plus the head/spine orientation for attachments (headband...).
+ * Pose -> joint positions (character space). Returns fresh vectors in
+ * `joints`, plus head/spine orientations for attachments (face, headband).
  */
 export function computeSkeleton(p) {
   const J = {};
@@ -138,7 +140,7 @@ export function computeSkeleton(p) {
   const upS = axis(0, 1, 0, qSpine);
   const rightS = axis(1, 0, 0, qSpine);
   J.chest.copy(J.pelvis).addScaledVector(upS, PROP.torso);
-  J.neck.copy(J.chest).addScaledVector(upS, PROP.neck * 0.55);
+  J.neck.copy(J.chest).addScaledVector(upS, PROP.neck * 0.6);
   J.shoulderL.copy(J.chest).addScaledVector(rightS, PROP.shoulderHalf).addScaledVector(upS, -0.02);
   J.shoulderR.copy(J.chest).addScaledVector(rightS, -PROP.shoulderHalf).addScaledVector(upS, -0.02);
 
@@ -160,7 +162,7 @@ export function computeSkeleton(p) {
     );
   }
 
-  // Legs: knees bulge forward.
+  // Legs: knees bulge forward. The ankle IS the foot — a rounded stump.
   for (const s of ['L', 'R']) {
     const side = s === 'L' ? 1 : -1;
     const pole = _tmp.set(0, 0, 0)
@@ -172,9 +174,6 @@ export function computeSkeleton(p) {
       new THREE.Vector3(p[`f${s}x`], p[`f${s}y`], p[`f${s}z`]),
       PROP.thigh, PROP.shin, pole, J[`knee${s}`], J[`ankle${s}`],
     );
-    const toeDir = fwdP.clone().multiplyScalar(Math.cos(p[`toe${s}`]))
-      .addScaledVector(upP, -Math.sin(p[`toe${s}`]));
-    J[`toe${s}`].copy(J[`ankle${s}`]).addScaledVector(toeDir, PROP.foot);
   }
 
   return { joints: J, headQuat: qHead, spineQuat: qSpine, pelvisQuat: qPelvis };
@@ -201,8 +200,8 @@ export function idlePose(t) {
  */
 export function gaitPose(phase, run) {
   const L = THREE.MathUtils.lerp;
-  const stride = L(0.34, 0.52, run);
-  const lift = L(0.12, 0.30, run);
+  const stride = L(0.36, 0.55, run);
+  const lift = L(0.13, 0.32, run);
   const armSwing = L(0.20, 0.34, run);
   const p = makePose();
 
@@ -213,13 +212,11 @@ export function gaitPose(phase, run) {
   });
   const fl = foot(phase);
   const fr = foot(phase + Math.PI);
-  p.fLx = 0.15 + fl.xOut; p.fLy = fl.y; p.fLz = fl.z;
-  p.fRx = -0.15 - fr.xOut; p.fRy = fr.y; p.fRz = fr.z;
-  p.toeL = 0.38 + 0.35 * Math.pow(Math.max(0, Math.sin(phase - 0.6)), 2) * run;
-  p.toeR = 0.38 + 0.35 * Math.pow(Math.max(0, Math.sin(phase + Math.PI - 0.6)), 2) * run;
+  p.fLx = 0.14 + fl.xOut; p.fLy = fl.y; p.fLz = fl.z;
+  p.fRx = -0.14 - fr.xOut; p.fRy = fr.y; p.fRz = fr.z;
 
   const bob = L(0.02, 0.045, run);
-  p.rootY = L(0.93, 0.865, run) + bob * Math.sin(2 * phase + 0.8) - bob * 0.3
+  p.rootY = L(0.97, 0.90, run) + bob * Math.sin(2 * phase + 0.8) - bob * 0.3
     + run * 0.05 * Math.pow(Math.max(0, Math.sin(2 * phase + 2.2)), 2); // flight
   p.lean = L(0.10, 0.30, run) + 0.03 * Math.sin(2 * phase);
   p.pelvisRoll = 0.05 * Math.sin(phase) * (1 - run * 0.5);
@@ -227,25 +224,23 @@ export function gaitPose(phase, run) {
   p.spineYaw = -0.10 * Math.sin(phase);
   p.headPitch = 0.08;
 
-  const handY = L(0.98, 1.05, run) + 0.03 * Math.sin(2 * phase);
-  p.hLx = 0.25; p.hLy = handY; p.hLz = armSwing * Math.cos(phase) + 0.05;
-  p.hRx = -0.25; p.hRy = handY; p.hRz = -armSwing * Math.cos(phase) + 0.05;
+  const handY = L(0.95, 1.02, run) + 0.03 * Math.sin(2 * phase);
+  p.hLx = 0.23; p.hLy = handY; p.hLz = armSwing * Math.cos(phase) + 0.05;
+  p.hRx = -0.23; p.hRy = handY; p.hRz = -armSwing * Math.cos(phase) + 0.05;
   return p;
 }
 
 /** Airborne: k=+1 rising (split kick), k=-1 falling (braced to land). */
 export function airPose(k) {
   const rise = makePose({
-    rootY: 0.95, lean: 0.18, headPitch: -0.05,
-    hLx: 0.50, hLy: 1.75, hLz: 0.10, hRx: -0.50, hRy: 1.75, hRz: 0.10,
-    fLx: 0.16, fLy: 0.60, fLz: 0.38, fRx: -0.16, fRy: 0.52, fRz: -0.34,
-    toeL: 0.6, toeR: 0.6,
+    rootY: 0.97, lean: 0.18, headPitch: -0.05,
+    hLx: 0.48, hLy: 1.68, hLz: 0.10, hRx: -0.48, hRy: 1.68, hRz: 0.10,
+    fLx: 0.15, fLy: 0.62, fLz: 0.40, fRx: -0.15, fRy: 0.55, fRz: -0.36,
   });
   const fall = makePose({
-    rootY: 0.92, lean: 0.26, headPitch: 0.15,
-    hLx: 0.55, hLy: 1.15, hLz: 0.15, hRx: -0.55, hRy: 1.15, hRz: 0.15,
-    fLx: 0.17, fLy: 0.30, fLz: 0.10, fRx: -0.17, fRy: 0.34, fRz: -0.06,
-    toeL: 0.3, toeR: 0.3,
+    rootY: 0.95, lean: 0.26, headPitch: 0.15,
+    hLx: 0.52, hLy: 1.10, hLz: 0.15, hRx: -0.52, hRy: 1.10, hRz: 0.15,
+    fLx: 0.16, fLy: 0.34, fLz: 0.10, fRx: -0.16, fRy: 0.38, fRz: -0.06,
   });
   return lerpPose(fall, rise, THREE.MathUtils.clamp((k + 1) / 2, 0, 1));
 }
@@ -253,9 +248,9 @@ export function airPose(k) {
 /** Deep crouch, the landing absorb. */
 export function crouchPose() {
   return makePose({
-    rootY: 0.72, lean: 0.38,
-    hLx: 0.30, hLy: 0.95, hLz: 0.35, hRx: -0.30, hRy: 0.95, hRz: 0.35,
-    fLx: 0.20, fLz: 0.16, fRx: -0.20, fRz: -0.14,
+    rootY: 0.74, lean: 0.38,
+    hLx: 0.28, hLy: 0.92, hLz: 0.32, hRx: -0.28, hRy: 0.92, hRz: 0.32,
+    fLx: 0.19, fLz: 0.15, fRx: -0.19, fRz: -0.13,
   });
 }
 
@@ -270,8 +265,8 @@ export const CASTS = {
   bara: {
     label: 'Bara', color: '#ff7a26', fx: 'fireball', fxAt: 0.27, glow: 'R',
     keys: [
-      { d: 0.18, ease: 'out', p: { hRx: -0.30, hRy: 1.25, hRz: -0.25, spineYaw: -0.35, lean: 0.05, rootY: 0.92 } },
-      { d: 0.09, ease: 'out', p: { hRx: -0.10, hRy: 1.40, hRz: 0.62, hLx: 0.24, hLy: 1.05, hLz: 0.05, spineYaw: 0.32, pelvisYaw: 0.18, lean: 0.34, rootY: 0.90 } },
+      { d: 0.18, ease: 'out', p: { hRx: -0.28, hRy: 1.20, hRz: -0.24, spineYaw: -0.35, lean: 0.05, rootY: 0.96 } },
+      { d: 0.09, ease: 'out', p: { hRx: -0.10, hRy: 1.34, hRz: 0.60, hLx: 0.22, hLy: 1.00, hLz: 0.05, spineYaw: 0.32, pelvisYaw: 0.18, lean: 0.34, rootY: 0.94 } },
       { d: 0.14, ease: 'linear', p: {} },
       { d: 0.32, ease: 'inout', p: { ...BASE } },
     ],
@@ -279,16 +274,16 @@ export const CASTS = {
   prisma: {
     label: 'Prisma', color: '#57e6ff', fx: 'ring', fxAt: 0.30, glow: 'both',
     keys: [
-      { d: 0.30, ease: 'out', p: { hLx: 0.74, hLy: 1.66, hLz: 0.06, hRx: -0.74, hRy: 1.66, hRz: 0.06, lean: -0.06, rootY: 0.97, headPitch: -0.12, spineYaw: 0 } },
-      { d: 0.38, ease: 'linear', p: { hLy: 1.70, hRy: 1.70 } },
+      { d: 0.30, ease: 'out', p: { hLx: 0.72, hLy: 1.58, hLz: 0.06, hRx: -0.72, hRy: 1.58, hRz: 0.06, lean: -0.06, rootY: 1.00, headPitch: -0.12, spineYaw: 0 } },
+      { d: 0.38, ease: 'linear', p: { hLy: 1.62, hRy: 1.62 } },
       { d: 0.35, ease: 'inout', p: { ...BASE } },
     ],
   },
   nova: {
     label: 'Nova', color: '#b78cff', fx: 'shell', fxAt: 0.45, glow: 'both',
     keys: [
-      { d: 0.35, ease: 'inout', p: { hLx: 0.34, hLy: 1.00, hLz: -0.08, hRx: -0.34, hRy: 1.00, hRz: -0.08, rootY: 0.82, lean: 0.22, spineYaw: 0 } },
-      { d: 0.10, ease: 'out', p: { hLx: 0.13, hLy: 1.35, hLz: 0.60, hRx: -0.13, hRy: 1.35, hRz: 0.60, lean: 0.38, rootY: 0.90 } },
+      { d: 0.35, ease: 'inout', p: { hLx: 0.32, hLy: 0.96, hLz: -0.08, hRx: -0.32, hRy: 0.96, hRz: -0.08, rootY: 0.84, lean: 0.22, spineYaw: 0 } },
+      { d: 0.10, ease: 'out', p: { hLx: 0.12, hLy: 1.30, hLz: 0.58, hRx: -0.12, hRy: 1.30, hRz: 0.58, lean: 0.38, rootY: 0.94 } },
       { d: 0.16, ease: 'linear', p: {} },
       { d: 0.35, ease: 'inout', p: { ...BASE } },
     ],
@@ -296,8 +291,8 @@ export const CASTS = {
   fall: {
     label: 'FALL', color: '#a64dff', fx: 'shockwave', fxAt: 0.41, glow: 'both',
     keys: [
-      { d: 0.30, ease: 'out', p: { hLx: 0.30, hLy: 2.05, hLz: 0.15, hRx: -0.30, hRy: 2.05, hRz: 0.15, rootY: 1.00, lean: -0.08, headPitch: -0.10, spineYaw: 0 } },
-      { d: 0.11, ease: 'in', p: { hLx: 0.24, hLy: 0.22, hLz: 0.50, hRx: -0.24, hRy: 0.22, hRz: 0.50, rootY: 0.50, lean: 0.95, headPitch: 0.30, fLx: 0.26, fLz: -0.05, fRx: -0.26, fRz: -0.05 } },
+      { d: 0.30, ease: 'out', p: { hLx: 0.28, hLy: 1.98, hLz: 0.15, hRx: -0.28, hRy: 1.98, hRz: 0.15, rootY: 1.03, lean: -0.08, headPitch: -0.10, spineYaw: 0 } },
+      { d: 0.11, ease: 'in', p: { hLx: 0.23, hLy: 0.20, hLz: 0.48, hRx: -0.23, hRy: 0.20, hRz: 0.48, rootY: 0.52, lean: 0.95, headPitch: 0.30, fLx: 0.24, fLz: -0.05, fRx: -0.24, fRz: -0.05 } },
       { d: 0.28, ease: 'linear', p: {} },
       { d: 0.48, ease: 'inout', p: { ...BASE } },
     ],
