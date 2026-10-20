@@ -5,6 +5,8 @@ test('temporary character preview loads the GLB without booting the game', async
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto('preview/');
   await expect(page.locator('#load-status')).toBeHidden({ timeout: 30_000 });
+  await expect(page.locator('.stage h1')).toHaveCount(0);
+  await expect(page.locator('.asset-details').first()).not.toHaveAttribute('open');
   await expect(page.locator('#model-info')).toContainText('Siap diperiksa');
   await expect(page.locator('#model-info')).toContainText('28 tulang · 1 skinned mesh');
   await expect(page.locator('#model-info')).toContainText('Walking · 1.16 s');
@@ -86,8 +88,11 @@ test('movement choice toggles Walking back to standing instead of freezing a ste
   await walk.click();
   await expect(walk).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('#animation')).toHaveValue('bind');
+  await expect
+    .poll(async () => ['0', '500', '1000'].includes(await page.locator('#phase').inputValue()))
+    .toBe(true);
   const phase = await page.locator('#phase').inputValue();
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(200);
   expect(await page.locator('#phase').inputValue()).toBe(phase);
 });
 
@@ -112,6 +117,13 @@ test('playable preview moves with keyboard and joystick, releases input, and tes
     .poll(() => page.locator('#drive-status').textContent())
     .not.toBe('Mode main · X 0.000 · Z 0.000');
   await page.keyboard.up('w');
+  await expect
+    .poll(async () => {
+      const before = await page.locator('#drive-status').textContent();
+      await page.waitForTimeout(500);
+      return (await page.locator('#drive-status').textContent()) === before;
+    })
+    .toBe(true);
   const stopped = await page.locator('#drive-status').textContent();
   await page.waitForTimeout(200);
   expect(await page.locator('#drive-status').textContent()).toBe(stopped);

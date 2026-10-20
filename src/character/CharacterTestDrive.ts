@@ -5,6 +5,10 @@ import type { CharacterPlayback } from './CharacterPlayback';
  * Uses the SAME exported Walking clip and speed contract as gameplay.
  */
 export class CharacterTestDrive {
+  private readonly velocity = new THREE.Vector3();
+  resetMotion() {
+    this.velocity.set(0, 0, 0);
+  }
   constructor(
     readonly body: THREE.Object3D,
     readonly playback: CharacterPlayback,
@@ -21,7 +25,10 @@ export class CharacterTestDrive {
     if (direction.length() > 1) direction.normalize();
     // Match the playback contract's minimum walk rate for small analogue input.
     if (direction.length() > 0 && direction.length() < 0.35) direction.setLength(0.35);
-    this.body.position.addScaledVector(direction, this.walkSpeed * dt);
+    if (direction.lengthSq() > 0) this.velocity.copy(direction).multiplyScalar(this.walkSpeed);
+    else this.velocity.multiplyScalar(Math.exp(-10 * dt));
+    if (this.velocity.length() < 0.01) this.velocity.set(0, 0, 0);
+    this.body.position.addScaledVector(this.velocity, dt);
     this.body.position.x = THREE.MathUtils.clamp(this.body.position.x, -5, 5);
     this.body.position.z = THREE.MathUtils.clamp(this.body.position.z, -5, 5);
     const delta = this.body.position.clone().sub(old);

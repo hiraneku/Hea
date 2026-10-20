@@ -216,3 +216,21 @@ SHA-256 sumber: `1dd246fbac2e45209b97648018093b643d49624e288f3c87b1b26317e058e9c
 Dokumen ini tidak mengasumsikan lisensi pihak ketiga untuk model tersebut.
 `AVATAR-LICENSE.txt` yang sudah ada menjelaskan **RobotExpressive (`avatar.glb`)**,
 bukan bukti lisensi untuk `101172.glb` atau turunannya.
+
+## Transisi berhenti dan UI ringkas
+
+`CharacterPlayback.setMode('bind')` sekarang meminta transisi stop, bukan pause.
+Walking menyelesaikan sisa setengah siklus sampai kontak ganda (fase 0 atau 0,5),
+kemudian weight turun dengan smootherstep selama 0,38 detik. Total bergantung
+fase/kecepatan (sekitar 0,38–1,11 detik). `isStopping` menandai transisi; permintaan
+walk baru membatalkannya tanpa seek ulang. `playing=false` masih menjeda inspeksi
+biasa, tetapi tidak membekukan langkah terakhir ketika stop sudah diminta.
+
+Ini transisi runtime reusable atas clip Walking asli, **bukan clip Stopping baru
+di GLB**. Pose akhir masih bind pose model, belum Idle terpisah. Solver kaki,
+geometry dan rig v6 tidak diubah; belum merupakan stop mocap atau foot-lock terrain.
+`CharacterTestDrive` juga meredam velocity pada pelepasan input dan membersihkannya
+saat reset/pergantian mode. Efek pengereman dan langkah terakhir perlu review visual.
+
+Preview membuang judul besar di atas viewport. Info aset, koordinat uji dan teks
+teknis tersedia dalam panel lipat; kontrol utama tetap langsung tersedia.

@@ -474,6 +474,50 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(player.mode).toBe('bind');
     player.dispose();
   });
+  it('finishes the last step at double support and settles smoothly instead of freezing a lifted leg', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    for (const phase of [0.08, 0.24, 0.39, 0.62, 0.81, 0.95]) {
+      player.setMode('walk');
+      player.playing = true;
+      player.update(1);
+      player.seek(phase);
+      const bones = mesh.skeleton.bones;
+      let previous = bones.map((b) => b.quaternion.clone());
+      player.setMode('bind');
+      player.playing = false;
+      player.update(0);
+      bones.forEach((b, i) =>
+        expect(
+          b.quaternion.clone().normalize().angleTo(previous[i].clone().normalize()),
+        ).toBeLessThan(1e-6),
+      );
+      expect(player.isStopping).toBe(true);
+      let maximumChange = 0;
+      for (let frame = 0; frame < 80; frame++) {
+        player.update(1 / 60);
+        bones.forEach((b, i) => {
+          maximumChange = Math.max(maximumChange, b.quaternion.angleTo(previous[i]));
+        });
+        previous = bones.map((b) => b.quaternion.clone());
+      }
+      expect(maximumChange).toBeLessThan(0.25);
+      expect(player.isStopping).toBe(false);
+      expect(
+        Math.min(Math.abs(player.phase), Math.abs(player.phase - 0.5), Math.abs(player.phase - 1)),
+      ).toBeLessThan(1e-5);
+      expect(player.action.getEffectiveWeight()).toBeLessThan(1e-5);
+      expect(gltf.scene.getObjectByName('Hips')!.position.y).toBeCloseTo(measured.pelvis[1], 5);
+    }
+    player.setMode('walk');
+    player.update(0.1);
+    player.seek(0.3);
+    player.setMode('bind');
+    player.update(0.1);
+    player.setMode('walk');
+    expect(player.isStopping).toBe(false);
+    player.dispose();
+  });
+
   it('loads the same exported GLB through the actual gameplay AvatarModel adapter', async () => {
     const loader = vi.spyOn(GLTFLoader.prototype, 'loadAsync').mockResolvedValue(gltf);
     try {

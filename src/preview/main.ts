@@ -26,28 +26,27 @@ app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>
   <main>
     <section class="stage" aria-label="Preview karakter 3D">
-      <div class="stage-heading"><span class="eyebrow">MODEL STUDY / 001</span><h1>KENALI<br><em>KARAKTERMU.</em></h1><p>101172-rigged.glb <span>·</span> Walk v${RIG_REVISION} · sendi terukur</p></div>
+      <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION}</p></div>
       <div id="viewport"></div><div id="joint-labels" class="joint-labels" aria-hidden="true" hidden></div>
       <div id="drive-pad" role="group" aria-label="Joystick gerak" hidden><span id="drive-knob"></span><small>GERAK</small></div>
       <div id="load-status" role="status">Memuat model…</div>
-      <div class="stage-footer"><span><i></i> WALK V${RIG_REVISION} · WALKING · RIG + UJI MAIN</span><span>Y ↑</span></div>
+      <div class="stage-footer"><span><i></i> HEA · PREVIEW</span><span>Y ↑</span></div>
     </section>
     <aside>
-      <span class="eyebrow">INSPEKSI MODEL</span><h2>Character preview</h2><p class="intro">Periksa bentuk dan material sebelum integrasi. Halaman ini tidak mengubah karakter dalam game.</p>
-      <dl id="model-info"><div><dt>Status</dt><dd>Memuat…</dd></div></dl>
+      <h2>Karakter</h2>
+      <details class="asset-details"><summary>Info aset</summary><dl id="model-info"><div><dt>Status</dt><dd>Memuat…</dd></div></dl><output id="drive-status">Mode inspeksi · X 0.000 · Z 0.000</output></details>
       <h3>SUDUT PANDANG</h3><div class="view-buttons"><button data-view="front">Depan</button><button data-view="side">Samping</button><button data-view="back">Belakang</button><button id="reset">Reset kamera</button></div>
-      <h3>UJI MAIN / LANTAI DATAR</h3>
+      <h3>MAIN</h3>
       <div class="view-buttons"><button id="drive-toggle" aria-pressed="false" disabled>Mainkan karakter</button><button id="drive-reset" disabled>Reset posisi</button></div>
-      <p class="movement-help">Aktifkan lalu gerakkan joystick di layar, atau WASD / tombol panah. Arah mengikuti kamera. Lepaskan untuk diam. Area uji ±5 m; belum ada collision, tangga, atau animasi lari.</p>
-      <output id="drive-status">Mode inspeksi · X 0.000 · Z 0.000</output>
-      <h3>UJI LEHER / MENOLEH</h3>
+      <p class="movement-help">Joystick / WASD · Lepaskan untuk berhenti.</p>
+      <h3>ARAH KEPALA</h3>
       <label for="look-yaw"><span>Menoleh kiri / kanan</span><output id="look-yaw-value">0°</output></label><input id="look-yaw" type="range" min="-70" max="70" value="0" aria-label="Menoleh kiri kanan" disabled />
       <label for="look-pitch"><span>Tunduk / mendongak</span><output id="look-pitch-value">0°</output></label><input id="look-pitch" type="range" min="-30" max="30" value="0" aria-label="Tunduk mendongak" disabled />
       <button id="look-reset" disabled>Luruskan kepala</button>
       <h3>COBA GERAKAN</h3>
       <div class="view-buttons" id="movement-options" aria-label="Pilihan gerakan"><button id="movement-walk" aria-pressed="false" disabled>Jalan</button></div>
-      <p class="movement-help">Klik Jalan untuk mencoba. Klik lagi untuk diam. Gerakan lain akan ditambahkan setelah clip-nya tersedia.</p>
-      <h3>ANIMASI / GAMEPLAY ASSET</h3>
+      <p class="movement-help">Klik untuk jalan, klik lagi untuk berhenti.</p>
+      <h3>ANIMASI</h3>
       <label><span>Pose / animasi</span><select id="animation" disabled><option value="walk">Berjalan</option><option value="bind">Bind pose (A-pose)</option></select></label>
       <div class="view-buttons"><button id="play" disabled>Jeda animasi</button><button id="restart-animation" disabled>Ulangi siklus</button></div>
       <label><span>Kecepatan</span><output id="speed-value">1.00×</output></label><input id="speed" aria-label="Kecepatan animasi" type="range" min="0.25" max="1.5" step="0.05" value="1" disabled />
@@ -56,8 +55,9 @@ app.innerHTML = `
       <a class="download" href="${modelURL.href}" download="101172-rigged.glb">↓ Unduh GLB rig + Walking</a>
       <h3>TAMPILAN</h3><label><span>Putar otomatis</span><input id="rotate" type="checkbox" /></label><label><span>Wireframe</span><input id="wireframe" type="checkbox" /></label><label><span>Lantai & grid</span><input id="grid" type="checkbox" checked /></label>
       <label class="background"><span>Latar</span><select id="background"><option value="#182321">Gelap</option><option value="#d8dfdc">Terang</option><option value="#69736f">Abu-abu</option></select></label>
-      <div class="note" id="rig-note">Membaca struktur GLB…</div>
+      <details class="asset-details"><summary>Detail & bantuan</summary><div class="note" id="rig-note">Membaca struktur GLB…</div>
       <div class="help"><h3>KONTROL</h3><p>Seret untuk memutar · Scroll / cubit untuk zoom · Klik kanan / dua jari untuk geser.</p><p>Depan mengikuti sumbu +Z model. Reset mengembalikan tampilan seluruh tubuh.</p></div>
+      </details>
     </aside>
   </main>`;
 
@@ -394,9 +394,10 @@ async function boot() {
       playButton.setAttribute('aria-pressed', String(!playback!.playing));
     };
     const selectMovement = (mode: 'walk' | 'bind') => {
+      const restart = !playback!.isStopping && playback!.action.getEffectiveWeight() < 0.001;
       playback!.setMode(mode);
       playback!.playing = mode === 'walk';
-      if (mode === 'walk') playback!.seek(0);
+      if (mode === 'walk' && restart) playback!.seek(0);
       syncMovement();
     };
     syncMovement();
@@ -404,6 +405,7 @@ async function boot() {
     driveButton.onclick = () => {
       driving = !driving;
       release();
+      drive.resetMotion();
       pad.hidden = !driving;
       driveButton.setAttribute('aria-pressed', String(driving));
       driveButton.textContent = driving ? 'Selesai main' : 'Mainkan karakter';
@@ -427,6 +429,7 @@ async function boot() {
     renderer.domElement.tabIndex = 0;
     document.querySelector<HTMLButtonElement>('#drive-reset')!.onclick = () => {
       release();
+      drive.resetMotion();
       camera.position.sub(holder.position);
       target.sub(holder.position);
       controls.target.sub(holder.position);

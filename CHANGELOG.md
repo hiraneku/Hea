@@ -7,6 +7,18 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — berhenti berjalan halus dan preview lebih bersih
+
+- Stop mengikuti sisa setengah langkah sampai kedua kaki menapak, lalu blend
+  smootherstep 0,38 detik ke pose diam. Permintaan stop tidak lagi membekukan
+  swing di udara; transisi bisa dibatalkan ketika mulai berjalan lagi.
+- Mode main meredam kecepatan perpindahan saat input dilepas, bukan berhenti
+  mendadak. Reset dan pergantian mode membersihkan sisa velocity.
+- Hilangkan judul besar di atas karakter; ringkas instruksi dan sembunyikan info
+  aset/koordinat serta detail teknis dalam panel lipat.
+- Pengujian regresi stop pada enam fase, batas perubahan pose, final contact,
+  toggle serta kontrol desktop/HP. GLB/source dan pemain default tidak diubah.
+
 ### Ditambahkan / disesuaikan — rig v6 dan preview yang dapat dimainkan
 
 - Turunkan siku 4 cm dari v5 sesuai review; simpan landmark kontur asli dan offset
