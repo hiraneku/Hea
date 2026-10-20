@@ -1,0 +1,592 @@
+<!doctype html>
+<html lang="id">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Prototipe Stickman — HEA</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #170b26; }
+  canvas { display: block; touch-action: none; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; }
+  #title {
+    position: fixed; left: 12px; top: 12px; color: #fff; font: 600 15px/1.35 system-ui, sans-serif;
+    background: rgba(16,10,28,.72); padding: 8px 12px; border-radius: 10px; backdrop-filter: blur(6px);
+    max-width: 86vw;
+  }
+  #title small { display: block; font-weight: 400; opacity: .8; font-size: 12px; }
+  #panel {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 10px;
+    display: flex; flex-direction: column; gap: 6px; align-items: center;
+    background: rgba(16,10,28,.72); padding: 10px; border-radius: 14px; backdrop-filter: blur(6px);
+    max-width: 96vw; font: 14px system-ui, sans-serif; color: #fff;
+  }
+  .row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
+  button {
+    appearance: none; border: 1px solid rgba(255,255,255,.25); background: rgba(255,255,255,.08);
+    color: #fff; border-radius: 9px; padding: 10px 14px; font: 600 14px system-ui, sans-serif;
+    min-height: 42px; cursor: pointer;
+  }
+  button:active { transform: scale(.96); }
+  button.on { background: #fff; color: #1c1030; border-color: #fff; }
+  button.cast { border-left: 5px solid var(--c); }
+  .sw { width: 30px; height: 30px; border-radius: 50%; border: 2px solid rgba(255,255,255,.35); padding: 0; min-height: 0; }
+  .sw.on { border-color: #fff; box-shadow: 0 0 0 2px rgba(255,255,255,.5); }
+  .hint { font-size: 11.5px; opacity: .75; text-align: center; }
+</style>
+</head>
+<body>
+<div id="flash"></div>
+<div id="title">STICKMAN — prototipe pemain gaya Hyun's Dojo
+  <small>Pose prosedural + IK dua tulang + ragdoll fisika. Seret untuk memutar kamera, cubit/scroll untuk zoom.</small>
+</div>
+<div id="panel">
+  <div class="row">
+    <button data-act="idle" class="modebtn on">Diam</button>
+    <button data-act="walk" class="modebtn">Jalan</button>
+    <button data-act="run" class="modebtn">Lari</button>
+    <button data-act="jump">Lompat</button>
+  </div>
+  <div class="row">
+    <button data-act="cast-bara" class="cast" style="--c:#ff7a26">Bara</button>
+    <button data-act="cast-prisma" class="cast" style="--c:#57e6ff">Prisma</button>
+    <button data-act="cast-nova" class="cast" style="--c:#b78cff">Nova</button>
+    <button data-act="cast-fall" class="cast" style="--c:#a64dff">FALL</button>
+  </div>
+  <div class="row">
+    <button data-act="hit">Kena Pukul!</button>
+    <button data-act="getup">Bangkit</button>
+    <button data-act="theme" id="themeBtn">Latar: Arena</button>
+    <button data-act="band" id="bandBtn" class="on">Ikat Kepala</button>
+  </div>
+  <div class="row" id="colors">
+    <button class="sw on" data-color="#17171c" style="background:#17171c" aria-label="Hitam"></button>
+    <button class="sw" data-color="#f2f2f5" style="background:#f2f2f5" aria-label="Putih"></button>
+    <button class="sw" data-color="#d23b2e" style="background:#d23b2e" aria-label="Merah"></button>
+    <button class="sw" data-color="#2e6fd2" style="background:#2e6fd2" aria-label="Biru"></button>
+    <button class="sw" data-color="#e8b71f" style="background:#e8b71f" aria-label="Kuning"></button>
+    <button class="sw" data-color="#8a3fd1" style="background:#8a3fd1" aria-label="Ungu"></button>
+    <button class="sw" data-color="#2fae4e" style="background:#2fae4e" aria-label="Hijau"></button>
+  </div>
+  <div class="hint">Tombol 1–4 = cast · Spasi = lompat · H = kena pukul · G = bangkit</div>
+</div>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import {
+  PROP, BONES, JOINTS, BASE, makePose, lerpPose, EASE,
+  computeSkeleton, idlePose, gaitPose, airPose, crouchPose,
+  CASTS, castPoseAt, castDuration,
+} from './stickman.mjs';
+
+/* ------------------------------------------------------------ renderer -- */
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 300);
+camera.position.set(3.2, 1.7, 4.6);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 1.0, 0);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 1.6;
+controls.maxDistance = 16;
+controls.maxPolarAngle = 1.53;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.7;
+addEventListener('pointerdown', () => { controls.autoRotate = false; }, { once: true });
+
+const hemi = new THREE.HemisphereLight(0xcfd8ff, 0x2a1a3e, 0.9);
+scene.add(hemi);
+const key = new THREE.DirectionalLight(0xffffff, 2.4);
+key.position.set(4, 7, 3);
+key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048);
+key.shadow.camera.left = key.shadow.camera.bottom = -7;
+key.shadow.camera.right = key.shadow.camera.top = 7;
+key.shadow.camera.far = 25;
+key.shadow.bias = -0.0004;
+scene.add(key);
+const rim = new THREE.DirectionalLight(0xb78cff, 1.6);
+rim.position.set(-3, 4, -5);
+scene.add(rim);
+
+/* -------------------------------------------------------------- ground -- */
+const groundMat = new THREE.MeshStandardMaterial({ color: '#241335', roughness: 1 });
+const ground = new THREE.Mesh(new THREE.CircleGeometry(45, 48), groundMat);
+ground.rotation.x = -Math.PI / 2;
+ground.receiveShadow = true;
+scene.add(ground);
+
+const gridCanvas = document.createElement('canvas');
+gridCanvas.width = gridCanvas.height = 128;
+{
+  const g = gridCanvas.getContext('2d');
+  g.clearRect(0, 0, 128, 128);
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, 128, 3); g.fillRect(0, 0, 3, 128);
+}
+const gridTex = new THREE.CanvasTexture(gridCanvas);
+gridTex.wrapS = gridTex.wrapT = THREE.RepeatWrapping;
+gridTex.repeat.set(45, 45); // 90 m plane -> 2 m tiles
+const gridMat = new THREE.MeshBasicMaterial({ map: gridTex, transparent: true, opacity: 0.35, depthWrite: false, color: '#be8cff' });
+const grid = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), gridMat);
+grid.rotation.x = -Math.PI / 2;
+grid.position.y = 0.01;
+scene.add(grid);
+
+/* ------------------------------------------------------------ stickman -- */
+const group = new THREE.Group();
+scene.add(group);
+
+const bodyMat = new THREE.MeshStandardMaterial({ color: '#17171c', roughness: 0.55, emissive: '#17171c', emissiveIntensity: 0.35 });
+const boneRadius = (a, b) => {
+  if (a === 'pelvis' || b === 'chest' && a !== 'neck') return 0.05;
+  if (a.startsWith('ankle')) return 0.032;
+  if (a === 'chest' && b.startsWith('shoulder')) return 0.035;
+  if (a.startsWith('hip') || a.startsWith('knee') || b.startsWith('knee')) return 0.045;
+  return 0.04;
+};
+const jointRadius = {
+  pelvis: 0.055, chest: 0.05, neck: 0.04,
+  shoulderL: 0.05, shoulderR: 0.05, elbowL: 0.042, elbowR: 0.042, handL: 0.052, handR: 0.052,
+  hipL: 0.05, hipR: 0.05, kneeL: 0.045, kneeR: 0.045, ankleL: 0.04, ankleR: 0.04, toeL: 0.03, toeR: 0.03,
+};
+const cylGeo = new THREE.CylinderGeometry(1, 1, 1, 10);
+const sphGeo = new THREE.SphereGeometry(1, 14, 10);
+const boneMeshes = BONES.map(([a, b]) => {
+  const m = new THREE.Mesh(cylGeo, bodyMat);
+  m.castShadow = true;
+  group.add(m);
+  return { a, b, mesh: m, r: boneRadius(a, b) };
+});
+const jointMeshes = {};
+for (const name of JOINTS) {
+  if (name === 'head') continue;
+  const m = new THREE.Mesh(sphGeo, bodyMat);
+  m.scale.setScalar(jointRadius[name]);
+  m.castShadow = true;
+  group.add(m);
+  jointMeshes[name] = m;
+}
+const headMesh = new THREE.Mesh(sphGeo, bodyMat);
+headMesh.scale.setScalar(PROP.headR);
+headMesh.castShadow = true;
+group.add(headMesh);
+const bandMesh = new THREE.Mesh(
+  new THREE.TorusGeometry(PROP.headR * 1.02, 0.028, 8, 24),
+  new THREE.MeshStandardMaterial({ color: '#d7263d', roughness: 0.6 }),
+);
+bandMesh.castShadow = true;
+group.add(bandMesh);
+
+const UP = new THREE.Vector3(0, 1, 0);
+const _d = new THREE.Vector3();
+const _m = new THREE.Vector3();
+const _q = new THREE.Quaternion();
+function drawSkeleton(J) {
+  for (const { a, b, mesh, r } of boneMeshes) {
+    _d.subVectors(J[b], J[a]);
+    const len = Math.max(_d.length(), 1e-5);
+    _m.addVectors(J[a], J[b]).multiplyScalar(0.5);
+    mesh.position.copy(_m);
+    mesh.quaternion.setFromUnitVectors(UP, _d.normalize());
+    mesh.scale.set(r, len, r);
+  }
+  for (const name of Object.keys(jointMeshes)) jointMeshes[name].position.copy(J[name]);
+  headMesh.position.copy(J.head);
+  _d.subVectors(J.head, J.neck).normalize();
+  bandMesh.position.copy(J.head).addScaledVector(_d, 0.035);
+  bandMesh.quaternion.setFromUnitVectors(UP, _d)
+    .multiply(_q.setFromAxisAngle(new THREE.Vector3(1, 0, 0), Math.PI / 2 - 0.18));
+}
+
+/* ----------------------------------------------------------------- FX -- */
+const fxList = [];
+function addFx(mesh, dur, update) {
+  scene.add(mesh);
+  fxList.push({ mesh, t: 0, dur, update });
+}
+const fxLight = new THREE.PointLight(0xffffff, 0, 9, 1.6);
+scene.add(fxLight);
+
+function spawnFireball(from) {
+  const mat = new THREE.MeshBasicMaterial({ color: '#ff7a26', transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 10), mat);
+  m.position.copy(from);
+  const vel = new THREE.Vector3(0, 0.6, 15);
+  addFx(m, 0.75, (k, dt, mesh) => {
+    vel.y -= 2.5 * dt;
+    mesh.position.addScaledVector(vel, dt);
+    mesh.scale.setScalar(1 + k * 0.6);
+    mat.opacity = 1 - k * k;
+    fxLight.position.copy(mesh.position);
+    fxLight.color.set('#ff7a26');
+    fxLight.intensity = 26 * (1 - k);
+  });
+}
+function spawnShell(at, color) {
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.5, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const m = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), mat);
+  m.position.copy(at);
+  addFx(m, 0.5, (k, dt, mesh) => {
+    mesh.scale.setScalar(0.3 + EASE.out(k) * 3.1);
+    mat.opacity = 0.5 * (1 - k);
+  });
+}
+function spawnRing(at, color, flat = true, maxR = 2.6, dur = 0.55) {
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide });
+  const m = new THREE.Mesh(new THREE.RingGeometry(0.86, 1.0, 48), mat);
+  if (flat) m.rotation.x = -Math.PI / 2;
+  m.position.copy(at);
+  addFx(m, dur, (k, dt, mesh) => {
+    mesh.scale.setScalar(0.3 + EASE.out(k) * maxR);
+    mat.opacity = 0.85 * (1 - k);
+  });
+}
+
+// Hand glow that charges up while a cast gesture winds up.
+const glowMat = () => new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
+const glowL = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), glowMat());
+const glowR = new THREE.Mesh(new THREE.SphereGeometry(0.11, 14, 10), glowMat());
+group.add(glowL, glowR);
+const glowLight = new THREE.PointLight(0xffffff, 0, 7, 1.6);
+group.add(glowLight);
+
+const flashEl = document.getElementById('flash');
+function flash(peak = 0.85) {
+  flashEl.style.transition = 'none';
+  flashEl.style.opacity = String(peak);
+  requestAnimationFrame(() => {
+    flashEl.style.transition = 'opacity 0.22s ease-out';
+    flashEl.style.opacity = '0';
+  });
+}
+
+/* -------------------------------------------------------------- ragdoll -- */
+const REST = computeSkeleton(makePose()).joints;
+const BRACES = [['shoulderL', 'shoulderR'], ['hipL', 'hipR'], ['shoulderL', 'hipR'], ['shoulderR', 'hipL'], ['head', 'chest'], ['chest', 'hipL'], ['chest', 'hipR']];
+const CONSTRAINTS = [...BONES, ...BRACES].map(([a, b]) => ({ a, b, len: REST[a].distanceTo(REST[b]) }));
+const particleR = (n) => (n === 'head' ? PROP.headR : n.startsWith('toe') ? 0.03 : 0.05);
+let rag = null;
+
+function startRagdoll(J, worldY) {
+  rag = {};
+  for (const n of JOINTS) {
+    const p = J[n].clone();
+    p.y += worldY;
+    rag[n] = { p, pp: p.clone() };
+  }
+  const kick = (n, vx, vy, vz) => {
+    rag[n].pp.x -= vx * 0.016; rag[n].pp.y -= vy * 0.016; rag[n].pp.z -= vz * 0.016;
+  };
+  kick('chest', 0.6, 3.6, -6.5);
+  kick('head', 1.4, 4.2, -7.5);
+  kick('neck', 0.8, 3.8, -7.0);
+  kick('pelvis', 0.2, 2.6, -4.5);
+  kick('shoulderL', 1.0, 3.2, -6.0);
+  kick('shoulderR', 0.2, 3.4, -6.8);
+}
+function stepRagdoll(dt) {
+  const sub = 2;
+  const h = dt / sub;
+  for (let s = 0; s < sub; s++) {
+    for (const n of JOINTS) {
+      const pt = rag[n];
+      const vx = (pt.p.x - pt.pp.x) * 0.995;
+      const vy = (pt.p.y - pt.pp.y) * 0.995;
+      const vz = (pt.p.z - pt.pp.z) * 0.995;
+      pt.pp.copy(pt.p);
+      pt.p.x += vx; pt.p.y += vy - 22 * h * h; pt.p.z += vz;
+    }
+    for (let it = 0; it < 7; it++) {
+      for (const c of CONSTRAINTS) {
+        const A = rag[c.a]; const B = rag[c.b];
+        _d.subVectors(B.p, A.p);
+        const d = Math.max(_d.length(), 1e-6);
+        const diff = (d - c.len) / d * 0.5;
+        A.p.addScaledVector(_d, diff);
+        B.p.addScaledVector(_d, -diff);
+      }
+      for (const n of JOINTS) {
+        const pt = rag[n];
+        const r = particleR(n);
+        if (pt.p.y < r) {
+          pt.p.y = r;
+          pt.pp.x += (pt.p.x - pt.pp.x) * 0.3; // ground friction
+          pt.pp.z += (pt.p.z - pt.pp.z) * 0.3;
+        }
+      }
+    }
+  }
+  const J = {};
+  for (const n of JOINTS) J[n] = rag[n].p;
+  return J;
+}
+
+/* ------------------------------------------------------------ state -- */
+let mode = 'idle'; // idle | walk | run | cast | ragdoll | getup
+let time = 0;
+let phase = 0;
+let runAmt = 0;
+let curPose = idlePose(0);
+let transition = null; // { from, t, dur }
+let airY = 0; let vy = 0; let airborne = false;
+let landT = -1;
+let castName = null; let castT = 0; let castFired = false; let returnMode = 'idle';
+let getupT = 0; let getupFrom = null;
+let hitstopT = 0; let shakeAmp = 0;
+let jumping = false;
+
+function setMode(next) {
+  if (mode === 'ragdoll' || mode === 'getup') return;
+  transition = { from: { ...curPose }, t: 0, dur: 0.16 };
+  mode = next;
+  document.querySelectorAll('.modebtn').forEach((b) =>
+    b.classList.toggle('on', b.dataset.act === next));
+}
+function startCast(name) {
+  if (mode === 'ragdoll' || mode === 'getup' || mode === 'cast' || airborne) return;
+  returnMode = mode;
+  transition = { from: { ...curPose }, t: 0, dur: 0.1 };
+  mode = 'cast';
+  castName = name;
+  castT = 0;
+  castFired = false;
+  const c = CASTS[name];
+  glowL.material.color.set(c.color);
+  glowR.material.color.set(c.color);
+  glowLight.color.set(c.color);
+}
+function doJump() {
+  if (airborne || mode === 'ragdoll' || mode === 'getup' || mode === 'cast') return;
+  airborne = true;
+  jumping = true;
+  vy = 7.4;
+  transition = { from: { ...curPose }, t: 0, dur: 0.12 };
+}
+function doHit() {
+  if (mode === 'ragdoll' || mode === 'getup') return;
+  const { joints } = computeSkeleton(curPose);
+  startRagdoll(joints, airY);
+  mode = 'ragdoll';
+  airborne = false; airY = 0; vy = 0;
+  flash(0.9);
+  hitstopT = 0.07;
+  shakeAmp = 0.14;
+  setGlow(0, 0);
+}
+function doGetup() {
+  if (mode !== 'ragdoll') return;
+  getupFrom = {};
+  for (const n of JOINTS) getupFrom[n] = rag[n].p.clone();
+  getupT = 0;
+  mode = 'getup';
+}
+function setGlow(l, r) {
+  glowL.material.opacity = l * 0.9;
+  glowR.material.opacity = r * 0.9;
+  glowL.scale.setScalar(0.6 + l * 0.9);
+  glowR.scale.setScalar(0.6 + r * 0.9);
+  glowLight.intensity = Math.max(l, r) * 14;
+}
+
+/* ----------------------------------------------------------------- UI -- */
+let arenaTheme = true;
+function applyTheme() {
+  if (arenaTheme) {
+    scene.background = new THREE.Color('#170b26');
+    scene.fog = new THREE.Fog('#170b26', 18, 60);
+    groundMat.color.set('#241335');
+    gridMat.color.set('#be8cff'); gridMat.opacity = 0.35;
+    hemi.intensity = 0.9; key.intensity = 2.4; rim.intensity = 1.6; rim.color.set('#b78cff');
+    bodyMat.emissiveIntensity = 0.35;
+  } else {
+    scene.background = new THREE.Color('#b9cbd9');
+    scene.fog = new THREE.Fog('#b9cbd9', 25, 80);
+    groundMat.color.set('#a8b39a');
+    gridMat.color.set('#3a4a3a'); gridMat.opacity = 0.28;
+    hemi.intensity = 1.25; key.intensity = 2.6; rim.intensity = 0.5; rim.color.set('#ffffff');
+    bodyMat.emissiveIntensity = 0.06;
+  }
+  document.getElementById('themeBtn').textContent = arenaTheme ? 'Latar: Arena' : 'Latar: Terang';
+}
+applyTheme();
+
+document.getElementById('panel').addEventListener('click', (e) => {
+  const btn = e.target.closest('button');
+  if (!btn) return;
+  const act = btn.dataset.act;
+  const color = btn.dataset.color;
+  if (color) {
+    bodyMat.color.set(color);
+    bodyMat.emissive.set(color);
+    document.querySelectorAll('.sw').forEach((s) => s.classList.toggle('on', s === btn));
+    return;
+  }
+  if (!act) return;
+  if (act === 'idle' || act === 'walk' || act === 'run') setMode(act);
+  else if (act === 'jump') doJump();
+  else if (act.startsWith('cast-')) startCast(act.slice(5));
+  else if (act === 'hit') doHit();
+  else if (act === 'getup') doGetup();
+  else if (act === 'theme') { arenaTheme = !arenaTheme; applyTheme(); }
+  else if (act === 'band') { bandMesh.visible = !bandMesh.visible; btn.classList.toggle('on', bandMesh.visible); }
+});
+addEventListener('keydown', (e) => {
+  if (e.code === 'Space') { e.preventDefault(); doJump(); }
+  else if (e.key === '1') startCast('bara');
+  else if (e.key === '2') startCast('prisma');
+  else if (e.key === '3') startCast('nova');
+  else if (e.key === '4') startCast('fall');
+  else if (e.key === 'h' || e.key === 'H') doHit();
+  else if (e.key === 'g' || e.key === 'G') doGetup();
+});
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+
+/* ---------------------------------------------------------------- loop -- */
+const clock = new THREE.Clock();
+function targetPose(dt) {
+  if (airborne) return airPose(THREE.MathUtils.clamp(vy / 7.4, -1, 1));
+  if (mode === 'cast') return castPoseAt(CASTS[castName], castT);
+  if (mode === 'walk' || mode === 'run') {
+    const speed = THREE.MathUtils.lerp(5.2, 8.4, runAmt);
+    phase += speed * dt;
+    gridTex.offset.y -= THREE.MathUtils.lerp(2.0, 5.4, runAmt) * dt / 2;
+    return gaitPose(phase, runAmt);
+  }
+  return idlePose(time);
+}
+
+function tick() {
+  requestAnimationFrame(tick);
+  const rawDt = Math.min(clock.getDelta(), 0.05);
+  hitstopT = Math.max(0, hitstopT - rawDt);
+  const dt = rawDt * (hitstopT > 0 ? 0.07 : 1);
+  time += dt;
+  runAmt += ((mode === 'run' ? 1 : 0) - runAmt) * Math.min(1, dt * 3.2);
+
+  // Jump physics (world-space hop above the pose).
+  if (airborne) {
+    vy -= 20 * dt;
+    airY += vy * dt;
+    if (airY <= 0) {
+      airY = 0; vy = 0; airborne = false; jumping = false;
+      landT = 0;
+      transition = { from: { ...curPose }, t: 0, dur: 0.1 };
+      shakeAmp = Math.max(shakeAmp, 0.03);
+    }
+  }
+
+  let J;
+  if (mode === 'ragdoll') {
+    group.position.y = 0;
+    group.scale.set(1, 1, 1);
+    J = stepRagdoll(dt);
+  } else if (mode === 'getup') {
+    getupT += dt;
+    const k = EASE.out(THREE.MathUtils.clamp(getupT / 0.55, 0, 1));
+    const target = computeSkeleton(idlePose(time)).joints;
+    J = {};
+    for (const n of JOINTS) J[n] = getupFrom[n].clone().lerp(target[n], k);
+    if (getupT >= 0.55) {
+      mode = 'idle';
+      rag = null;
+      curPose = idlePose(time);
+      landT = 0;
+      document.querySelectorAll('.modebtn').forEach((b) =>
+        b.classList.toggle('on', b.dataset.act === 'idle'));
+    }
+  } else {
+    // Cast timeline + FX triggers.
+    if (mode === 'cast') {
+      const c = CASTS[castName];
+      castT += dt;
+      if (!castFired && castT >= c.fxAt) {
+        castFired = true;
+        const Jc = computeSkeleton(curPose).joints;
+        const wy = group.position.y;
+        if (c.fx === 'fireball') spawnFireball(Jc.handR.clone().setY(Jc.handR.y + wy));
+        else if (c.fx === 'shell') { spawnShell(Jc.chest.clone().setY(Jc.chest.y + wy), c.color); shakeAmp = Math.max(shakeAmp, 0.05); hitstopT = Math.max(hitstopT, 0.04); }
+        else if (c.fx === 'ring') spawnRing(new THREE.Vector3(0, 1.25 + wy, 0), c.color, true, 2.8, 0.6);
+        else if (c.fx === 'shockwave') {
+          spawnRing(new THREE.Vector3(0, 0.03, 0.45), c.color, true, 4.6, 0.65);
+          spawnRing(new THREE.Vector3(0, 0.05, 0.45), '#ffffff', true, 3.0, 0.5);
+          shakeAmp = Math.max(shakeAmp, 0.1);
+          hitstopT = Math.max(hitstopT, 0.05);
+          flash(0.35);
+        }
+      }
+      // Glow envelope: charge toward fxAt, decay after.
+      const g = castT < c.fxAt
+        ? THREE.MathUtils.clamp(castT / c.fxAt, 0, 1)
+        : Math.max(0, 1 - (castT - c.fxAt) / 0.28);
+      setGlow(c.glow !== 'R' ? g : 0, c.glow !== 'L' ? g : 0);
+      if (castT >= castDuration(c)) {
+        setGlow(0, 0);
+        const back = returnMode;
+        mode = back === 'cast' ? 'idle' : back;
+        transition = { from: { ...curPose }, t: 0, dur: 0.12 };
+      }
+    }
+
+    let pose = targetPose(dt);
+    if (transition) {
+      transition.t += dt;
+      const k = EASE.out(THREE.MathUtils.clamp(transition.t / transition.dur, 0, 1));
+      pose = lerpPose(transition.from, pose, k);
+      if (transition.t >= transition.dur) transition = null;
+    }
+    if (landT >= 0) {
+      landT += dt;
+      const w = Math.sin(Math.PI * THREE.MathUtils.clamp(landT / 0.3, 0, 1)) * 0.85;
+      pose = lerpPose(pose, crouchPose(), w);
+      if (landT >= 0.3) landT = -1;
+    }
+    curPose = pose;
+    const skel = computeSkeleton(curPose);
+    J = skel.joints;
+    group.position.y = airY;
+    glowL.position.copy(J.handL);
+    glowR.position.copy(J.handR);
+    glowLight.position.copy(J.chest).add(new THREE.Vector3(0, 0, 0.4));
+  }
+  drawSkeleton(J);
+
+  // FX lifetimes.
+  for (let i = fxList.length - 1; i >= 0; i--) {
+    const f = fxList[i];
+    f.t += dt;
+    const k = THREE.MathUtils.clamp(f.t / f.dur, 0, 1);
+    f.update(k, dt, f.mesh);
+    if (k >= 1) {
+      scene.remove(f.mesh);
+      f.mesh.geometry.dispose();
+      f.mesh.material.dispose();
+      fxList.splice(i, 1);
+      if (fxList.length === 0) fxLight.intensity = 0;
+    }
+  }
+
+  controls.update();
+  if (shakeAmp > 0.001) {
+    camera.position.x += (Math.random() - 0.5) * shakeAmp;
+    camera.position.y += (Math.random() - 0.5) * shakeAmp;
+    shakeAmp *= Math.exp(-9 * rawDt);
+  }
+  renderer.render(scene, camera);
+}
+tick();
+</script>
+</body>
+</html>
