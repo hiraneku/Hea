@@ -7,6 +7,19 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Ditambahkan / disesuaikan — rig v6 dan preview yang dapat dimainkan
+
+- Turunkan siku 4 cm dari v5 sesuai review; simpan landmark kontur asli dan offset
+  authoring secara terpisah. Rampingkan radius lengan bawah/pergelangan hingga 12%
+  secara halus pada GLB turunan saja; pertahankan file sumber dan perbaikan paha.
+- Tambahkan helper reusable CharacterLook untuk Neck/Head, kontrol yaw/pitch,
+  reset kepala, marker LEHER dan panah arah kepala pada skeleton preview.
+- Mode Mainkan karakter: joystick HP, WASD/panah desktop, locomotion mengikuti
+  kamera, Walking sesuai kecepatan perpindahan, reset posisi dan pembersihan input.
+  Arena ±5 m di lantai datar; belum collision, run, lompat atau terrain.
+- Regresi bentuk turunan, siku, look tanpa akumulasi dan locomotion, serta tes
+  browser kontrol main. Model default gameplay tidak dialihkan; cache GLB v6.
+
 ### Diperbaiki — posisi bahu, dada dan siku 101172 (v5)
 
 - Fit cap bahu terhadap centerline/radius kontur lengan asli; naikkan pivot bahu

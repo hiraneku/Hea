@@ -329,3 +329,54 @@ select:disabled {
   line-height: 1.65;
   color: #a6b8ac;
 }
+
+#drive-pad {
+  position: absolute;
+  right: 18px;
+  bottom: 54px;
+  z-index: 5;
+  width: 114px;
+  height: 114px;
+  border-radius: 50%;
+  border: 1px solid #d5f38a99;
+  background: #15271fe6;
+  touch-action: none;
+  user-select: none;
+}
+#drive-pad[hidden] {
+  display: none;
+}
+#drive-knob {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  left: 34px;
+  top: 34px;
+  border-radius: 50%;
+  background: #d5f38acc;
+  pointer-events: none;
+}
+#drive-pad small {
+  position: absolute;
+  bottom: 7px;
+  width: 100%;
+  text-align: center;
+  font-size: 8px;
+  letter-spacing: 2px;
+  pointer-events: none;
+}
+#drive-status {
+  display: block;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: #d5f38a;
+  margin: 12px 0 24px;
+}
+#drive-toggle[aria-pressed='true'] {
+  background: #d5f38a;
+  color: #182321;
+}
+#look-reset {
+  width: 100%;
+  margin-top: 14px;
+}

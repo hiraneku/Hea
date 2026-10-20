@@ -15,7 +15,10 @@
 Aset hasil dinormalisasi ke tinggi **2 m**, telapak di Y=0, arah depan **+Z**, up +Y.
 Sumber sudah menghadap **+Z** dan memiliki pose kaki terbuka. V3 hanya membake
 normalisasi ukuran/posisi, tanpa rotasi 180° yang keliru pada v1/v2. Material, UV,
-indeks dan tekstur dipertahankan; tes membandingkan seluruh vertex bind pose dengan sumber.
+indeks dan tekstur dipertahankan. Mulai v6, hanya penampang pergelangan/lengan bawah
+aset turunan dirampingkan atas permintaan pengguna; normal dihitung ulang. Tes
+membandingkan hasil dengan transformasi taper yang terdokumentasi dan memastikan
+bagian lain tetap sama dengan sumber.
 
 Skeleton **28 tulang**:
 
@@ -76,7 +79,7 @@ masih perlu dinilai visual; belum ada idle/run/air/cast atau IK runtime untuk le
 PNG/metrik berada di `.cache/character-review/`, tidak di Git. Untuk membandingkan
 sumber: `npm run character:review -- public/models/101172.glb` (bind pose).
 Panah di lantai menunjukkan +Z. Ini inspeksi manusia, **bukan tes bahwa motion natural**.
-Preview memakai revisi URL v5 untuk menghindari cache lama. Overlay skeleton
+Preview memakai revisi URL v6 untuk menghindari cache lama. Overlay skeleton
 menambahkan titik panggul/lutut/pergelangan dengan label dan panah arah depan;
 semuanya hanya alat inspeksi, bukan bagian yang menggerakkan karakter.
 
@@ -122,6 +125,37 @@ Walking diekspor ulang dengan skeleton/weights baru; tidak ada koreksi khusus
 viewer. Overlay menambahkan label BAHU dan SIKU di posisi bone yang sebenarnya.
 Tes mengukur ulang sumber, membandingkan pivot ekspor, memeriksa weight forearm,
 dan mempertahankan regresi paha/telapak. Gerakan Jalan toggle tetap berfungsi.
+
+## Penyesuaian v6 — siku, pergelangan, leher, dan uji main
+
+- Siku diturunkan **4 cm** dari landmark v5 ke Y=**1,31 m** pada model 2 m.
+  X/Z diambil dari kontur pada tinggi baru. `elbowContour` tetap menyimpan hasil
+  ukur v5; offset ini adalah keputusan authoring sesuai review, bukan pengukuran baru.
+- `shape101172.ts` merampingkan radius X/Z lengan bawah/pergelangan hingga **12%**,
+  dengan fade halus Y=0,91–1,295 m. Centerline, panjang, UV, indeks, jumlah vertex,
+  tangan paling bawah, lengan atas, torso dan kaki tidak diubah. Hanya GLB turunan
+  yang dibentuk ulang, bukan sumber. Weight dihitung ulang setelah taper.
+- Skeleton tetap 28 tulang termasuk **Neck → Head**. `CharacterLook` mengontrol
+  yaw ±70° dan pitch ±30°, dibagi Neck 65% / Head 35%, relatif tubuh. Panggil
+  `clear()` SEBELUM update mixer, lalu `apply(yawRadians, pitchRadians)` SESUDAHNYA.
+  Helper ini renderer/DOM-independent dan dapat digunakan gameplay dengan GLB yang
+  sama; tidak memakai deformer viewer. Ini kontrol prosedural, bukan clip look baru.
+  Overlay menampilkan titik LEHER dan panah putih untuk arah kepala tanpa wajah.
+- Tombol **Mainkan karakter** mengaktifkan joystick layar dan WASD/panah.
+  Gerakan mengikuti bidang kamera; kamera mengikuti perpindahan karakter. Joystick
+  berhenti pada pointer-up/cancel/lost-capture; input dibersihkan saat blur/hidden.
+  Lepas input untuk diam, Reset posisi untuk kembali ke pusat, Selesai main untuk
+  inspeksi. Slider menoleh tetap tersedia selama berjalan.
+- `CharacterTestDrive` memakai Walking dari GLB dan acuan speed metadata, mengukur
+  speed aktual untuk playback, menormalkan diagonal, serta membatasi posisi ±5 m.
+  Ini **arena uji lantai datar**, bukan integrasi controller game penuh: belum ada
+  collision, gravitasi, lompat, run, obstacle, terrain atau multiplayer. Mode ini
+  tidak memodifikasi pemain default. Kontrol inspeksi clip dikunci selama main
+  agar scrub/pause tidak bertentangan dengan locomotion.
+
+Tes mencakup taper hanya pada region lengan, batas perubahan vertex, offset siku,
+rotasi look tanpa akumulasi/gerak torso, motion relatif kamera, normalisasi diagonal,
+batas arena, keyboard/joystick, lepas input, reset posisi dan kontrol menoleh.
 
 ## Pemakaian dalam gameplay
 

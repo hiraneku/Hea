@@ -50,6 +50,7 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   await expect(page.locator('#joint-labels')).toContainText('LUTUT');
   await expect(page.locator('#joint-labels')).toContainText('BAHU');
   await expect(page.locator('#joint-labels')).toContainText('SIKU');
+  await expect(page.locator('#joint-labels')).toContainText('LEHER');
   await page.locator('#animation').selectOption('bind');
   await expect(page.locator('#animation')).toHaveValue('bind');
   await page.locator('#animation').selectOption('walk');
@@ -59,7 +60,7 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   await expect(phase).toHaveValue('0');
   await expect(page.getByRole('link', { name: 'Unduh GLB rig + Walking' })).toHaveAttribute(
     'href',
-    /models\/101172-rigged\.glb\?revision=5$/,
+    /models\/101172-rigged\.glb\?revision=6$/,
   );
 });
 
@@ -88,4 +89,42 @@ test('movement choice toggles Walking back to standing instead of freezing a ste
   const phase = await page.locator('#phase').inputValue();
   await page.waitForTimeout(400);
   expect(await page.locator('#phase').inputValue()).toBe(phase);
+});
+
+test('playable preview moves with keyboard and joystick, releases input, and tests neck controls', async ({
+  page,
+}) => {
+  await page.goto('preview/');
+  await expect(page.locator('#load-status')).toBeHidden({ timeout: 30_000 });
+  await page.locator('#look-yaw').evaluate((el) => {
+    (el as HTMLInputElement).value = '45';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await expect(page.locator('#look-yaw-value')).toHaveText('45°');
+  await page.locator('#look-reset').click();
+  await expect(page.locator('#look-yaw')).toHaveValue('0');
+  await page.locator('#drive-toggle').click();
+  await expect(page.locator('#drive-pad')).toBeVisible();
+  await expect(page.locator('#movement-walk')).toBeDisabled();
+  await page.locator('canvas').focus();
+  await page.keyboard.down('w');
+  await expect
+    .poll(() => page.locator('#drive-status').textContent())
+    .not.toBe('Mode main · X 0.000 · Z 0.000');
+  await page.keyboard.up('w');
+  const stopped = await page.locator('#drive-status').textContent();
+  await page.waitForTimeout(200);
+  expect(await page.locator('#drive-status').textContent()).toBe(stopped);
+  const before = stopped;
+  const pad = await page.locator('#drive-pad').boundingBox();
+  await page.mouse.move(pad!.x + pad!.width / 2, pad!.y + pad!.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(pad!.x + pad!.width / 2, pad!.y + 10);
+  await expect.poll(() => page.locator('#drive-status').textContent()).not.toBe(before);
+  await page.mouse.up();
+  await page.locator('#drive-reset').click();
+  await expect(page.locator('#drive-status')).toHaveText('Mode main · X 0.000 · Z 0.000');
+  await page.locator('#drive-toggle').click();
+  await expect(page.locator('#drive-pad')).toBeHidden();
+  await expect(page.locator('#animation')).toHaveValue('bind');
 });

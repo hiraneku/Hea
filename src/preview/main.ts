@@ -4,6 +4,8 @@ import '@fontsource/barlow-condensed/latin-700.css';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CharacterLook } from '../character/CharacterLook';
+import { CharacterTestDrive } from '../character/CharacterTestDrive';
 import { CharacterPlayback } from '../character/CharacterPlayback';
 import type { CharacterAnatomy } from '../character/anatomy101172';
 import { RIGGED_CHARACTER, RIG_REVISION } from '../character/rig101172';
@@ -26,13 +28,22 @@ app.innerHTML = `
     <section class="stage" aria-label="Preview karakter 3D">
       <div class="stage-heading"><span class="eyebrow">MODEL STUDY / 001</span><h1>KENALI<br><em>KARAKTERMU.</em></h1><p>101172-rigged.glb <span>·</span> Walk v${RIG_REVISION} · sendi terukur</p></div>
       <div id="viewport"></div><div id="joint-labels" class="joint-labels" aria-hidden="true" hidden></div>
+      <div id="drive-pad" role="group" aria-label="Joystick gerak" hidden><span id="drive-knob"></span><small>GERAK</small></div>
       <div id="load-status" role="status">Memuat model…</div>
-      <div class="stage-footer"><span><i></i> WALK V${RIG_REVISION} · IN-PLACE · SENDI DARI MESH</span><span>Y ↑</span></div>
+      <div class="stage-footer"><span><i></i> WALK V${RIG_REVISION} · WALKING · RIG + UJI MAIN</span><span>Y ↑</span></div>
     </section>
     <aside>
       <span class="eyebrow">INSPEKSI MODEL</span><h2>Character preview</h2><p class="intro">Periksa bentuk dan material sebelum integrasi. Halaman ini tidak mengubah karakter dalam game.</p>
       <dl id="model-info"><div><dt>Status</dt><dd>Memuat…</dd></div></dl>
       <h3>SUDUT PANDANG</h3><div class="view-buttons"><button data-view="front">Depan</button><button data-view="side">Samping</button><button data-view="back">Belakang</button><button id="reset">Reset kamera</button></div>
+      <h3>UJI MAIN / LANTAI DATAR</h3>
+      <div class="view-buttons"><button id="drive-toggle" aria-pressed="false" disabled>Mainkan karakter</button><button id="drive-reset" disabled>Reset posisi</button></div>
+      <p class="movement-help">Aktifkan lalu gerakkan joystick di layar, atau WASD / tombol panah. Arah mengikuti kamera. Lepaskan untuk diam. Area uji ±5 m; belum ada collision, tangga, atau animasi lari.</p>
+      <output id="drive-status">Mode inspeksi · X 0.000 · Z 0.000</output>
+      <h3>UJI LEHER / MENOLEH</h3>
+      <label for="look-yaw"><span>Menoleh kiri / kanan</span><output id="look-yaw-value">0°</output></label><input id="look-yaw" type="range" min="-70" max="70" value="0" aria-label="Menoleh kiri kanan" disabled />
+      <label for="look-pitch"><span>Tunduk / mendongak</span><output id="look-pitch-value">0°</output></label><input id="look-pitch" type="range" min="-30" max="30" value="0" aria-label="Tunduk mendongak" disabled />
+      <button id="look-reset" disabled>Luruskan kepala</button>
       <h3>COBA GERAKAN</h3>
       <div class="view-buttons" id="movement-options" aria-label="Pilihan gerakan"><button id="movement-walk" aria-pressed="false" disabled>Jalan</button></div>
       <p class="movement-help">Klik Jalan untuk mencoba. Klik lagi untuk diam. Gerakan lain akan ditambahkan setelah clip-nya tersedia.</p>
@@ -82,7 +93,7 @@ async function boot() {
   scene.add(rim);
   const ground = new THREE.Group();
   const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(7, 96),
+    new THREE.CircleGeometry(9, 96),
     new THREE.MeshStandardMaterial({ color: '#26322f', roughness: 0.95 }),
   );
   floor.rotation.x = -Math.PI / 2;
@@ -94,9 +105,9 @@ async function boot() {
   function view(angle = Math.PI / 6) {
     controls.target.copy(target);
     camera.position.set(
-      Math.sin(angle) * fitDistance,
+      target.x + Math.sin(angle) * fitDistance,
       target.y + fitDistance * 0.12,
-      Math.cos(angle) * fitDistance,
+      target.z + Math.cos(angle) * fitDistance,
     );
     controls.update();
   }
@@ -114,6 +125,11 @@ async function boot() {
   resize();
   view();
   let playback: CharacterPlayback | undefined;
+  let look: CharacterLook | undefined;
+  let driving = false;
+  let updateDrive: ((dt: number) => void) | undefined;
+  const yawInput = document.querySelector<HTMLInputElement>('#look-yaw')!;
+  const pitchInput = document.querySelector<HTMLInputElement>('#look-pitch')!;
   let helper: THREE.SkeletonHelper | undefined;
   const landmarks = new THREE.Group();
   landmarks.visible = false;
@@ -121,13 +137,30 @@ async function boot() {
   const labels = document.querySelector<HTMLDivElement>('#joint-labels')!;
   const annotations: { bone: THREE.Object3D; marker: THREE.Mesh; label?: HTMLSpanElement }[] = [];
   const projected = new THREE.Vector3();
+  let headBone: THREE.Object3D | undefined;
+  const headArrow = new THREE.ArrowHelper(
+    new THREE.Vector3(0, 0, 1),
+    new THREE.Vector3(),
+    0.28,
+    '#ffffff',
+    0.06,
+    0.035,
+  );
+  landmarks.add(headArrow);
   let previousTime = performance.now();
   const phaseInput = document.querySelector<HTMLInputElement>('#phase')!;
   renderer.setAnimationLoop(() => {
     const now = performance.now();
     const dt = Math.min((now - previousTime) / 1000, 0.05);
     previousTime = now;
-    playback?.update(document.hidden ? 0 : dt);
+    const visibleDt = document.hidden ? 0 : dt;
+    look?.clear();
+    if (driving) updateDrive?.(visibleDt);
+    else playback?.update(visibleDt);
+    look?.apply(
+      THREE.MathUtils.degToRad(Number(yawInput.value)),
+      THREE.MathUtils.degToRad(Number(pitchInput.value)),
+    );
     if (playback) {
       phaseInput.value = String(Math.round(playback.phase * 1000));
       document.querySelector<HTMLOutputElement>('#phase-value')!.value =
@@ -145,6 +178,20 @@ async function boot() {
           entry.label.style.top = `${(-projected.y * 0.5 + 0.5) * viewport.clientHeight - 10}px`;
         }
       }
+    if (landmarks.visible && headBone) {
+      headBone.getWorldPosition(headArrow.position);
+      // Place the guide at the centre of the featureless head, above neck labels.
+      headArrow.position.add(
+        new THREE.Vector3(0, 0.15, 0).applyQuaternion(
+          headBone.getWorldQuaternion(new THREE.Quaternion()),
+        ),
+      );
+      headArrow.setDirection(
+        new THREE.Vector3(0, 0, 1).applyQuaternion(
+          headBone.getWorldQuaternion(new THREE.Quaternion()),
+        ),
+      );
+    }
     renderer.render(scene, camera);
   });
   document.querySelector<HTMLInputElement>('#rotate')!.onchange = (e) => {
@@ -197,6 +244,96 @@ async function boot() {
     playback.playing = false;
     playback.setMode('bind');
     playback.update(1);
+    look = new CharacterLook(model);
+    headBone = model.getObjectByName('Head');
+    const drive = new CharacterTestDrive(holder, playback, metadata.walkSpeed * scale);
+    const keys = new Set<string>();
+    const joystick = new THREE.Vector2();
+    const pad = document.querySelector<HTMLDivElement>('#drive-pad')!;
+    const knob = document.querySelector<HTMLSpanElement>('#drive-knob')!;
+    let pointer: number | undefined;
+    const release = () => {
+      keys.clear();
+      joystick.set(0, 0);
+      knob.style.transform = '';
+      pointer = undefined;
+    };
+    window.addEventListener('blur', release);
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) release();
+    });
+    const movementKeys = [
+      'KeyW',
+      'KeyA',
+      'KeyS',
+      'KeyD',
+      'ArrowUp',
+      'ArrowLeft',
+      'ArrowDown',
+      'ArrowRight',
+    ];
+    window.addEventListener('keydown', (e) => {
+      if (
+        !driving ||
+        /INPUT|SELECT|TEXTAREA/.test((e.target as HTMLElement).tagName) ||
+        !movementKeys.includes(e.code)
+      )
+        return;
+      e.preventDefault();
+      keys.add(e.code);
+    });
+    window.addEventListener('keyup', (e) => {
+      keys.delete(e.code);
+    });
+    const movePointer = (e: PointerEvent) => {
+      if (e.pointerId !== pointer) return;
+      const r = pad.getBoundingClientRect();
+      joystick.set(
+        (e.clientX - r.left - r.width / 2) / 40,
+        -(e.clientY - r.top - r.height / 2) / 40,
+      );
+      if (joystick.length() > 1) joystick.normalize();
+      if (joystick.length() < 0.12) joystick.set(0, 0);
+      knob.style.transform = `translate(${joystick.x * 35}px, ${-joystick.y * 35}px)`;
+    };
+    pad.onpointerdown = (e) => {
+      if (!driving || pointer !== undefined) return;
+      pointer = e.pointerId;
+      pad.setPointerCapture(e.pointerId);
+      e.preventDefault();
+      movePointer(e);
+    };
+    pad.onpointermove = movePointer;
+    pad.onpointerup = (e) => {
+      if (e.pointerId === pointer) release();
+    };
+    pad.onpointercancel = release;
+    pad.onlostpointercapture = release;
+    updateDrive = (dt) => {
+      const x =
+        joystick.x +
+        Number(keys.has('KeyD') || keys.has('ArrowRight')) -
+        Number(keys.has('KeyA') || keys.has('ArrowLeft'));
+      const y =
+        joystick.y +
+        Number(keys.has('KeyW') || keys.has('ArrowUp')) -
+        Number(keys.has('KeyS') || keys.has('ArrowDown'));
+      const delta = drive.update(dt, x, y, camera);
+      camera.position.add(delta);
+      target.add(delta);
+      controls.target.add(delta);
+      document.querySelector<HTMLOutputElement>('#drive-status')!.value =
+        `Mode main · X ${holder.position.x.toFixed(3)} · Z ${holder.position.z.toFixed(3)}`;
+    };
+    for (const input of [yawInput, pitchInput])
+      input.oninput = () => {
+        document.querySelector<HTMLOutputElement>(`#${input.id}-value`)!.value = `${input.value}°`;
+      };
+    document.querySelector<HTMLButtonElement>('#look-reset')!.onclick = () => {
+      yawInput.value = pitchInput.value = '0';
+      for (const id of ['look-yaw', 'look-pitch'])
+        document.querySelector<HTMLOutputElement>(`#${id}-value`)!.value = '0°';
+    };
     helper = new THREE.SkeletonHelper(model);
     for (const material of Array.isArray(helper.material) ? helper.material : [helper.material]) {
       material.depthTest = false;
@@ -207,13 +344,14 @@ async function boot() {
     scene.add(helper);
     const markerGeometry = new THREE.SphereGeometry(0.015, 10, 8);
     for (const [joint, title, color] of [
+      ['Neck', 'LEHER', '#ffffff'],
       ['UpperArm', 'BAHU', '#ff94bd'],
       ['ForeArm', 'SIKU', '#c4a7ff'],
       ['Thigh', 'PANGGUL', '#ffca80'],
       ['Shin', 'LUTUT', '#80d8ff'],
       ['Foot', 'PERGELANGAN', '#d5f38a'],
     ])
-      for (const side of ['Left', 'Right']) {
+      for (const side of joint === 'Neck' ? [''] : ['Left', 'Right']) {
         const marker = new THREE.Mesh(
           markerGeometry,
           new THREE.MeshBasicMaterial({ color, depthTest: false }),
@@ -221,7 +359,7 @@ async function boot() {
         marker.renderOrder = 11;
         landmarks.add(marker);
         let label: HTMLSpanElement | undefined;
-        if (side === 'Left') {
+        if (side === 'Left' || side === '') {
           label = document.createElement('span');
           label.textContent = title;
           label.style.color = color;
@@ -240,7 +378,7 @@ async function boot() {
     landmarks.add(forward);
     document
       .querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
-        '#animation, #play, #restart-animation, #speed, #phase, #skeleton, #movement-walk',
+        '#animation, #play, #restart-animation, #speed, #phase, #skeleton, #movement-walk, #drive-toggle, #drive-reset, #look-yaw, #look-pitch, #look-reset',
       )
       .forEach((el) => {
         el.disabled = false;
@@ -262,6 +400,41 @@ async function boot() {
       syncMovement();
     };
     syncMovement();
+    const driveButton = document.querySelector<HTMLButtonElement>('#drive-toggle')!;
+    driveButton.onclick = () => {
+      driving = !driving;
+      release();
+      pad.hidden = !driving;
+      driveButton.setAttribute('aria-pressed', String(driving));
+      driveButton.textContent = driving ? 'Selesai main' : 'Mainkan karakter';
+      controls.autoRotate = false;
+      document.querySelector<HTMLInputElement>('#rotate')!.checked = false;
+      for (const id of [
+        'animation',
+        'play',
+        'restart-animation',
+        'speed',
+        'phase',
+        'movement-walk',
+      ])
+        (document.getElementById(id) as HTMLInputElement).disabled = driving;
+      selectMovement('bind');
+      document.querySelector<HTMLOutputElement>('#drive-status')!.value = driving
+        ? 'Mode main · X 0.000 · Z 0.000'
+        : `Mode inspeksi · X ${holder.position.x.toFixed(3)} · Z ${holder.position.z.toFixed(3)}`;
+      if (driving) renderer.domElement.focus();
+    };
+    renderer.domElement.tabIndex = 0;
+    document.querySelector<HTMLButtonElement>('#drive-reset')!.onclick = () => {
+      release();
+      camera.position.sub(holder.position);
+      target.sub(holder.position);
+      controls.target.sub(holder.position);
+      holder.position.set(0, 0, 0);
+      holder.quaternion.identity();
+      document.querySelector<HTMLOutputElement>('#drive-status')!.value =
+        `${driving ? 'Mode main' : 'Mode inspeksi'} · X 0.000 · Z 0.000`;
+    };
     movementButton.onclick = () => selectMovement(playback!.mode === 'walk' ? 'bind' : 'walk');
     playButton.onclick = () => {
       if (playback!.mode === 'bind') {
@@ -354,7 +527,7 @@ async function boot() {
       info.append(row);
     }
     note.textContent =
-      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V5 menyesuaikan bahu dan siku terhadap kontur lengan asli, dengan weight tekukan siku yang diperbarui. Pemisahan weight lengan/paha tetap dipertahankan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
+      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V6 menurunkan siku 4 cm dari v5 dan merampingkan radius lengan bawah hingga 12% pada aset turunan. Leher dan kepala bisa diuji menoleh; mode main memakai clip Walking yang sama. Pemisahan weight lengan/paha tetap dipertahankan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
     document.querySelector<HTMLInputElement>('#wireframe')!.onchange = (e) => {
       for (const material of materials) material.wireframe = (e.target as HTMLInputElement).checked;
     };

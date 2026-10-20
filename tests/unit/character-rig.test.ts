@@ -4,6 +4,9 @@ import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { armRegions101172 } from '../../src/character/skinRegions101172';
+import { CharacterLook } from '../../src/character/CharacterLook';
+import { CharacterTestDrive } from '../../src/character/CharacterTestDrive';
+import { taperForearms101172 } from '../../src/character/shape101172';
 import { CharacterPlayback } from '../../src/character/CharacterPlayback';
 import { AvatarModel } from '../../src/game/Avatar';
 import {
@@ -81,14 +84,31 @@ describe('portable 101172 rig and Walking asset', () => {
     );
   });
 
-  it('preserves original bind geometry and front direction instead of rotating the feet backward', () => {
-    const source = sourceGeometry.getAttribute('position');
+  it('only tapers the requested derivative forearms while preserving source proportions elsewhere', () => {
+    const expected = sourceGeometry.clone();
+    taperForearms101172(expected, measured);
+    const source = expected.getAttribute('position');
+    const original = sourceGeometry.getAttribute('position');
     const target = mesh.geometry.getAttribute('position');
     expect(target.count).toBe(source.count);
     let maxError = 0;
     for (let i = 0; i < source.count * 3; i++)
       maxError = Math.max(maxError, Math.abs(source.array[i] - target.array[i]));
     expect(maxError).toBeLessThan(1e-6);
+    let changed = 0;
+    for (let i = 0; i < source.count; i++) {
+      const d = new THREE.Vector3()
+        .fromBufferAttribute(original, i)
+        .distanceTo(new THREE.Vector3().fromBufferAttribute(target, i));
+      if (d > 1e-6) {
+        changed++;
+        expect(original.getY(i)).toBeGreaterThan(0.91);
+        expect(original.getY(i)).toBeLessThan(measured.arms.left.elbow[1]);
+        expect(Math.abs(original.getX(i))).toBeGreaterThan(original.getY(i) < 1.1 ? 0.16 : 0.1);
+      }
+      expect(d).toBeLessThan(0.008);
+    }
+    expect(changed).toBeGreaterThan(1000);
     for (const side of ['Left', 'Right']) {
       const ankle = gltf.scene
         .getObjectByName(side + 'Foot')!
@@ -135,10 +155,6 @@ describe('portable 101172 rig and Walking asset', () => {
       expect(
         new THREE.Vector3(...arm.tip).distanceTo(new THREE.Vector3(...arm.wrist)),
       ).toBeLessThan(0.12);
-      expect(Math.abs(arm.tip[0])).toBeGreaterThan(0.2);
-      expect(
-        new THREE.Vector3(...arm.tip).distanceTo(new THREE.Vector3(...arm.wrist)),
-      ).toBeLessThan(0.12);
       expect(arm.shoulder[1]).toBeGreaterThan(1.53);
       expect(arm.shoulder[1]).toBeLessThan(1.59);
       expect(arm.elbow[1]).toBeGreaterThan(1.3);
@@ -146,7 +162,8 @@ describe('portable 101172 rig and Walking asset', () => {
       const waist = arm.profile
         .filter((s) => s.y >= 1.25 && s.y <= 1.42)
         .reduce((a, b) => (a.width * a.depth < b.width * b.depth ? a : b));
-      expect(arm.elbow).toEqual([waist.x, waist.y, waist.z]);
+      expect(arm.elbowContour).toEqual([waist.x, waist.y, waist.z]);
+      expect(arm.elbow[1]).toBeCloseTo(waist.y - 0.04, 5);
       for (const [name, point] of [
         ['UpperArm', arm.shoulder],
         ['ForeArm', arm.elbow],
@@ -180,6 +197,57 @@ describe('portable 101172 rig and Walking asset', () => {
       checked++;
     }
     expect(checked).toBeGreaterThan(100);
+  });
+
+  it('turns Neck and Head additively without accumulating rotations or moving the torso', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.setMode('bind');
+    player.playing = false;
+    player.update(1);
+    const look = new CharacterLook(gltf.scene);
+    const neck = gltf.scene.getObjectByName('Neck')!,
+      head = gltf.scene.getObjectByName('Head')!;
+    const chest = gltf.scene.getObjectByName('Chest')!.quaternion.clone();
+    const rest = neck.quaternion.clone();
+    look.apply(0.8, 0.2);
+    const once = neck.quaternion.clone();
+    for (let i = 0; i < 100; i++) look.apply(0.8, 0.2);
+    expect(neck.quaternion.angleTo(once)).toBeLessThan(1e-6);
+    expect(neck.quaternion.angleTo(rest)).toBeGreaterThan(0.4);
+    expect(head.quaternion.angleTo(new THREE.Quaternion())).toBeGreaterThan(0.2);
+    expect(gltf.scene.getObjectByName('Chest')!.quaternion.angleTo(chest)).toBeLessThan(1e-6);
+    look.clear();
+    expect(neck.quaternion.angleTo(rest)).toBeLessThan(1e-6);
+    player.seek(0.3);
+    const animated = neck.quaternion.clone();
+    look.apply(99, 99);
+    look.clear();
+    expect(neck.quaternion.angleTo(animated)).toBeLessThan(1e-6);
+    player.dispose();
+  });
+
+  it('drives the portable clip at travelled speed with camera-relative motion and arena limits', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    const body = new THREE.Group();
+    body.add(gltf.scene);
+    const drive = new CharacterTestDrive(body, player, WALK.stride / WALK.duration);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(0, 1, 5);
+    camera.lookAt(0, 1, 0);
+    camera.updateMatrixWorld();
+    const delta = drive.update(0.1, 0, 1, camera);
+    expect(delta.z).toBeCloseTo(-drive.walkSpeed * 0.1, 5);
+    expect(player.mode).toBe('walk');
+    expect(drive.update(0.1, 1, 1, camera).length()).toBeCloseTo(delta.length(), 5);
+    for (let i = 0; i < 200; i++) drive.update(0.1, 1, 1, camera);
+    expect(Math.abs(body.position.x)).toBeLessThanOrEqual(5);
+    expect(Math.abs(body.position.z)).toBeLessThanOrEqual(5);
+    drive.update(0.1, 0, 0, camera);
+    expect(player.mode).toBe('bind');
+    const before = body.position.clone();
+    drive.update(0, 1, 1, camera);
+    expect(body.position.distanceTo(before)).toBe(0);
+    player.dispose();
   });
 
   it('has finite normalized four-slot skin weights and valid bone indices at every vertex', () => {

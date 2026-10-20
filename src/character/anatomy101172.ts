@@ -19,6 +19,7 @@ export interface LegAnatomy {
 export interface ArmAnatomy {
   shoulder: Point3;
   elbow: Point3;
+  elbowContour: Point3;
   wrist: Point3;
   tip: Point3;
   profile: Section[];
@@ -253,7 +254,12 @@ export function measure101172(geometry: THREE.BufferGeometry): CharacterAnatomy 
       tip = armSection(0.88);
     return {
       shoulder: [at(xLine, bestY), bestY, at(zLine, bestY)],
-      elbow: [elbowSection.x, elbowSection.y, elbowSection.z],
+      // Explicit user-directed lowering from v5, not a new measurement claim.
+      elbowContour: [elbowSection.x, elbowSection.y, elbowSection.z],
+      elbow: (() => {
+        const s = armSection(elbowSection.y - 0.04);
+        return [s.x, s.y, s.z] as Point3;
+      })(),
       wrist: [wrist.x, wrist.y, wrist.z],
       tip: [tip.x, tip.y, tip.z],
       profile,

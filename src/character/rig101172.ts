@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { taperForearms101172 } from './shape101172';
 import { armRegions101172 } from './skinRegions101172';
 import { measure101172, type CharacterAnatomy } from './anatomy101172';
 
@@ -16,7 +17,7 @@ export const WALK = {
   contactAdvance: 0.25,
   clearance: 0.12,
 } as const;
-export const RIG_REVISION = 5;
+export const RIG_REVISION = 6;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;
@@ -92,8 +93,8 @@ export const JOINT_NAMES = [
 ];
 const smooth = (a: number, b: number, x: number) => THREE.MathUtils.smoothstep(x, a, b);
 
-/** A true skinned mesh with four normalized influences per vertex. UVs, normals,
- * indices, texture and material survive; the original source is never mutated.
+/** A true skinned mesh with four normalized influences per vertex. UVs,
+ * indices, texture and material survive; derivative taper normals are recomputed; the original source is never mutated.
  * Anatomical masks prevent adjacent arms/torso or opposite legs sharing weights.
  */
 export function rig101172(source: THREE.Object3D): RiggedCharacter {
@@ -115,6 +116,7 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
   // v1/v2 flipped the source by PI on an unverified "front" assumption.
   // The unmodified source's knee bow AND forefoot establish +Z as forward.
   const anatomy = measure101172(geometry);
+  taperForearms101172(geometry, anatomy);
   const joints = createJoints(anatomy);
   const scene = new THREE.Group();
   scene.name = 'HEA_101172';
@@ -130,6 +132,8 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
       walkStance: WALK.stance,
       source: '101172.glb',
       rig: 'HEA humanoid 28',
+      shape: { forearmRadialReduction: 0.12, elbowLowering: 0.04 },
+      look: { bones: ['Neck', 'Head'], yawDegrees: 70, pitchDegrees: 30 },
       clip: 'Walking',
       anatomy,
     },
