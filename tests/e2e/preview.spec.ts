@@ -29,6 +29,7 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   // The explicit index URL must resolve the same model/site root as /preview/.
   await page.goto('preview/index.html?review=walking');
   await expect(page.locator('#load-status')).toBeHidden({ timeout: 30_000 });
+  await page.locator('#movement-walk').click();
   await page.getByRole('button', { name: 'Jeda animasi', exact: true }).click();
   const phase = page.locator('#phase');
   const paused = await phase.inputValue();
@@ -50,14 +51,13 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   await page.locator('#animation').selectOption('bind');
   await expect(page.locator('#animation')).toHaveValue('bind');
   await page.locator('#animation').selectOption('walk');
-  await page.getByRole('button', { name: 'Putar animasi', exact: true }).click();
-  await expect.poll(async () => phase.inputValue()).not.toBe('250');
+  await expect.poll(async () => phase.inputValue()).not.toBe('0');
   await page.getByRole('button', { name: 'Jeda animasi', exact: true }).click();
   await page.getByRole('button', { name: 'Ulangi siklus', exact: true }).click();
   await expect(phase).toHaveValue('0');
   await expect(page.getByRole('link', { name: 'Unduh GLB rig + Walking' })).toHaveAttribute(
     'href',
-    /models\/101172-rigged\.glb\?revision=3$/,
+    /models\/101172-rigged\.glb\?revision=4$/,
   );
 });
 
@@ -66,4 +66,24 @@ test('missing rigged asset reports a useful loading error', async ({ page }) => 
   await page.goto('preview/');
   await expect(page.locator('#load-status')).toContainText('Model gagal dimuat');
   await expect(page.locator('#play')).toBeDisabled();
+});
+
+test('movement choice toggles Walking back to standing instead of freezing a step', async ({
+  page,
+}) => {
+  await page.goto('preview/');
+  await expect(page.locator('#load-status')).toBeHidden({ timeout: 30_000 });
+  const walk = page.getByRole('button', { name: 'Jalan', exact: true });
+  await expect(walk).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#animation')).toHaveValue('bind');
+  await walk.click();
+  await expect(walk).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('#animation')).toHaveValue('walk');
+  await expect.poll(() => page.locator('#phase').inputValue()).not.toBe('0');
+  await walk.click();
+  await expect(walk).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.locator('#animation')).toHaveValue('bind');
+  const phase = await page.locator('#phase').inputValue();
+  await page.waitForTimeout(400);
+  expect(await page.locator('#phase').inputValue()).toBe(phase);
 });

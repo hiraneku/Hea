@@ -76,9 +76,29 @@ masih perlu dinilai visual; belum ada idle/run/air/cast atau IK runtime untuk le
 PNG/metrik berada di `.cache/character-review/`, tidak di Git. Untuk membandingkan
 sumber: `npm run character:review -- public/models/101172.glb` (bind pose).
 Panah di lantai menunjukkan +Z. Ini inspeksi manusia, **bukan tes bahwa motion natural**.
-Preview memakai revisi URL v3 untuk menghindari cache lama. Overlay skeleton
+Preview memakai revisi URL v4 untuk menghindari cache lama. Overlay skeleton
 menambahkan titik panggul/lutut/pergelangan dengan label dan panah arah depan;
 semuanya hanya alat inspeksi, bukan bagian yang menggerakkan karakter.
+
+## Koreksi skin v4 dan pilihan gerakan
+
+Mask X/Y v3 mengira sisi luar paha yang dekat tangan merupakan bagian lengan.
+Akibatnya ayunan tangan menarik beberapa vertex paha menjadi tonjolan tajam.
+`skinRegions101172.ts` kini memisahkan komponen mesh di bawah bahu (Y < 1,4 m),
+menyatukan posisi berimpit untuk seam UV/normal, lalu membedakan komponen lengan
+menggantung dari tubuh/tungkai yang tersambung ke kaki. Di atas batas itu tetap
+ada blend bahu. Geometry asli tidak diubah; koreksi dibake pada skin weights GLB.
+
+Regresi memeriksa nol weight lengan pada daerah paha tengah serta batas stretch
+edge segitiga paha pada 16 fase Walking. Render QA diperiksa dari depan, samping,
+dan tiga perempat, bukan hanya mengandalkan tes koordinat tulang.
+
+Preview sekarang mulai **diam (bind pose)**. Tombol **Jalan** mengaktifkan Walking;
+klik lagi mengembalikan weight animasi ke nol dengan transisi halus. Ini berbeda
+dari **Jeda animasi**, yang hanya membekukan fase aktif. Dropdown pose tetap sinkron
+dengan tombol; scrub mengaktifkan Walking untuk inspeksi fase. Hanya Walking
+tersedia saat ini, tidak ada clip idle/run/jump palsu. Pilihan gerakan lain dapat
+ditambahkan saat clip-nya selesai. Perubahan UI tidak mengganti pemain default.
 
 ## Pemakaian dalam gameplay
 

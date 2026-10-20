@@ -7,6 +7,17 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — paha tertarik oleh tangan saat Walking (v4)
+
+- Pisahkan area lengan di bawah bahu berdasarkan konektivitas segitiga dengan
+  welding posisi untuk seam UV/normal. Mask koordinat v3 salah memberi weight
+  tangan pada sisi luar paha; vertex tersebut kini mengikuti tungkai/pelvis.
+- Tambahkan regresi weight lengan pada paha dan stretch sisi segitiga sepanjang
+  16 fase, serta perbarui GLB gameplay dan cache revision preview menjadi v4.
+- Preview mulai diam. Tombol gerakan Jalan dapat ditoggle: klik untuk mencoba,
+  klik lagi untuk blend kembali ke bind pose, bukan membekukan langkah di udara.
+  Clip lain belum tersedia; pilihan berikutnya bisa ditambahkan setelah dibuat.
+
 ### Diperbaiki — Walking v3 berdasarkan geometri asli 101172
 
 - Ukur kontur mesh asli untuk pangkal kaki di pelvis, lutut dan pergelangan;

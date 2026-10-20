@@ -318,3 +318,14 @@ select:disabled {
   border-radius: 2px;
   white-space: nowrap;
 }
+
+#movement-options button[aria-pressed='true'] {
+  background: #d5f38a;
+  color: #182321;
+  border-color: #d5f38a;
+}
+.movement-help {
+  font-size: 12px;
+  line-height: 1.65;
+  color: #a6b8ac;
+}

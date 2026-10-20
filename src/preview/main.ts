@@ -33,6 +33,9 @@ app.innerHTML = `
       <span class="eyebrow">INSPEKSI MODEL</span><h2>Character preview</h2><p class="intro">Periksa bentuk dan material sebelum integrasi. Halaman ini tidak mengubah karakter dalam game.</p>
       <dl id="model-info"><div><dt>Status</dt><dd>Memuat…</dd></div></dl>
       <h3>SUDUT PANDANG</h3><div class="view-buttons"><button data-view="front">Depan</button><button data-view="side">Samping</button><button data-view="back">Belakang</button><button id="reset">Reset kamera</button></div>
+      <h3>COBA GERAKAN</h3>
+      <div class="view-buttons" id="movement-options" aria-label="Pilihan gerakan"><button id="movement-walk" aria-pressed="false" disabled>Jalan</button></div>
+      <p class="movement-help">Klik Jalan untuk mencoba. Klik lagi untuk diam. Gerakan lain akan ditambahkan setelah clip-nya tersedia.</p>
       <h3>ANIMASI / GAMEPLAY ASSET</h3>
       <label><span>Pose / animasi</span><select id="animation" disabled><option value="walk">Berjalan</option><option value="bind">Bind pose (A-pose)</option></select></label>
       <div class="view-buttons"><button id="play" disabled>Jeda animasi</button><button id="restart-animation" disabled>Ulangi siklus</button></div>
@@ -191,6 +194,9 @@ async function boot() {
       normalized.z / 2;
     view();
     playback = new CharacterPlayback(model, gltf.animations);
+    playback.playing = false;
+    playback.setMode('bind');
+    playback.update(1);
     helper = new THREE.SkeletonHelper(model);
     for (const material of Array.isArray(helper.material) ? helper.material : [helper.material]) {
       material.depthTest = false;
@@ -232,27 +238,50 @@ async function boot() {
     landmarks.add(forward);
     document
       .querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
-        '#animation, #play, #restart-animation, #speed, #phase, #skeleton',
+        '#animation, #play, #restart-animation, #speed, #phase, #skeleton, #movement-walk',
       )
       .forEach((el) => {
         el.disabled = false;
       });
     const playButton = document.querySelector<HTMLButtonElement>('#play')!;
+    const movementButton = document.querySelector<HTMLButtonElement>('#movement-walk')!;
+    const animationSelect = document.querySelector<HTMLSelectElement>('#animation')!;
+    const syncMovement = () => {
+      const walking = playback!.mode === 'walk';
+      movementButton.setAttribute('aria-pressed', String(walking));
+      animationSelect.value = walking ? 'walk' : 'bind';
+      playButton.textContent = walking && playback!.playing ? 'Jeda animasi' : 'Putar animasi';
+      playButton.setAttribute('aria-pressed', String(!playback!.playing));
+    };
+    const selectMovement = (mode: 'walk' | 'bind') => {
+      playback!.setMode(mode);
+      playback!.playing = mode === 'walk';
+      if (mode === 'walk') playback!.seek(0);
+      syncMovement();
+    };
+    syncMovement();
+    movementButton.onclick = () => selectMovement(playback!.mode === 'walk' ? 'bind' : 'walk');
     playButton.onclick = () => {
+      if (playback!.mode === 'bind') {
+        selectMovement('walk');
+        return;
+      }
       playback!.playing = !playback!.playing;
       playButton.textContent = playback!.playing ? 'Jeda animasi' : 'Putar animasi';
       playButton.setAttribute('aria-pressed', String(!playback!.playing));
     };
     document.querySelector<HTMLButtonElement>('#restart-animation')!.onclick = () =>
       playback!.seek(0);
-    document.querySelector<HTMLSelectElement>('#animation')!.onchange = (event) =>
-      playback!.setMode((event.target as HTMLSelectElement).value as 'walk' | 'bind');
+    animationSelect.onchange = () => selectMovement(animationSelect.value as 'walk' | 'bind');
     document.querySelector<HTMLInputElement>('#speed')!.oninput = (event) => {
       playback!.speed = Number((event.target as HTMLInputElement).value);
       document.querySelector<HTMLOutputElement>('#speed-value')!.value =
         `${playback!.speed.toFixed(2)}×`;
     };
     phaseInput.oninput = () => {
+      playback!.setMode('walk');
+      animationSelect.value = 'walk';
+      movementButton.setAttribute('aria-pressed', 'true');
       playback!.playing = false;
       playButton.textContent = 'Putar animasi';
       playback!.seek(Number(phaseInput.value) / 1000);
@@ -323,7 +352,7 @@ async function boot() {
       info.append(row);
     }
     note.textContent =
-      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V3 mengukur kontur mesh asli untuk panggul, lutut dan pergelangan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
+      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V4 memisahkan weight lengan dan paha menurut konektivitas mesh, serta mengukur kontur mesh asli untuk panggul, lutut dan pergelangan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
     document.querySelector<HTMLInputElement>('#wireframe')!.onchange = (e) => {
       for (const material of materials) material.wireframe = (e.target as HTMLInputElement).checked;
     };

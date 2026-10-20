@@ -144,6 +144,51 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(maxError).toBeLessThan(1e-6);
   });
 
+  it('keeps the thigh surface from being dragged into spikes by the swinging hands', () => {
+    const positions = mesh.geometry.getAttribute('position');
+    const skinIndex = mesh.geometry.getAttribute('skinIndex');
+    const skinWeight = mesh.geometry.getAttribute('skinWeight');
+    let checked = 0;
+    // At these heights the leg is inside |X|=.16 and the hanging hands outside it.
+    // This is intentionally independent of the authoring connectivity classifier.
+    for (let i = 0; i < positions.count; i++) {
+      const y = positions.getY(i);
+      if (y < 0.8 || y > 1.04 || Math.abs(positions.getX(i)) > 0.16) continue;
+      checked++;
+      for (let slot = 0; slot < 4; slot++) {
+        const name = mesh.skeleton.bones[skinIndex.array[i * 4 + slot]].name;
+        if (/Clavicle|Arm|Hand/.test(name)) expect(skinWeight.array[i * 4 + slot]).toBe(0);
+      }
+    }
+    expect(checked).toBeGreaterThan(1000);
+    const indices = mesh.geometry.index!;
+    const edges: [number, number, number][] = [];
+    const a = new THREE.Vector3(),
+      b = new THREE.Vector3();
+    for (let i = 0; i < indices.count; i += 3)
+      for (let j = 0; j < 3; j++) {
+        const u = indices.getX(i + j),
+          v = indices.getX(i + ((j + 1) % 3));
+        if ([u, v].some((n) => positions.getY(n) < 0.8 || positions.getY(n) > 1.12)) continue;
+        a.fromBufferAttribute(positions, u);
+        b.fromBufferAttribute(positions, v);
+        const length = a.distanceTo(b);
+        if (length > 0.001) edges.push([u, v, length]);
+      }
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    let maximumStretch = 0;
+    for (let frame = 0; frame < 16; frame++) {
+      player.seek(frame / 16);
+      for (const [u, v, length] of edges) {
+        mesh.applyBoneTransform(u, a.fromBufferAttribute(positions, u));
+        mesh.applyBoneTransform(v, b.fromBufferAttribute(positions, v));
+        maximumStretch = Math.max(maximumStretch, a.distanceTo(b) / length);
+      }
+    }
+    expect(maximumStretch).toBeLessThan(3);
+    player.dispose();
+  });
+
   it('does not let shin deformation collapse or curl the rounded soles', () => {
     const positions = mesh.geometry.getAttribute('position');
     const indices = mesh.geometry.getAttribute('skinIndex');

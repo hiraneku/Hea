@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { armRegions101172 } from './skinRegions101172';
 import { measure101172, type CharacterAnatomy } from './anatomy101172';
 
 /** Authored landmarks for 101172, in metres after normalizing to a 2 m stature.
@@ -15,7 +16,7 @@ export const WALK = {
   contactAdvance: 0.25,
   clearance: 0.12,
 } as const;
-export const RIG_REVISION = 3;
+export const RIG_REVISION = 4;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;
@@ -160,6 +161,7 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
 
 function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: CharacterAnatomy) {
   const position = geometry.getAttribute('position');
+  const armRegions = armRegions101172(geometry);
   const indices = new Uint16Array(position.count * 4);
   const weights = new Float32Array(position.count * 4);
   // Skin a joint along the segment to its child, not its parent segment.
@@ -203,9 +205,9 @@ function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: Ch
     // Midway between the surface of the trunk and the arm centreline at each height.
     const armBorder = THREE.MathUtils.lerp(0.14, 0.095, smooth(1.0, 1.5, p.y));
     const armMask =
-      smooth(armBorder - 0.018, armBorder + 0.035, ax) *
-      (1 - smooth(1.5, 1.59, p.y)) *
-      smooth(0.76, 0.85, p.y);
+      p.y < 1.4
+        ? armRegions[vertex]
+        : smooth(armBorder - 0.018, armBorder + 0.035, ax) * (1 - smooth(1.5, 1.59, p.y));
     const seam = smooth(anatomy.crotch - 0.055, anatomy.crotch + 0.015, p.y);
     const seamSupport = 1 - seam * (1 - smooth(0.0, 0.055, ax));
     const legMask =
