@@ -19,7 +19,7 @@ export const WALK = {
   contactAdvance: 0.25,
   clearance: 0.12,
 } as const;
-export const RIG_REVISION = 8;
+export const RIG_REVISION = 9;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;

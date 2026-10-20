@@ -913,7 +913,7 @@ describe('portable 101172 rig and Walking asset', () => {
     }
     player.dispose();
   });
-  it('hovers with straight close-set legs and relaxed arms, then restores the captured stopped stance', () => {
+  it('hovers with straight neutral-spaced legs and relaxed arms, then restores the captured stopped stance', () => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
     player.rootMotionEnabled = true;
     player.setMode('walk', true);
@@ -936,9 +936,13 @@ describe('portable 101172 rig and Walking asset', () => {
         knee = point(side + 'Shin'),
         ankle = point(side + 'Foot');
       expect(knee.clone().sub(hip).angleTo(ankle.clone().sub(knee))).toBeLessThan(0.005);
-      expect(Math.abs(point(side + 'Hand').x - point(side + 'UpperArm').x)).toBeLessThan(0.065);
+      const armClearance = Math.abs(point(side + 'Hand').x - point(side + 'UpperArm').x);
+      expect(armClearance).toBeGreaterThan(0.08);
+      expect(armClearance).toBeLessThan(0.14);
     }
-    expect(point('LeftFoot').x - point('RightFoot').x).toBeLessThan(0.19);
+    const ankleSpacing = point('LeftFoot').x - point('RightFoot').x;
+    expect(ankleSpacing).toBeGreaterThan(0.24);
+    expect(ankleSpacing).toBeLessThan(0.28);
     const pos = mesh.geometry.getAttribute('position');
     const index = mesh.geometry.index!;
     let worst = 0,

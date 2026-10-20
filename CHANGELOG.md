@@ -7,6 +7,15 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diganti / diperbaiki — pose flight netral v9
+
+- Koreksi v8 yang terlalu rapat: ankle hover berjarak sekitar 25,5 cm,
+  di antara v8 (17 cm) dan bind model (44 cm); lutut tetap lurus.
+- Lengan menggantung sedikit menjauh dari tubuh, dengan siku rileks;
+  bukan menempel badan atau terbuka menjadi A-pose.
+- Skin v8, recovery stance, warna putih dan aset asli tetap dipertahankan.
+- Regresi kini membatasi jarak minimum sekaligus maksimum kaki/lengan.
+
 ### Diganti / diperbaiki — flight dan skin v8
 
 - Hover berkaki lurus dan lebih rapat, tangan rileks dekat badan; hapus ankle tuck.

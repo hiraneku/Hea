@@ -441,3 +441,12 @@ zona bahu. Ini menghilangkan diskontinuitas klasifikasi horizontal di armpit.
 Clavicle kini terbatas dekat shoulder. Sumber GLB dan bentuk selain taper forearm
 yang sudah disetujui tetap tidak diubah. Test mengukur edge stretch mesh saat
 hover, knee angle, lebar kaki, posisi tangan, dan recovery stance dari stopping.
+
+## V9 — jarak netral, bukan merapatkan sampai menempel
+
+Mengoreksi pose v8 yang ditolak karena terlalu rapat. Arah kaki diubah dari
+±0,035 menjadi ±0,08 terhadap sumbu vertikal: jarak ankle sekitar 25,5 cm,
+bukan 17 cm atau 44 cm bind. Knee chain tetap lurus. Arah upper arm ±0,22
+dan forearm ±0,16 memberi ruang rileks di samping tubuh, tanpa A-pose lebar.
+Test jarak minimum/maksimum mencegah regresi ke kedua ekstrem. Skin, entry/exit
+stance dan playback v8 tidak berubah.

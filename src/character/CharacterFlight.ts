@@ -318,15 +318,15 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
     if (air > 0)
       for (const side of sides) {
         const sign = side === 'Left' ? 1 : -1;
-        const legDirection = new THREE.Vector3(sign * 0.035, -1, -0.025);
+        const legDirection = new THREE.Vector3(sign * 0.08, -1, -0.025);
         aim(side + 'Thigh', side + 'Shin', legDirection.clone());
         aim(side + 'Shin', side + 'Foot', legDirection.clone());
         scene.updateMatrixWorld(true);
         const foot = bones.get(side + 'Foot')!;
         const flat = foot.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
         foot.quaternion.slerp(flat, air);
-        aim(side + 'UpperArm', side + 'ForeArm', new THREE.Vector3(sign * 0.1, -1, 0.02));
-        aim(side + 'ForeArm', side + 'Hand', new THREE.Vector3(sign * 0.045, -1, -0.06));
+        aim(side + 'UpperArm', side + 'ForeArm', new THREE.Vector3(sign * 0.22, -1, 0.045));
+        aim(side + 'ForeArm', side + 'Hand', new THREE.Vector3(sign * 0.16, -1, -0.035));
       }
     // Recover the captured standing pose, including pelvis and arm orientation.
     // Never snap from a walking stride back into that same mid-stride pose.
