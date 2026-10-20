@@ -13,8 +13,9 @@
 ## Konvensi dan rig
 
 Aset hasil dinormalisasi ke tinggi **2 m**, telapak di Y=0, arah depan **+Z**, up +Y.
-Sumber menghadap -Z dan memiliki pose kaki terbuka; konversi orientasi/ukuran
-sudah dibake pada geometry. Material, UV, indeks dan tekstur dipertahankan.
+Sumber sudah menghadap **+Z** dan memiliki pose kaki terbuka. V3 hanya membake
+normalisasi ukuran/posisi, tanpa rotasi 180° yang keliru pada v1/v2. Material, UV,
+indeks dan tekstur dipertahankan; tes membandingkan seluruh vertex bind pose dengan sumber.
 
 Skeleton **28 tulang**:
 
@@ -22,52 +23,62 @@ Skeleton **28 tulang**:
 - Kiri/kanan: Chest → Clavicle → UpperArm → ForeArm → Hand → HandEnd.
 - Kiri/kanan: Hips → Thigh → Shin → Foot → Toes → ToeEnd.
 
-Landmark pada `src/character/rig101172.ts` ditulis khusus untuk bentuk model ini,
-bukan auto-rigger generik. Empat slot influence per vertex dinormalisasi; falloff
-halus di sendi dan mask anatomis membatasi kebocoran weight antara lengan–torso
-serta kaki kiri–kanan. Tangan model berupa bentuk membulat tanpa jari terpisah,
-jadi belum ada rig jari. Tulang terminal dipakai sebagai ujung rantai, bukan semua
-harus memiliki weight. Jumlah geometri masih **188.524 segitiga / 116.724 vertex**;
-ini belum aset low-poly yang dioptimalkan untuk HP.
+Landmark kaki dihitung oleh `src/character/anatomy101172.ts`, bukan tebakan
+proporsi manusia generik. Penampang segitiga dirangkai menjadi kontur terhubung;
+kontur luar dipilih agar lapisan dalam mesh tidak menggeser pusat penampang.
+Percabangan kontur menentukan crotch; pusat pangkal kaki diambil di atasnya.
+Perubahan arah centerline tungkai menentukan lutut, dan perubahan lebar/kedalaman
+penampang menentukan pergelangan. Forefoot dan arah tekukan lutut memverifikasi +Z.
+Ini estimator khusus geometri model ini, bukan pengganti landmark artis atau
+jaminan anatomi untuk model lain. Offset soket/pelvis, batas pencarian dan fit
+centerline dapat diaudit di source; landmark beserta profil disimpan di metadata GLB.
 
-## Walking v2 — koreksi setelah review visual
+Pengukuran setelah normalisasi 2 m (dibulatkan; sisi kiri):
 
-- Loop **1,20 detik**, in-place, tanpa translasi Root di dunia.
-- Perpindahan satu siklus **0,82 m** pada skala aset (kecepatan acuan ±0,683 m/s).
-- Siklus kaki berlawanan 50%; stance 52% memberi transisi tumpuan singkat pada model bergaya stickman ini.
-- IK dua tulang dibake saat authoring untuk menjaga lutut menekuk ke depan.
-- Roll pergelangan dibuat kecil untuk telapak model yang membulat. Belum mengklaim
-  artikulasi tumit–jari manusia yang sempurna. Clearance swing 5,5 cm dan koreksi
-  permukaan telapak dibake terhadap lantai datar (target clearance kontak 2 mm).
-- Panggul memiliki bob/sway dan rotasi kecil; dada berputar berlawanan, kepala
-  dikompensasi, lengan berayun berlawanan dengan kaki, siku dan pergelangan melunak.
-- 120 interval sampling per siklus; track quaternion dengan interpolasi standar
-  dan endpoint yang menyambung. Tidak memerlukan solver khusus saat dimainkan.
+| Landmark             |    X (m) |   Y (m) |    Z (m) |
+| -------------------- | -------: | ------: | -------: |
+| Pusat pelvis         | −0,00008 | 1,10500 |  0,01863 |
+| Pangkal kaki / Thigh |  0,05500 | 1,07500 |  0,01905 |
+| Lutut / Shin         |  0,14277 | 0,61352 |  0,03974 |
+| Pergelangan / Foot   |  0,22131 | 0,19000 | −0,05196 |
+| Ball / Toes          |  0,25606 | 0,04500 |  0,04743 |
 
-Ini **revisi yang masih perlu direview**, bukan klaim motion capture atau rig final
-untuk semua pose. Perlu penilaian visual pengguna, tuning weight saat pose ekstrem,
-dan kelak animasi idle/run/air/cast. Belum ada foot IK runtime untuk tangga/lereng.
+Pangkal kaki kini di 53,8% tinggi model, lutut 30,7%, pergelangan 9,5%.
+Empat slot influence per vertex dinormalisasi; mask anatomis memisahkan lengan,
+torso, dan kedua kaki. Blend lutut dipusatkan di hasil pengukuran, bukan di paha.
+Weight pusat pelvis menjembatani sambungan kedua kaki; telapak dibatasi pada
+Foot/Toes. Tangan model membulat tanpa jari terpisah, jadi belum ada rig jari.
+Jumlah geometri tetap **188.524 segitiga / 116.724 vertex**; belum dioptimalkan untuk HP.
 
-### Mengapa v1 ditolak dan apa yang diperbaiki
+## Walking v3 — koreksi terhadap mesh asli
 
-V1 memiliki postur berjalan jongkok: panggul terlalu rendah, landmark lutut dan
-pergelangan terlalu ke luar/rendah, dan dua jalur kaki terlalu sempit. Gerak lolos
-pemeriksaan kontak/loop tetapi tetap tampak salah. Itu kegagalan validasi visual,
-bukan bukti bahwa model sumber rusak.
+- Loop **1,16 detik**, in-place, tanpa translasi Root di dunia.
+- Perpindahan satu siklus **0,94 m**, kecepatan acuan ±0,810 m/s pada skala aset.
+- Siklus kaki berlawanan 50%; stance 58%, dengan overlap tumpuan.
+- IK dua tulang dibake menggunakan panjang tungkai hasil ukur. Frame bidang
+  tekukan bind pose dicocokkan penuh dengan frame pose, bukan sekadar arah tulang.
+- Target angkatan ankle swing **12 cm** sebelum koreksi roll/kontak lantai.
+  Angka ini bukan jarak minimum seluruh telapak dari lantai. Telapak membulat;
+  roll dibatasi dan rotasi jari berlebihan tidak digunakan.
+- Panggul memiliki bob/sway; dada berputar berlawanan, kepala dikompensasi,
+  lengan berayun berlawanan dengan kaki dan dijauhkan sedikit dari paha.
+- 120 interval per siklus, track quaternion standar dengan endpoint menyambung.
+  Tidak memerlukan solver khusus saat dimainkan.
 
-V2 mengoreksi landmark berdasarkan penampang mesh, menaikkan panggul, memusatkan
-kontak kaki terhadap panggul, memperlebar jalur, serta mengurangi stride dan
-angkatannya. Weight telapak kini dibatasi pada Foot/Toes di bawah pergelangan agar
-shin tidak menarik dan mengerutkan telapak. Rotasi jari yang berlebihan dihapus;
-model ini tidak memiliki jari terpisah.
+V1 dan v2 ditolak secara visual. V2 masih memakai pivot terlalu rendah, arah
+sumber terbalik, dan angkatan kaki terlalu kecil. V3 mengganti dasar penentuan
+sendi, orientasi dan lintasan tersebut. **Ini masih perlu review pengguna**, bukan
+klaim motion capture atau rig final. Deformasi lipatan panggul pada pose ekstrem
+masih perlu dinilai visual; belum ada idle/run/air/cast atau IK runtime untuk lereng.
 
-Tes regresi baru mengukur sudut lutut kaki penopang, jarak jalur kaki, dan bentuk
-permukaan telapak (jarak antar-landmark mesh), bukan hanya koordinat tulang.
-`npm run character:review` merender 8 fase dari depan, samping dan tiga perempat
-pada aset ekspor. PNG dan metrik berada di `.cache/character-review/`, tidak di Git.
-Ini bahan inspeksi manusia, **bukan tes otomatis bahwa gerakannya sudah natural**.
-Preview menandai v2 sebagai masih direview; query revisi aset mencegah cache GLB v1
-tercampur dengan UI yang baru.
+`npm run character:review` memuat GLB ekspor secara independen, merender 8 fase
+(dari depan, samping, tiga perempat), dan mengukur sudut lutut/separasi/tinggi pelvis.
+PNG/metrik berada di `.cache/character-review/`, tidak di Git. Untuk membandingkan
+sumber: `npm run character:review -- public/models/101172.glb` (bind pose).
+Panah di lantai menunjukkan +Z. Ini inspeksi manusia, **bukan tes bahwa motion natural**.
+Preview memakai revisi URL v3 untuk menghindari cache lama. Overlay skeleton
+menambahkan titik panggul/lutut/pergelangan dengan label dan panah arah depan;
+semuanya hanya alat inspeksi, bukan bagian yang menggerakkan karakter.
 
 ## Pemakaian dalam gameplay
 
@@ -88,7 +99,7 @@ kembali ke bind pose. Ini placeholder sampai clip idle/air dibuat. Pengujian mem
 GLB yang sebenarnya melalui adapter tersebut, bukan hanya model palsu di viewer.
 
 **Penting:** kecepatan ground motor saat ini 8,5 m/s, jauh di atas jalan santai.
-Pada tinggi pemain 1,52 m, kecepatan acuan Walking menjadi ±0,519 m/s. Sebelum
+Pada tinggi pemain 1,52 m, kecepatan acuan Walking menjadi ±0,616 m/s. Sebelum
 mengaktifkan karakter ini di game, selaraskan motor locomotion atau tambahkan run
 beserta blending-nya. Clamp playback bukan solusi foot sliding pada kecepatan itu.
 Juga belum menghubungkan ragdoll blocky lama ke skeleton baru.
@@ -114,11 +125,13 @@ tersedia lewat dependensi npm, dengan server Vite sementara yang selalu ditutup.
 Tidak perlu Blender atau layanan rigging eksternal. Script hanya menulis GLB baru;
 tidak mengubah sumber atau mengganti karakter yang sedang aktif.
 
-Unit test memeriksa GLB ekspor: skeleton, indeks/weight seluruh vertex, kontinuitas
+Unit test mengukur ulang sumber, memeriksa identitas vertex/orientasi bind pose,
+landmark ekspor, hash sumber dalam metadata, skeleton, indeks/weight seluruh vertex, kontinuitas
 loop, batas rotasi per sampel, clearance dan kontak telapak sepanjang siklus,
 lintasan ankle pada stance, pause/scrub/blend, dan kompatibilitas `AvatarModel`.
 Tes kontak berlaku pada skala aset dan lantai datar, bukan jaminan semua terrain.
-Browser test memeriksa kontrol desktop/sentuh dan kegagalan pemuatan.
+Browser test memeriksa kontrol desktop/sentuh, label sendi, dan kegagalan pemuatan.
+SHA-256 sumber: `1dd246fbac2e45209b97648018093b643d49624e288f3c87b1b26317e058e9c8`.
 
 ## Asal model
 

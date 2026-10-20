@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CharacterPlayback } from '../character/CharacterPlayback';
+import type { CharacterAnatomy } from '../character/anatomy101172';
 import { RIGGED_CHARACTER, RIG_REVISION } from '../character/rig101172';
 import './preview.css';
 
@@ -23,10 +24,10 @@ app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>
   <main>
     <section class="stage" aria-label="Preview karakter 3D">
-      <div class="stage-heading"><span class="eyebrow">MODEL STUDY / 001</span><h1>KENALI<br><em>KARAKTERMU.</em></h1><p>101172-rigged.glb <span>·</span> Walk v2 · koreksi postur</p></div>
-      <div id="viewport"></div>
+      <div class="stage-heading"><span class="eyebrow">MODEL STUDY / 001</span><h1>KENALI<br><em>KARAKTERMU.</em></h1><p>101172-rigged.glb <span>·</span> Walk v${RIG_REVISION} · sendi terukur</p></div>
+      <div id="viewport"></div><div id="joint-labels" class="joint-labels" aria-hidden="true" hidden></div>
       <div id="load-status" role="status">Memuat model…</div>
-      <div class="stage-footer"><span><i></i> WALK V2 · IN-PLACE · MASIH DIREVIEW</span><span>Y ↑</span></div>
+      <div class="stage-footer"><span><i></i> WALK V${RIG_REVISION} · IN-PLACE · SENDI DARI MESH</span><span>Y ↑</span></div>
     </section>
     <aside>
       <span class="eyebrow">INSPEKSI MODEL</span><h2>Character preview</h2><p class="intro">Periksa bentuk dan material sebelum integrasi. Halaman ini tidak mengubah karakter dalam game.</p>
@@ -37,7 +38,7 @@ app.innerHTML = `
       <div class="view-buttons"><button id="play" disabled>Jeda animasi</button><button id="restart-animation" disabled>Ulangi siklus</button></div>
       <label><span>Kecepatan</span><output id="speed-value">1.00×</output></label><input id="speed" aria-label="Kecepatan animasi" type="range" min="0.25" max="1.5" step="0.05" value="1" disabled />
       <label><span>Siklus langkah</span><output id="phase-value">0%</output></label><input id="phase" aria-label="Posisi siklus langkah" type="range" min="0" max="1000" step="1" value="0" disabled />
-      <label><span>Tampilkan skeleton</span><input id="skeleton" type="checkbox" disabled /></label>
+      <label><span>Skeleton + titik sendi</span><input id="skeleton" type="checkbox" disabled /></label>
       <a class="download" href="${modelURL.href}" download="101172-rigged.glb">↓ Unduh GLB rig + Walking</a>
       <h3>TAMPILAN</h3><label><span>Putar otomatis</span><input id="rotate" type="checkbox" /></label><label><span>Wireframe</span><input id="wireframe" type="checkbox" /></label><label><span>Lantai & grid</span><input id="grid" type="checkbox" checked /></label>
       <label class="background"><span>Latar</span><select id="background"><option value="#182321">Gelap</option><option value="#d8dfdc">Terang</option><option value="#69736f">Abu-abu</option></select></label>
@@ -111,6 +112,12 @@ async function boot() {
   view();
   let playback: CharacterPlayback | undefined;
   let helper: THREE.SkeletonHelper | undefined;
+  const landmarks = new THREE.Group();
+  landmarks.visible = false;
+  scene.add(landmarks);
+  const labels = document.querySelector<HTMLDivElement>('#joint-labels')!;
+  const annotations: { bone: THREE.Object3D; marker: THREE.Mesh; label?: HTMLSpanElement }[] = [];
+  const projected = new THREE.Vector3();
   let previousTime = performance.now();
   const phaseInput = document.querySelector<HTMLInputElement>('#phase')!;
   renderer.setAnimationLoop(() => {
@@ -123,8 +130,18 @@ async function boot() {
       document.querySelector<HTMLOutputElement>('#phase-value')!.value =
         `${Math.round(playback.phase * 100)}%`;
     }
-    helper?.updateMatrixWorld(true);
     controls.update();
+    helper?.updateMatrixWorld(true);
+    if (landmarks.visible)
+      for (const entry of annotations) {
+        entry.bone.getWorldPosition(entry.marker.position);
+        if (entry.label) {
+          projected.copy(entry.marker.position).project(camera);
+          entry.label.hidden = projected.z > 1 || projected.z < -1;
+          entry.label.style.left = `${(projected.x * 0.5 + 0.5) * viewport.clientWidth + 9}px`;
+          entry.label.style.top = `${(-projected.y * 0.5 + 0.5) * viewport.clientHeight - 10}px`;
+        }
+      }
     renderer.render(scene, camera);
   });
   document.querySelector<HTMLInputElement>('#rotate')!.onchange = (e) => {
@@ -150,6 +167,9 @@ async function boot() {
         : 'Memuat model…';
     });
     const model = gltf.scene;
+    const metadata = model.getObjectByName('HEA_101172')?.userData.heaCharacter;
+    if (metadata?.version !== RIG_REVISION) throw new Error('Wrong cached character revision.');
+    const anatomy = metadata.anatomy as CharacterAnatomy;
     const bounds = new THREE.Box3().setFromObject(model);
     const size = bounds.getSize(new THREE.Vector3());
     const center = bounds.getCenter(new THREE.Vector3());
@@ -179,6 +199,37 @@ async function boot() {
     helper.renderOrder = 10;
     helper.visible = false;
     scene.add(helper);
+    const markerGeometry = new THREE.SphereGeometry(0.015, 10, 8);
+    for (const [joint, title, color] of [
+      ['Thigh', 'PANGGUL', '#ffca80'],
+      ['Shin', 'LUTUT', '#80d8ff'],
+      ['Foot', 'PERGELANGAN', '#d5f38a'],
+    ])
+      for (const side of ['Left', 'Right']) {
+        const marker = new THREE.Mesh(
+          markerGeometry,
+          new THREE.MeshBasicMaterial({ color, depthTest: false }),
+        );
+        marker.renderOrder = 11;
+        landmarks.add(marker);
+        let label: HTMLSpanElement | undefined;
+        if (side === 'Left') {
+          label = document.createElement('span');
+          label.textContent = title;
+          label.style.color = color;
+          labels.append(label);
+        }
+        annotations.push({ bone: model.getObjectByName(side + joint)!, marker, label });
+      }
+    const forward = new THREE.ArrowHelper(
+      new THREE.Vector3(0, 0, 1),
+      new THREE.Vector3(0.42, 0.015, -0.15),
+      0.65,
+      '#d5f38a',
+      0.08,
+      0.05,
+    );
+    landmarks.add(forward);
     document
       .querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
         '#animation, #play, #restart-animation, #speed, #phase, #skeleton',
@@ -208,6 +259,8 @@ async function boot() {
     };
     document.querySelector<HTMLInputElement>('#skeleton')!.onchange = (event) => {
       helper!.visible = (event.target as HTMLInputElement).checked;
+      landmarks.visible = helper!.visible;
+      labels.hidden = !helper!.visible;
     };
     // Read-only inspection hook, dev only; production exposes no editing harness.
     if (import.meta.env.DEV)
@@ -249,6 +302,9 @@ async function boot() {
         'Revisi rig',
         `v${model.getObjectByName('HEA_101172')?.userData.heaCharacter.version ?? '?'}`,
       ],
+      ['Pangkal kaki (tinggi)', `${((anatomy.left.hip[1] / 2) * 100).toFixed(1)}% H`],
+      ['Lutut (tinggi)', `${((anatomy.left.knee[1] / 2) * 100).toFixed(1)}% H`],
+      ['Arah kaki / langkah', '+Z / +Z'],
       ['Mesh', String(meshes)],
       ['Segitiga', Math.round(triangles).toLocaleString('id-ID')],
       ['Rig / tulang', bones ? `${bones} tulang · ${skinned} skinned mesh` : 'Tidak ada'],
@@ -267,7 +323,7 @@ async function boot() {
       info.append(row);
     }
     note.textContent =
-      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. Revisi v2 mengoreksi postur jongkok dan jalur kaki v1; belum dianggap final. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
+      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V3 mengukur kontur mesh asli untuk panggul, lutut dan pergelangan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
     document.querySelector<HTMLInputElement>('#wireframe')!.onchange = (e) => {
       for (const material of materials) material.wireframe = (e.target as HTMLInputElement).checked;
     };

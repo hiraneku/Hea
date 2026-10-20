@@ -1,20 +1,21 @@
 import * as THREE from 'three';
+import { measure101172, type CharacterAnatomy } from './anatomy101172';
 
 /** Authored landmarks for 101172, in metres after normalizing to a 2 m stature.
- * The source is a single mesh in a splayed A-pose; its feet point toward -Z.
+ * The source is a single mesh in a splayed A-pose; its knee/forefoot point toward +Z (measured, not guessed).
  * This asset is authored facing +Z, with the floor at Y=0 and no root translation.
  * Do not apply these weights/landmarks to an arbitrary humanoid.
  */
 export const WALK = {
-  duration: 1.2,
-  stride: 0.82,
+  duration: 1.16,
+  stride: 0.94,
   height: 2,
   samples: 120,
-  stance: 0.52,
+  stance: 0.58,
   contactAdvance: 0.25,
-  clearance: 0.055,
+  clearance: 0.12,
 } as const;
-export const RIG_REVISION = 2;
+export const RIG_REVISION = 3;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;
@@ -28,34 +29,60 @@ interface Joint {
   parent: string | null;
   at: Point;
 }
-const joints: Joint[] = [
-  { name: 'Root', parent: null, at: [0, 0, 0] },
-  { name: 'Hips', parent: 'Root', at: [0, 0.97, -0.025] },
-  { name: 'Spine', parent: 'Hips', at: [0, 1.1, -0.02] },
-  { name: 'SpineUpper', parent: 'Spine', at: [0, 1.29, -0.01] },
-  { name: 'Chest', parent: 'SpineUpper', at: [0, 1.44, -0.005] },
-  { name: 'Neck', parent: 'Chest', at: [0, 1.6, 0] },
-  { name: 'Head', parent: 'Neck', at: [0, 1.7, 0] },
-  { name: 'HeadEnd', parent: 'Head', at: [0, 1.97, 0] },
-];
-for (const [side, sign] of [
-  ['Left', 1],
-  ['Right', -1],
-] as const) {
-  joints.push(
-    { name: `${side}Clavicle`, parent: 'Chest', at: [sign * 0.065, 1.48, -0.005] },
-    { name: `${side}UpperArm`, parent: `${side}Clavicle`, at: [sign * 0.12, 1.46, -0.005] },
-    { name: `${side}ForeArm`, parent: `${side}UpperArm`, at: [sign * 0.205, 1.17, -0.02] },
-    { name: `${side}Hand`, parent: `${side}ForeArm`, at: [sign * 0.255, 0.91, -0.025] },
-    { name: `${side}HandEnd`, parent: `${side}Hand`, at: [sign * 0.26, 0.82, -0.025] },
-    { name: `${side}Thigh`, parent: 'Hips', at: [sign * 0.075, 0.95, -0.03] },
-    { name: `${side}Shin`, parent: `${side}Thigh`, at: [sign * 0.16, 0.51, -0.01] },
-    { name: `${side}Foot`, parent: `${side}Shin`, at: [sign * 0.24, 0.16, 0.03] },
-    { name: `${side}Toes`, parent: `${side}Foot`, at: [sign * 0.25, 0.045, 0.12] },
-    { name: `${side}ToeEnd`, parent: `${side}Toes`, at: [sign * 0.25, 0.04, 0.145] },
-  );
+function createJoints(anatomy: CharacterAnatomy): Joint[] {
+  const joints: Joint[] = [
+    { name: 'Root', parent: null, at: [0, 0, 0] },
+    { name: 'Hips', parent: 'Root', at: anatomy.pelvis },
+    { name: 'Spine', parent: 'Hips', at: [0, 1.24, 0.008] },
+    { name: 'SpineUpper', parent: 'Spine', at: [0, 1.36, 0.008] },
+    { name: 'Chest', parent: 'SpineUpper', at: [0, 1.48, 0.005] },
+    { name: 'Neck', parent: 'Chest', at: [0, 1.61, 0.002] },
+    { name: 'Head', parent: 'Neck', at: [0, 1.7, 0] },
+    { name: 'HeadEnd', parent: 'Head', at: [0, 1.97, 0] },
+  ];
+  for (const [side, sign, leg] of [
+    ['Left', 1, anatomy.left],
+    ['Right', -1, anatomy.right],
+  ] as const) {
+    joints.push(
+      { name: `${side}Clavicle`, parent: 'Chest', at: [sign * 0.05, 1.49, 0.005] },
+      { name: `${side}UpperArm`, parent: `${side}Clavicle`, at: [sign * 0.109, 1.46, 0.004] },
+      { name: `${side}ForeArm`, parent: `${side}UpperArm`, at: [sign * 0.191, 1.16, 0.007] },
+      { name: `${side}Hand`, parent: `${side}ForeArm`, at: [sign * 0.225, 0.98, 0.008] },
+      { name: `${side}HandEnd`, parent: `${side}Hand`, at: [sign * 0.224, 0.88, 0.009] },
+      { name: `${side}Thigh`, parent: 'Hips', at: leg.hip },
+      { name: `${side}Shin`, parent: `${side}Thigh`, at: leg.knee },
+      { name: `${side}Foot`, parent: `${side}Shin`, at: leg.ankle },
+      { name: `${side}Toes`, parent: `${side}Foot`, at: leg.ball },
+      { name: `${side}ToeEnd`, parent: `${side}Toes`, at: leg.tip },
+    );
+  }
+  return joints;
 }
-export const JOINT_NAMES = joints.map((joint) => joint.name);
+export const JOINT_NAMES = [
+  'Root',
+  'Hips',
+  'Spine',
+  'SpineUpper',
+  'Chest',
+  'Neck',
+  'Head',
+  'HeadEnd',
+  ...['Left', 'Right'].flatMap((side) =>
+    [
+      'Clavicle',
+      'UpperArm',
+      'ForeArm',
+      'Hand',
+      'HandEnd',
+      'Thigh',
+      'Shin',
+      'Foot',
+      'Toes',
+      'ToeEnd',
+    ].map((joint) => side + joint),
+  ),
+];
 const smooth = (a: number, b: number, x: number) => THREE.MathUtils.smoothstep(x, a, b);
 
 /** A true skinned mesh with four normalized influences per vertex. UVs, normals,
@@ -78,7 +105,10 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
   const center = box.getCenter(new THREE.Vector3());
   geometry.translate(-center.x, -box.min.y, -center.z);
   geometry.scale(2 / height, 2 / height, 2 / height);
-  geometry.rotateY(Math.PI);
+  // v1/v2 flipped the source by PI on an unverified "front" assumption.
+  // The unmodified source's knee bow AND forefoot establish +Z as forward.
+  const anatomy = measure101172(geometry);
+  const joints = createJoints(anatomy);
   const scene = new THREE.Group();
   scene.name = 'HEA_101172';
   scene.userData = {
@@ -94,6 +124,7 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
       source: '101172.glb',
       rig: 'HEA humanoid 28',
       clip: 'Walking',
+      anatomy,
     },
   };
   const bones = new Map<string, THREE.Bone>();
@@ -119,15 +150,15 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
   scene.updateMatrixWorld(true);
   const skeleton = new THREE.Skeleton([...bones.values()]);
   mesh.bind(skeleton);
-  weightSkin(geometry);
+  weightSkin(geometry, joints, anatomy);
   mesh.normalizeSkinWeights();
   mesh.frustumCulled = false; // animated bounds must not use the static A-pose box
   mesh.castShadow = mesh.receiveShadow = true;
-  const animations = [makeWalk(bones, scene, mesh)];
+  const animations = [makeWalk(bones, scene, mesh, anatomy)];
   return { scene, mesh, skeleton, animations };
 }
 
-function weightSkin(geometry: THREE.BufferGeometry) {
+function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: CharacterAnatomy) {
   const position = geometry.getAttribute('position');
   const indices = new Uint16Array(position.count * 4);
   const weights = new Float32Array(position.count * 4);
@@ -175,7 +206,12 @@ function weightSkin(geometry: THREE.BufferGeometry) {
       smooth(armBorder - 0.018, armBorder + 0.035, ax) *
       (1 - smooth(1.5, 1.59, p.y)) *
       smooth(0.76, 0.85, p.y);
-    const legMask = (1 - smooth(0.88, 1.01, p.y)) * (1 - armMask);
+    const seam = smooth(anatomy.crotch - 0.055, anatomy.crotch + 0.015, p.y);
+    const seamSupport = 1 - seam * (1 - smooth(0.0, 0.055, ax));
+    const legMask =
+      (1 - smooth(anatomy.crotch - 0.03, anatomy.pelvis[1] + 0.03, p.y)) *
+      (1 - armMask) *
+      seamSupport;
     const candidates = segments
       .map((segment) => {
         const side = segment.name.startsWith('Left')
@@ -190,11 +226,14 @@ function weightSkin(geometry: THREE.BufferGeometry) {
         if (leg) {
           // Distance alone let the shin pull the sole when bending the knee.
           // Keep the heel/sole on the foot and blend only through the ankle.
-          const footMask = 1 - smooth(0.12, 0.23, p.y);
-          const toeMask = smooth(0.055, 0.115, p.z);
+          const limb = side > 0 ? anatomy.left : anatomy.right;
+          const footMask = 1 - smooth(limb.ankle[1] - 0.06, limb.ankle[1] + 0.06, p.y);
+          const toeMask = smooth(limb.ball[2] - 0.035, limb.ball[2] + 0.035, p.z);
+          const thighMask = smooth(limb.knee[1] - 0.045, limb.knee[1] + 0.045, p.y);
           if (segment.name.endsWith('Foot')) mask *= footMask * (1 - toeMask);
           else if (segment.name.endsWith('Toes')) mask *= footMask * toeMask;
-          else mask *= 1 - footMask;
+          else
+            mask *= (1 - footMask) * (segment.name.endsWith('Thigh') ? thighMask : 1 - thighMask);
         }
         new THREE.Line3(segment.a, segment.b).closestPointToPoint(p, true, nearest);
         const d2 = p.distanceToSquared(nearest);
@@ -238,20 +277,45 @@ function solveLeg(
   const bend = Math.sqrt(Math.max(0, l1 * l1 - along * along));
   const pole = new THREE.Vector3(0, 0, 1).addScaledVector(direction, -direction.z).normalize();
   const knee = hip.clone().addScaledVector(direction, along).addScaledVector(pole, bend);
-  const parentWorld = thigh.parent!.getWorldQuaternion(new THREE.Quaternion());
-  const upperDirection = knee
-    .clone()
-    .sub(hip)
-    .normalize()
-    .applyQuaternion(parentWorld.clone().invert());
-  thigh.quaternion.setFromUnitVectors(shin.position.clone().normalize(), upperDirection);
+  const upperWorld = knee.clone().sub(hip).normalize();
+  const lowerWorld = ankle.clone().sub(knee).normalize();
+  const hingeWorld = upperWorld.clone().cross(lowerWorld).normalize();
+  const bindHinge = shin.position.clone().cross(foot.position).normalize();
+  // Match a full hinge frame, not a single direction with an ambiguous roll.
+  // This keeps the knee's bend axis consistent with the source leg plane.
+  function frame(direction: THREE.Vector3, hinge: THREE.Vector3) {
+    const y = direction.clone().normalize();
+    const z = hinge.clone().cross(y).normalize();
+    const x = y.clone().cross(z).normalize();
+    return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
+  }
+  const parentInverse = thigh.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
+  thigh.quaternion
+    .copy(
+      frame(
+        upperWorld.clone().applyQuaternion(parentInverse),
+        hingeWorld.clone().applyQuaternion(parentInverse),
+      ),
+    )
+    .multiply(frame(shin.position, bindHinge).invert());
   scene.updateMatrixWorld(true);
-  const thighWorld = thigh.getWorldQuaternion(new THREE.Quaternion());
-  const lowerDirection = ankle.clone().sub(knee).normalize().applyQuaternion(thighWorld.invert());
-  shin.quaternion.setFromUnitVectors(foot.position.clone().normalize(), lowerDirection);
+  const thighInverse = thigh.getWorldQuaternion(new THREE.Quaternion()).invert();
+  shin.quaternion
+    .copy(
+      frame(
+        lowerWorld.clone().applyQuaternion(thighInverse),
+        hingeWorld.clone().applyQuaternion(thighInverse),
+      ),
+    )
+    .multiply(frame(foot.position, bindHinge).invert());
 }
 
-function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THREE.SkinnedMesh) {
+function makeWalk(
+  bones: Map<string, THREE.Bone>,
+  scene: THREE.Group,
+  mesh: THREE.SkinnedMesh,
+  anatomy: CharacterAnatomy,
+) {
   const positions = mesh.geometry.getAttribute('position');
   const soles = { Left: [] as number[], Right: [] as number[] };
   for (let i = 0; i < positions.count; i++) {
@@ -263,6 +327,18 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
   const original = new Map([...bones].map(([name, bone]) => [name, bone.position.clone()]));
   const hips = bones.get('Hips')!;
   const frames = WALK.samples;
+  const standingHeight =
+    (['Left', 'Right'] as const).reduce((sum, side) => {
+      const leg = side === 'Left' ? anatomy.left : anatomy.right;
+      return (
+        sum +
+        bones.get(side + 'Shin')!.position.length() +
+        bones.get(side + 'Foot')!.position.length() +
+        leg.ankle[1] +
+        anatomy.pelvis[1] -
+        leg.hip[1]
+      );
+    }, 0) / 2;
   for (let frame = 0; frame <= frames; frame++) {
     const phase = frame === frames ? 0 : frame / frames;
     const t = phase * Math.PI * 2;
@@ -272,9 +348,8 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
     }
     // Double support at contacts, body highest over the planted foot. Small lateral
     // transfer, pelvis yaw and counter-rotating chest make the gait read as weight.
-    // The old 0.91 m pelvis shortened the supporting leg by ~8 cm and
-    // forced a permanent crouch. Mid-stance now approaches full extension.
-    hips.position.y = 0.965 - 0.012 * Math.cos(2 * t);
+    // Reach is derived from this mesh's measured leg lengths and sole height.
+    hips.position.y = standingHeight - 0.025 - 0.018 * Math.cos(2 * t);
     hips.position.x = 0.008 * Math.sin(t);
     hips.rotation.set(0.018, 0.045 * Math.cos(t), -0.018 * Math.sin(t));
     bones.get('Spine')!.rotation.set(0.012, -0.018 * Math.cos(t), 0.012 * Math.sin(t));
@@ -299,7 +374,7 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
         z = front - WALK.stride * p;
         lift = 0;
         // Small ankle roll only: this source has a rounded foot, not a flat human sole.
-        roll = -0.06 * (1 - smooth(0, 0.18, u)) + 0.04 * smooth(0.72, 1, u);
+        roll = -0.1 * (1 - smooth(0, 0.18, u)) + 0.3 * smooth(0.72, 1, u);
       } else {
         const u = (p - stance) / (1 - stance);
         // Cubic Hermite keeps fore/aft velocity continuous at toe-off and contact.
@@ -310,16 +385,17 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
           (-2 * u * u * u + 3 * u * u) * front +
           (u * u * u - u * u) * m;
         lift = WALK.clearance * Math.sin(Math.PI * u) ** 2;
-        roll = THREE.MathUtils.lerp(0.04, -0.06, smooth(0, 1, u)) + 0.08 * Math.sin(Math.PI * u);
+        roll = THREE.MathUtils.lerp(0.3, -0.1, smooth(0, 1, u)) + 0.12 * Math.sin(Math.PI * u);
       }
+      const leg = side === 'Left' ? anatomy.left : anatomy.right;
       const ankle = new THREE.Vector3(
-        sign * (0.135 + 0.006 * Math.sin(Math.PI * p) ** 2),
-        0.16 + lift + Math.abs(Math.sin(roll)) * 0.065,
-        z - 0.03,
+        leg.hip[0] + sign * (0.07 + 0.006 * Math.sin(Math.PI * p) ** 2),
+        leg.ankle[1] + lift + Math.abs(Math.sin(roll)) * 0.1,
+        z + anatomy.pelvis[2],
       );
       // Bake flat-floor IK and sole contact into ordinary quaternion tracks. The
       // gameplay runtime does not need this authoring solver or the source mesh.
-      for (let correction = 0; correction < 3; correction++) {
+      for (let correction = 0; correction < 5; correction++) {
         solveLeg(side, ankle, bones, scene);
         scene.updateMatrixWorld(true);
         const foot = bones.get(side + 'Foot')!;
@@ -329,7 +405,7 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
           .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(roll, sign * -0.04, 0)));
         bones.get(side + 'Toes')!.rotation.x = 0;
         scene.updateMatrixWorld(true);
-        if (correction < 2) {
+        if (correction < 4) {
           let bottom = Infinity;
           for (const vertex of soles[side]) {
             solePoint.fromBufferAttribute(positions, vertex);
@@ -342,7 +418,7 @@ function makeWalk(bones: Map<string, THREE.Bone>, scene: THREE.Group, mesh: THRE
       // Swing the opposite arm, with relaxed elbow flexion and a delayed wrist.
       const swing = Math.cos(t + offset * Math.PI * 2);
       bones.get(side + 'Clavicle')!.rotation.set(0, 0.025 * swing, sign * 0.025);
-      bones.get(side + 'UpperArm')!.rotation.set(0.25 * swing - 0.03, sign * 0.015, sign * -0.12);
+      bones.get(side + 'UpperArm')!.rotation.set(0.25 * swing - 0.03, sign * 0.015, sign * -0.04);
       bones.get(side + 'ForeArm')!.rotation.set(-0.16 - 0.09 * (1 - swing), 0, sign * 0.02);
       bones
         .get(side + 'Hand')!

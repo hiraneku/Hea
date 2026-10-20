@@ -1,16 +1,22 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { CharacterPlayback } from '../../src/character/CharacterPlayback';
 import { AvatarModel } from '../../src/game/Avatar';
+import {
+  measure101172,
+  crossSections,
+  type CharacterAnatomy,
+} from '../../src/character/anatomy101172';
 import { JOINT_NAMES, WALK } from '../../src/character/rig101172';
 
 /** Decode the actual exported asset, without browser-only texture decoding.
  * Leave buffers, geometry, skin and animations unchanged; strip only render materials.
  */
-async function loadRig() {
-  const file = readFileSync('public/models/101172-rigged.glb');
+async function loadRig(path = 'public/models/101172-rigged.glb') {
+  const file = readFileSync(path);
   const jsonLength = file.readUInt32LE(12);
   const json = JSON.parse(file.subarray(20, 20 + jsonLength).toString());
   delete json.images;
@@ -35,6 +41,21 @@ async function loadRig() {
     '',
   );
 }
+let sourceGeometry: THREE.BufferGeometry;
+let measured: CharacterAnatomy;
+beforeAll(async () => {
+  const source = await loadRig('public/models/101172.glb');
+  source.scene.updateMatrixWorld(true);
+  source.scene.traverse((o) => {
+    if (o instanceof THREE.Mesh) sourceGeometry = o.geometry.clone().applyMatrix4(o.matrixWorld);
+  });
+  sourceGeometry.computeBoundingBox();
+  const box = sourceGeometry.boundingBox!;
+  const centre = box.getCenter(new THREE.Vector3());
+  const scale = 2 / (box.max.y - box.min.y);
+  sourceGeometry.translate(-centre.x, -box.min.y, -centre.z).scale(scale, scale, scale);
+  measured = measure101172(sourceGeometry);
+}, 30000);
 let gltf: GLTF;
 let mesh: THREE.SkinnedMesh;
 beforeEach(async () => {
@@ -52,7 +73,56 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(mesh.geometry.getAttribute('uv').count).toBe(116724);
     expect(gltf.animations.map((clip) => clip.name)).toEqual(['Walking']);
     expect(gltf.animations[0].duration).toBeCloseTo(WALK.duration, 5);
-    expect(gltf.scene.getObjectByName('HEA_101172')!.userData.heaCharacter.rootMotion).toBe(false);
+    const metadata = gltf.scene.getObjectByName('HEA_101172')!.userData.heaCharacter;
+    expect(metadata.rootMotion).toBe(false);
+    expect(metadata.sourceSHA256).toBe(
+      createHash('sha256').update(readFileSync('public/models/101172.glb')).digest('hex'),
+    );
+  });
+
+  it('preserves original bind geometry and front direction instead of rotating the feet backward', () => {
+    const source = sourceGeometry.getAttribute('position');
+    const target = mesh.geometry.getAttribute('position');
+    expect(target.count).toBe(source.count);
+    let maxError = 0;
+    for (let i = 0; i < source.count * 3; i++)
+      maxError = Math.max(maxError, Math.abs(source.array[i] - target.array[i]));
+    expect(maxError).toBeLessThan(1e-6);
+    for (const side of ['Left', 'Right']) {
+      const ankle = gltf.scene
+        .getObjectByName(side + 'Foot')!
+        .getWorldPosition(new THREE.Vector3());
+      const toe = gltf.scene
+        .getObjectByName(side + 'ToeEnd')!
+        .getWorldPosition(new THREE.Vector3());
+      expect(toe.z - ankle.z).toBeGreaterThan(0.14);
+    }
+  });
+
+  it('places the hip above the actual crotch and fits the knee/ankle to source contour measurements', () => {
+    expect(measured.crotch).toBeCloseTo(1.05, 2);
+    expect(measured.pelvis[1]).toBeGreaterThan(measured.crotch);
+    for (const [side, anatomy] of [
+      ['Left', measured.left],
+      ['Right', measured.right],
+    ] as const) {
+      const hip = gltf.scene.getObjectByName(side + 'Thigh')!.getWorldPosition(new THREE.Vector3());
+      const knee = gltf.scene.getObjectByName(side + 'Shin')!.getWorldPosition(new THREE.Vector3());
+      const ankle = gltf.scene
+        .getObjectByName(side + 'Foot')!
+        .getWorldPosition(new THREE.Vector3());
+      expect(hip.distanceTo(new THREE.Vector3(...anatomy.hip))).toBeLessThan(1e-5);
+      expect(hip.y).toBeGreaterThan(measured.crotch);
+      expect(knee.distanceTo(new THREE.Vector3(...anatomy.knee))).toBeLessThan(1e-5);
+      expect(knee.y).toBeGreaterThan(0.59);
+      expect(knee.y).toBeLessThan(0.64);
+      const contour = crossSections(sourceGeometry, knee.y).find(
+        (s) => Math.abs(s.x - knee.x) < 0.005,
+      );
+      expect(contour).toBeDefined();
+      expect(Math.abs(knee.z - contour!.z)).toBeLessThan(contour!.depth / 4);
+      expect(ankle.distanceTo(new THREE.Vector3(...anatomy.ankle))).toBeLessThan(1e-5);
+    }
   });
 
   it('has finite normalized four-slot skin weights and valid bone indices at every vertex', () => {
@@ -159,7 +229,8 @@ describe('portable 101172 rig and Walking asset', () => {
         if (phase < WALK.stance) {
           maxContactError = Math.max(maxContactError, Math.abs(bottom - 0.002));
           const ankle = gltf.scene.getObjectByName(side + 'Foot')!.getWorldPosition(point);
-          const expectedZ = WALK.stride * WALK.contactAdvance - WALK.stride * phase - 0.03;
+          const expectedZ =
+            WALK.stride * WALK.contactAdvance - WALK.stride * phase + measured.pelvis[2];
           maxAnklePathError = Math.max(maxAnklePathError, Math.abs(ankle.z - expectedZ));
         } else {
           const u = (phase - WALK.stance) / (1 - WALK.stance);
@@ -205,8 +276,10 @@ describe('portable 101172 rig and Walking asset', () => {
       }
     }
     expect(largestSupportBend).toBeLessThan(28);
-    expect(largestSwingBend).toBeLessThan(50);
-    expect(smallestSeparation).toBeGreaterThan(0.25);
+    // Higher clearance is deliberate: v2's restricted swing was rejected.
+    expect(largestSwingBend).toBeGreaterThan(55);
+    expect(largestSwingBend).toBeLessThan(75);
+    expect(smallestSeparation).toBeGreaterThan(0.24);
     player.dispose();
   });
 
@@ -222,7 +295,7 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(player.phase).toBeCloseTo(0.25 + 0.05 / WALK.duration, 5);
     for (let i = 0; i < 120; i++) player.locomotion(1 / 60, 0, true, WALK.stride / WALK.duration);
     expect(player.mode).toBe('bind');
-    expect(gltf.scene.getObjectByName('Hips')!.position.y).toBeCloseTo(0.97, 4);
+    expect(gltf.scene.getObjectByName('Hips')!.position.y).toBeCloseTo(measured.pelvis[1], 4);
     for (let i = 0; i < 60; i++)
       player.locomotion(1 / 60, WALK.stride / WALK.duration, true, WALK.stride / WALK.duration);
     expect(player.mode).toBe('walk');
@@ -245,7 +318,9 @@ describe('portable 101172 rig and Walking asset', () => {
       for (let i = 0; i < 60; i++)
         avatar.update(1 / 60, { speed: 1.4, airborne: false, dead: false });
       expect(avatar.current).toBe('walk');
-      expect(Math.abs(hip.position.y - bindY)).toBeGreaterThan(0.005);
+      expect(
+        playerRoot.getObjectByName('LeftThigh')!.quaternion.angleTo(new THREE.Quaternion()),
+      ).toBeGreaterThan(0.1);
       for (let i = 0; i < 60; i++)
         avatar.update(1 / 60, { speed: 0, airborne: false, dead: false });
       expect(hip.position.y).toBeCloseTo(bindY, 5);

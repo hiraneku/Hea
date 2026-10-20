@@ -7,6 +7,18 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — Walking v3 berdasarkan geometri asli 101172
+
+- Ukur kontur mesh asli untuk pangkal kaki di pelvis, lutut dan pergelangan;
+  pivot/weight lutut tidak lagi memakai perkiraan rendah v2.
+- Hapus rotasi 180° yang keliru: sumber sudah menghadap +Z. Cocokkan frame bidang
+  tekukan bind/pose, naikkan target swing ankle ke 12 cm, dan bake ulang Walking.
+- Tambahkan regresi identitas seluruh vertex/orientasi sumber, landmark hasil
+  pengukuran ulang, dan hash sumber. Model asli serta pemain default tetap utuh.
+- Preview v3 menampilkan titik sendi berlabel dan panah depan pada overlay skeleton.
+  Review renderer juga dapat menampilkan bind pose sumber sebagai pembanding.
+- V1/v2 ditolak pengguna; v3 tetap untuk review visual, bukan dianggap disetujui.
+
 ### Diperbaiki — postur Walking yang jongkok dan telapak yang terdeformasi
 
 - Walking v2 mengoreksi landmark lutut/pergelangan, tinggi panggul, pusat dan lebar
