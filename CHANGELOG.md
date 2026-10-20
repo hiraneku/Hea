@@ -7,6 +7,18 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Ditambahkan — rig 101172 dan Walking v1
+
+- Aset `101172-rigged.glb` mandiri dengan skeleton 28 tulang, skin weights, dan
+  clip `Walking` in-place: IK kaki dibake, kontak lantai, ayunan lengan, perpindahan
+  bobot panggul, serta rotasi dada/kepala. Model sumber tidak diubah.
+- Preview karakter memuat aset tersebut dengan play/pause, scrub, kecepatan,
+  bind pose, overlay skeleton dan unduh GLB; tetap di `/Hea/preview/`.
+- Pipeline authoring yang dapat diulang (`npm run character:build`), pemeriksaan
+  aset ekspor dan kompatibilitas adapter gameplay; lihat `docs/CHARACTER.md`.
+- Adapter avatar mendukung metadata arah/kecepatan dan memudarkan Walking ketika
+  clip tujuan belum tersedia. Pemain aktif belum dialihkan ke aset baru.
+
 ## [0.26.0] — 2026-10-19
 
 ### Ditambahkan — Lapisan sampel audio CC0 untuk Prisma, Nova, dan Fall

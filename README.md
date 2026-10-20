@@ -106,6 +106,15 @@ dengan tanggung jawab tunggal — `Game` mengorkestrasi, sedangkan kamera
 boss, registri patch Aegis, dan logika duel murni hidup di modulnya sendiri. Peta
 selengkapnya ada di [panduan pengembangan](docs/DEVELOPMENT.md).
 
+## Preview karakter sementara
+
+Buka **Preview Karakter** di footer menu, atau `/Hea/preview/` pada GitHub Pages.
+Viewer memuat `101172-rigged.glb`: skeleton 28 tulang dan animasi **Walking** yang
+tersimpan di GLB, bukan efek khusus viewer. Tersedia play/pause, scrub siklus,
+kecepatan, bind pose, skeleton overlay dan unduh aset untuk gameplay. Model sumber
+serta pilihan karakter pemain aktif tidak diganti. Detail rig, pipeline authoring,
+dan batas integrasi ada di [panduan karakter](docs/CHARACTER.md).
+
 ## Dokumentasi
 
 - [Panduan pengembangan](docs/DEVELOPMENT.md) — arsitektur, peta modul, pengujian,

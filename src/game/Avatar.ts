@@ -34,7 +34,7 @@ export function avatarPose(state: AvatarState): AvatarPose {
   return 'idle';
 }
 
-/** Clip names in the model, per pose. The asset ships with all of these. */
+/** Gameplay clip contract. A work-in-progress asset can supply only a subset. */
 export const POSE_CLIPS: Record<AvatarPose, string> = {
   idle: 'Idle',
   walk: 'Walking',
@@ -53,6 +53,7 @@ export class AvatarModel {
   private actions = new Map<AvatarPose, THREE.AnimationAction>();
   private pose: AvatarPose = 'idle';
   private speedBlend = 1;
+  private walkSpeed = 3.4;
   /** What the asset measured at load, for the diagnostics. */
   private loadInfo: { height?: number; offset?: number } = {};
 
@@ -87,6 +88,9 @@ export class AvatarModel {
     try {
       const gltf = await new GLTFLoader().loadAsync(this.url);
       const model = gltf.scene;
+      const metadata = model.getObjectByName('HEA_101172')?.userData.heaCharacter;
+      // The game body faces -Z. The portable humanoid asset declares +Z.
+      if (metadata?.forward === '+Z') model.rotation.y = Math.PI;
       // The body is a 1.3 m box standing on its own origin, so the model is measured, scaled to
       // `height`, and stood on the box's floor rather than wherever the asset's origin happens
       // to be.
@@ -94,6 +98,12 @@ export class AvatarModel {
         size = new THREE.Vector3();
       bounds.getSize(size);
       if (size.y > 0) {
+        if (
+          typeof metadata?.walkSpeed === 'number' &&
+          Number.isFinite(metadata.walkSpeed) &&
+          metadata.walkSpeed > 0
+        )
+          this.walkSpeed = metadata.walkSpeed * (this.height / size.y);
         model.scale.setScalar(this.height / size.y);
         bounds.setFromObject(model);
         // Feet on the box's floor (-0.65, the box being 1.3 m tall), centred on it.
@@ -106,6 +116,7 @@ export class AvatarModel {
       model.traverse((child) => {
         const mesh = child as THREE.Mesh;
         if (!mesh.isMesh) return;
+        if (mesh instanceof THREE.SkinnedMesh) mesh.frustumCulled = false;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
         // A dim warm key on the armour, so the player reads warm in an arena of cold stone.
@@ -144,7 +155,7 @@ export class AvatarModel {
     const action = this.actions.get(this.pose);
     if (action && (this.pose === 'walk' || this.pose === 'run')) {
       const target =
-        this.pose === 'run' ? 1.25 : THREE.MathUtils.clamp(state.speed / 3.4, 0.7, 1.6);
+        this.pose === 'run' ? 1.25 : THREE.MathUtils.clamp(state.speed / this.walkSpeed, 0.7, 1.6);
       this.speedBlend += (target - this.speedBlend) * Math.min(1, dt * 6);
       action.timeScale = this.speedBlend;
     }
@@ -159,6 +170,10 @@ export class AvatarModel {
       target.reset();
       if (from && !(this.pose === 'dead')) from.crossFadeTo(target, fade, false);
       target.fadeIn(fade).play();
+    } else {
+      // A work-in-progress character may ship only Walking. Never leave that
+      // action walking in mid-air or after stopping when Idle/Jump are absent.
+      from?.fadeOut(fade);
     }
     if (from && next === 'dead') from.fadeOut(fade);
     this.pose = next;

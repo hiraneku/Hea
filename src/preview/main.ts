@@ -4,28 +4,39 @@ import '@fontsource/barlow-condensed/latin-700.css';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { CharacterPlayback } from '../character/CharacterPlayback';
+import { RIGGED_CHARACTER } from '../character/rig101172';
 import './preview.css';
 
 // This is a separate build entry inside HEA, deliberately independent of Game.
 // Resolve against the document, not BASE_URL ('./' is nested here on Pages).
-const siteRoot = new URL(
-  '../',
-  window.location.href.endsWith('/') ? window.location.href : `${window.location.href}/`,
-);
+const previewURL = new URL(window.location.href);
+previewURL.search = '';
+previewURL.hash = '';
+if (!previewURL.pathname.endsWith('/') && !previewURL.pathname.endsWith('.html'))
+  previewURL.pathname += '/';
+const siteRoot = new URL('../', previewURL);
 const app = document.querySelector<HTMLDivElement>('#preview-app')!;
 app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>
   <main>
     <section class="stage" aria-label="Preview karakter 3D">
-      <div class="stage-heading"><span class="eyebrow">MODEL STUDY / 001</span><h1>KENALI<br><em>KARAKTERMU.</em></h1><p>101172.glb <span>·</span> Preview sementara</p></div>
+      <div class="stage-heading"><span class="eyebrow">MODEL STUDY / 001</span><h1>KENALI<br><em>KARAKTERMU.</em></h1><p>101172-rigged.glb <span>·</span> Rig &amp; walk / v1</p></div>
       <div id="viewport"></div>
       <div id="load-status" role="status">Memuat model…</div>
-      <div class="stage-footer"><span><i></i> MODEL ASLI · TANPA ANIMASI TAMBAHAN</span><span>Y ↑</span></div>
+      <div class="stage-footer"><span><i></i> RIG HUMANOID · WALKING / IN-PLACE</span><span>Y ↑</span></div>
     </section>
     <aside>
       <span class="eyebrow">INSPEKSI MODEL</span><h2>Character preview</h2><p class="intro">Periksa bentuk dan material sebelum integrasi. Halaman ini tidak mengubah karakter dalam game.</p>
       <dl id="model-info"><div><dt>Status</dt><dd>Memuat…</dd></div></dl>
       <h3>SUDUT PANDANG</h3><div class="view-buttons"><button data-view="front">Depan</button><button data-view="side">Samping</button><button data-view="back">Belakang</button><button id="reset">Reset kamera</button></div>
+      <h3>ANIMASI / GAMEPLAY ASSET</h3>
+      <label><span>Pose / animasi</span><select id="animation" disabled><option value="walk">Berjalan</option><option value="bind">Bind pose (A-pose)</option></select></label>
+      <div class="view-buttons"><button id="play" disabled>Jeda animasi</button><button id="restart-animation" disabled>Ulangi siklus</button></div>
+      <label><span>Kecepatan</span><output id="speed-value">1.00×</output></label><input id="speed" aria-label="Kecepatan animasi" type="range" min="0.25" max="1.5" step="0.05" value="1" disabled />
+      <label><span>Siklus langkah</span><output id="phase-value">0%</output></label><input id="phase" aria-label="Posisi siklus langkah" type="range" min="0" max="1000" step="1" value="0" disabled />
+      <label><span>Tampilkan skeleton</span><input id="skeleton" type="checkbox" disabled /></label>
+      <a class="download" href="${new URL(RIGGED_CHARACTER, siteRoot).href}" download="101172-rigged.glb">↓ Unduh GLB rig + Walking</a>
       <h3>TAMPILAN</h3><label><span>Putar otomatis</span><input id="rotate" type="checkbox" /></label><label><span>Wireframe</span><input id="wireframe" type="checkbox" /></label><label><span>Lantai & grid</span><input id="grid" type="checkbox" checked /></label>
       <label class="background"><span>Latar</span><select id="background"><option value="#182321">Gelap</option><option value="#d8dfdc">Terang</option><option value="#69736f">Abu-abu</option></select></label>
       <div class="note" id="rig-note">Membaca struktur GLB…</div>
@@ -96,7 +107,21 @@ async function boot() {
   observer.observe(viewport);
   resize();
   view();
+  let playback: CharacterPlayback | undefined;
+  let helper: THREE.SkeletonHelper | undefined;
+  let previousTime = performance.now();
+  const phaseInput = document.querySelector<HTMLInputElement>('#phase')!;
   renderer.setAnimationLoop(() => {
+    const now = performance.now();
+    const dt = Math.min((now - previousTime) / 1000, 0.05);
+    previousTime = now;
+    playback?.update(document.hidden ? 0 : dt);
+    if (playback) {
+      phaseInput.value = String(Math.round(playback.phase * 1000));
+      document.querySelector<HTMLOutputElement>('#phase-value')!.value =
+        `${Math.round(playback.phase * 100)}%`;
+    }
+    helper?.updateMatrixWorld(true);
     controls.update();
     renderer.render(scene, camera);
   });
@@ -118,7 +143,7 @@ async function boot() {
   });
   try {
     const gltf = await new GLTFLoader().loadAsync(
-      new URL('models/101172.glb', siteRoot).href,
+      new URL(RIGGED_CHARACTER, siteRoot).href,
       (event) => {
         status.textContent = event.total
           ? `Memuat model… ${Math.round((event.loaded / event.total) * 100)}%`
@@ -146,6 +171,60 @@ async function boot() {
         1.4 +
       normalized.z / 2;
     view();
+    playback = new CharacterPlayback(model, gltf.animations);
+    helper = new THREE.SkeletonHelper(model);
+    for (const material of Array.isArray(helper.material) ? helper.material : [helper.material]) {
+      material.depthTest = false;
+      material.transparent = true;
+    }
+    helper.renderOrder = 10;
+    helper.visible = false;
+    scene.add(helper);
+    document
+      .querySelectorAll<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(
+        '#animation, #play, #restart-animation, #speed, #phase, #skeleton',
+      )
+      .forEach((el) => {
+        el.disabled = false;
+      });
+    const playButton = document.querySelector<HTMLButtonElement>('#play')!;
+    playButton.onclick = () => {
+      playback!.playing = !playback!.playing;
+      playButton.textContent = playback!.playing ? 'Jeda animasi' : 'Putar animasi';
+      playButton.setAttribute('aria-pressed', String(!playback!.playing));
+    };
+    document.querySelector<HTMLButtonElement>('#restart-animation')!.onclick = () =>
+      playback!.seek(0);
+    document.querySelector<HTMLSelectElement>('#animation')!.onchange = (event) =>
+      playback!.setMode((event.target as HTMLSelectElement).value as 'walk' | 'bind');
+    document.querySelector<HTMLInputElement>('#speed')!.oninput = (event) => {
+      playback!.speed = Number((event.target as HTMLInputElement).value);
+      document.querySelector<HTMLOutputElement>('#speed-value')!.value =
+        `${playback!.speed.toFixed(2)}×`;
+    };
+    phaseInput.oninput = () => {
+      playback!.playing = false;
+      playButton.textContent = 'Putar animasi';
+      playback!.seek(Number(phaseInput.value) / 1000);
+    };
+    document.querySelector<HTMLInputElement>('#skeleton')!.onchange = (event) => {
+      helper!.visible = (event.target as HTMLInputElement).checked;
+    };
+    // Read-only inspection hook, dev only; production exposes no editing harness.
+    if (import.meta.env.DEV)
+      Object.assign(window, {
+        __HEA_CHARACTER__: {
+          snapshot: () => ({
+            phase: playback!.phase,
+            playing: playback!.playing,
+            mode: playback!.mode,
+            bones: helper!.bones.map((bone) => ({
+              name: bone.name,
+              position: bone.getWorldPosition(new THREE.Vector3()).toArray(),
+            })),
+          }),
+        },
+      });
     const materials = new Set<THREE.MeshStandardMaterial>();
     let meshes = 0,
       bones = 0,
@@ -153,7 +232,10 @@ async function boot() {
       triangles = 0;
     model.traverse((object) => {
       if (object instanceof THREE.Bone) bones++;
-      if (object instanceof THREE.SkinnedMesh) skinned++;
+      if (object instanceof THREE.SkinnedMesh) {
+        skinned++;
+        object.frustumCulled = false;
+      }
       if (!(object instanceof THREE.Mesh)) return;
       meshes++;
       triangles += (object.geometry.index?.count ?? object.geometry.attributes.position.count) / 3;
@@ -167,7 +249,10 @@ async function boot() {
       ['Mesh', String(meshes)],
       ['Segitiga', Math.round(triangles).toLocaleString('id-ID')],
       ['Rig / tulang', bones ? `${bones} tulang · ${skinned} skinned mesh` : 'Tidak ada'],
-      ['Animasi bawaan', String(gltf.animations.length)],
+      [
+        'Animasi',
+        gltf.animations.map((clip) => `${clip.name} · ${clip.duration.toFixed(2)} s`).join(', '),
+      ],
       ['Ukuran asli (XYZ)', `${size.x.toFixed(2)} × ${size.y.toFixed(2)} × ${size.z.toFixed(2)}`],
     ]) {
       const row = document.createElement('div');
@@ -178,9 +263,8 @@ async function boot() {
       row.append(dt, dd);
       info.append(row);
     }
-    note.textContent = bones
-      ? 'Rig terdeteksi. Animasi baru belum dibuat atau diputar di preview ini.'
-      : 'Model ini belum memiliki rig maupun tulang. Rigging diperlukan untuk animasi tubuh bersendi. Belum ada animasi yang ditambahkan.';
+    note.textContent =
+      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
     document.querySelector<HTMLInputElement>('#wireframe')!.onchange = (e) => {
       for (const material of materials) material.wireframe = (e.target as HTMLInputElement).checked;
     };
@@ -189,7 +273,7 @@ async function boot() {
     console.error('Preview model failed:', error);
     status.textContent = 'Model gagal dimuat. Muat ulang halaman untuk mencoba lagi.';
     info.textContent = 'Model belum tersedia.';
-    note.textContent = 'Pastikan models/101172.glb tersedia pada situs HEA.';
+    note.textContent = 'Pastikan models/101172-rigged.glb tersedia pada situs HEA.';
   }
 }
 void boot().catch((error: unknown) => {
