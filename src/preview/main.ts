@@ -47,7 +47,7 @@ app.innerHTML = `
       <div class="view-buttons" id="movement-options" aria-label="Pilihan gerakan"><button id="movement-walk" aria-pressed="false" disabled>Jalan</button></div>
       <p class="movement-help">Klik untuk jalan, klik lagi untuk berhenti.</p>
       <h3>ANIMASI</h3>
-      <label><span>Pose / animasi</span><select id="animation" disabled><option value="walk">Berjalan</option><option value="bind">Bind pose (A-pose)</option></select></label>
+      <label><span>Pose / animasi</span><select id="animation" disabled><option value="walk">Berjalan</option><option value="bind">Diam / berhenti</option></select></label>
       <div class="view-buttons"><button id="play" disabled>Jeda animasi</button><button id="restart-animation" disabled>Ulangi siklus</button></div>
       <label><span>Kecepatan</span><output id="speed-value">1.00×</output></label><input id="speed" aria-label="Kecepatan animasi" type="range" min="0.25" max="1.5" step="0.05" value="1" disabled />
       <label><span>Siklus langkah</span><output id="phase-value">0%</output></label><input id="phase" aria-label="Posisi siklus langkah" type="range" min="0" max="1000" step="1" value="0" disabled />
@@ -128,6 +128,7 @@ async function boot() {
   let look: CharacterLook | undefined;
   let driving = false;
   let updateDrive: ((dt: number) => void) | undefined;
+  let applyInspectionMotion: (() => void) | undefined;
   const yawInput = document.querySelector<HTMLInputElement>('#look-yaw')!;
   const pitchInput = document.querySelector<HTMLInputElement>('#look-pitch')!;
   let helper: THREE.SkeletonHelper | undefined;
@@ -156,7 +157,10 @@ async function boot() {
     const visibleDt = document.hidden ? 0 : dt;
     look?.clear();
     if (driving) updateDrive?.(visibleDt);
-    else playback?.update(visibleDt);
+    else {
+      playback?.update(visibleDt);
+      applyInspectionMotion?.();
+    }
     look?.apply(
       THREE.MathUtils.degToRad(Number(yawInput.value)),
       THREE.MathUtils.degToRad(Number(pitchInput.value)),
@@ -242,11 +246,21 @@ async function boot() {
     view();
     playback = new CharacterPlayback(model, gltf.animations);
     playback.playing = false;
-    playback.setMode('bind');
-    playback.update(1);
+    playback.setMode('bind', true);
+    playback.update(0);
     look = new CharacterLook(model);
     headBone = model.getObjectByName('Head');
     const drive = new CharacterTestDrive(holder, playback, metadata.walkSpeed * scale);
+    applyInspectionMotion = () => {
+      const delta = playback!
+        .consumeRootMotion()
+        .multiply(holder.scale)
+        .applyQuaternion(holder.quaternion);
+      holder.position.add(delta);
+      camera.position.add(delta);
+      target.add(delta);
+      controls.target.add(delta);
+    };
     const keys = new Set<string>();
     const joystick = new THREE.Vector2();
     const pad = document.querySelector<HTMLDivElement>('#drive-pad')!;
@@ -394,6 +408,8 @@ async function boot() {
       playButton.setAttribute('aria-pressed', String(!playback!.playing));
     };
     const selectMovement = (mode: 'walk' | 'bind') => {
+      // Capture animation pose without baking the additive look offset twice.
+      look?.clear();
       const restart = !playback!.isStopping && playback!.action.getEffectiveWeight() < 0.001;
       playback!.setMode(mode);
       playback!.playing = mode === 'walk';

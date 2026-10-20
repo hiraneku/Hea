@@ -217,20 +217,48 @@ Dokumen ini tidak mengasumsikan lisensi pihak ketiga untuk model tersebut.
 `AVATAR-LICENSE.txt` yang sudah ada menjelaskan **RobotExpressive (`avatar.glb`)**,
 bukan bukti lisensi untuk `101172.glb` atau turunannya.
 
-## Transisi berhenti dan UI ringkas
+## Stop dua langkah — menggantikan blend berhenti sebelumnya
 
-`CharacterPlayback.setMode('bind')` sekarang meminta transisi stop, bukan pause.
-Walking menyelesaikan sisa setengah siklus sampai kontak ganda (fase 0 atau 0,5),
-kemudian weight turun dengan smootherstep selama 0,38 detik. Total bergantung
-fase/kecepatan (sekitar 0,38–1,11 detik). `isStopping` menandai transisi; permintaan
-walk baru membatalkannya tanpa seek ulang. `playing=false` masih menjeda inspeksi
-biasa, tetapi tidak membekukan langkah terakhir ketika stop sudah diminta.
+Stop sebelumnya ditolak: selesai setengah siklus lalu fade ke bind pose bukan
+langkah penutup. Sekarang `CharacterStop.ts` membake **clip `Stopping` khusus pose
+dan fase saat input dilepas**, memakai solver hinge-frame yang sama dengan Walking:
 
-Ini transisi runtime reusable atas clip Walking asli, **bukan clip Stopping baru
-di GLB**. Pose akhir masih bind pose model, belum Idle terpisah. Solver kaki,
-geometry dan rig v6 tidak diubah; belum merupakan stop mocap atau foot-lock terrain.
-`CharacterTestDrive` juga meredam velocity pada pelepasan input dan membersihkannya
-saat reset/pergantian mode. Efek pengereman dan langkah terakhir perlu review visual.
+1. Fase <0,5 memilih kaki kanan sebagai kaki berikutnya yang akan menapak; fase
+   ≥0,5 memilih kiri. Posisi, orientasi dan kecepatan swing awal disampel dari pose
+   aktual/Walking; kaki penopang tetap di target lantai semula.
+2. Kaki acuan mendarat lebih dulu (0,18–0,56 detik), lalu transfer berat 0,08 detik.
+3. Kaki satunya terangkat dan menyusul selama 0,42 detik. Target Z akhir sama,
+   dengan lane X kiri/kanan tetap terpisah. Tidak menyatukan kedua kaki bertumpuk.
+4. Tubuh/lengan mereda 0,22 detik; pose akhir ditahan sebagai **berdiri sejajar**,
+   bukan A-pose. Total sekitar 0,9–1,28 detik tergantung fase awal.
 
-Preview membuang judul besar di atas viewport. Info aset, koordinat uji dan teks
-teknis tersedia dalam panel lipat; kontrol utama tetap langsung tersedia.
+Clip berisi quaternion tulang, Hips.position dan Root.position biasa. IK hanya
+berjalan saat pembentukan clip, bukan setiap frame playback. Metadata, bind skeleton,
+geometry dan Walking GLB v6 tidak diubah. Clip Stopping bersifat phase-specific,
+**dibuat runtime oleh helper reusable, tidak disimpan statis di GLB unduhan**.
+`makeCharacterStop` mengembalikan AnimationClip standar yang juga bisa diekspor
+bersama rig oleh pipeline glTF. Tidak ada logika berhenti khusus renderer preview.
+
+`CharacterPlayback.setMode('bind')` tetap nama API legacy untuk permintaan stop.
+`setMode('bind', true)` hanya untuk bind inspection awal/reset. `isStopping`
+menandai transisi; `stopPlan` menyediakan clip dan waktu kontak untuk inspeksi.
+Memulai walk lagi membatalkan stop dengan crossfade 0,24 detik. Jeda inspeksi biasa
+masih tersedia, tetapi permintaan stop menyelesaikan gerak walau `playing=false`.
+
+Untuk motor dunia: aktifkan `rootMotionEnabled`, panggil `update(dt)`, kemudian
+`consumeRootMotion()` sekali per frame; putar delta lokal mengikuti orientasi tubuh,
+kalikan skala tubuh, dan terapkan pada motor. **Jangan tambahkan translasi Walking
+atau damping velocity saat Stopping**: itu menyeret kaki yang sedang dipin.
+`CharacterTestDrive` menerapkan kontrak ini, termasuk ketika pose akhir ditahan.
+Preview inspeksi juga mengonsumsi motion dan mengikuti posisi dengan kamera.
+
+QA: `npm run character:stop-review` merender fase 0,25 dan 0,75 dari tiga arah,
+masing-masing saat mulai, kontak pertama, kaki penutup terangkat, kontak kedua,
+dan akhir. PNG berada di `.cache/stop-review/`, tidak di Git. Regresi menguji delapan
+fase, kedua kaki acuan, pijakan <2 mm drift, tidak menembus lantai, clearance kaki
+penutup, pose akhir sejajar, serta ekstraksi motion pada tubuh diputar/diskalakan.
+
+Batasan: ini stop authoring prosedural untuk **lantai datar**, bukan mocap, collision
+solver atau animasi airborne. Di batas arena yang meng-clamp tubuh, foot-lock tidak
+bisa dijamin jika motion ditolak; controller terrain/halangan perlu replanning.
+Gerak tetap perlu review pengguna. Preview tetap ringkas, detail teknis dalam panel lipat.

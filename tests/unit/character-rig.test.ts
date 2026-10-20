@@ -201,9 +201,9 @@ describe('portable 101172 rig and Walking asset', () => {
 
   it('turns Neck and Head additively without accumulating rotations or moving the torso', () => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
-    player.setMode('bind');
+    player.setMode('bind', true);
     player.playing = false;
-    player.update(1);
+    player.update(0);
     const look = new CharacterLook(gltf.scene);
     const neck = gltf.scene.getObjectByName('Neck')!,
       head = gltf.scene.getObjectByName('Head')!;
@@ -465,7 +465,8 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(player.phase).toBeCloseTo(0.25 + 0.05 / WALK.duration, 5);
     for (let i = 0; i < 120; i++) player.locomotion(1 / 60, 0, true, WALK.stride / WALK.duration);
     expect(player.mode).toBe('bind');
-    expect(gltf.scene.getObjectByName('Hips')!.position.y).toBeCloseTo(measured.pelvis[1], 4);
+    expect(gltf.scene.getObjectByName('Hips')!.position.y).toBeGreaterThan(1.1);
+    expect(gltf.scene.getObjectByName('Hips')!.position.y).toBeLessThan(1.14);
     for (let i = 0; i < 60; i++)
       player.locomotion(1 / 60, WALK.stride / WALK.duration, true, WALK.stride / WALK.duration);
     expect(player.mode).toBe('walk');
@@ -474,47 +475,120 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(player.mode).toBe('bind');
     player.dispose();
   });
-  it('finishes the last step at double support and settles smoothly instead of freezing a lifted leg', () => {
+  it('lands the phase-selected foot first, closes the other beside it, and pins planted feet', () => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
-    for (const phase of [0.08, 0.24, 0.39, 0.62, 0.81, 0.95]) {
+    const positions = mesh.geometry.getAttribute('position');
+    const sole: number[] = [];
+    for (let i = 0; i < positions.count; i++) if (positions.getY(i) < 0.1) sole.push(i);
+    const foot = (side: string) =>
+      gltf.scene.getObjectByName(side + 'Foot')!.getWorldPosition(new THREE.Vector3());
+    let worstPin = 0,
+      worstFloor = 0,
+      worstAngle = 0;
+    for (const phase of [0.02, 0.12, 0.25, 0.49, 0.52, 0.68, 0.85, 0.98]) {
       player.setMode('walk');
       player.playing = true;
       player.update(1);
       player.seek(phase);
-      const bones = mesh.skeleton.bones;
-      let previous = bones.map((b) => b.quaternion.clone());
+      const start = { Left: foot('Left'), Right: foot('Right') };
+      let previous = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
       player.setMode('bind');
       player.playing = false;
       player.update(0);
-      bones.forEach((b, i) =>
-        expect(
-          b.quaternion.clone().normalize().angleTo(previous[i].clone().normalize()),
-        ).toBeLessThan(1e-6),
+      mesh.skeleton.bones.forEach((bone, i) =>
+        expect(bone.quaternion.clone().normalize().angleTo(previous[i])).toBeLessThan(1e-6),
       );
-      expect(player.isStopping).toBe(true);
-      let maximumChange = 0;
-      for (let frame = 0; frame < 80; frame++) {
-        player.update(1 / 60);
-        bones.forEach((b, i) => {
-          maximumChange = Math.max(maximumChange, b.quaternion.angleTo(previous[i]));
+      const plan = player.stopPlan!;
+      expect(plan.clip.name).toBe('Stopping');
+      expect(plan.lead).toBe(phase < 0.5 ? 'Right' : 'Left');
+      expect(plan.secondContact).toBeGreaterThan(plan.firstContact + 0.4);
+      const follow = plan.lead === 'Left' ? 'Right' : 'Left';
+      let leadAnchor: THREE.Vector3 | undefined,
+        followAnchor: THREE.Vector3 | undefined,
+        followMax = 0;
+      for (let frame = 1; frame <= 100; frame++) {
+        const time = (plan.clip.duration * frame) / 100;
+        player.update(plan.clip.duration / 100);
+        const lead = foot(plan.lead),
+          closing = foot(follow);
+        if (time < plan.followStart - 0.02)
+          worstPin = Math.max(worstPin, closing.distanceTo(start[follow]));
+        if (time > plan.firstContact + 0.02) {
+          if (!leadAnchor) leadAnchor = lead.clone();
+          worstPin = Math.max(worstPin, lead.distanceTo(leadAnchor));
+        }
+        if (time > plan.secondContact + 0.02) {
+          if (!followAnchor) followAnchor = closing.clone();
+          worstPin = Math.max(worstPin, closing.distanceTo(followAnchor));
+        }
+        if (time > plan.followStart && time < plan.secondContact)
+          followMax = Math.max(followMax, closing.y);
+        mesh.skeleton.bones.forEach((bone, i) => {
+          worstAngle = Math.max(
+            worstAngle,
+            bone.quaternion.clone().normalize().angleTo(previous[i]),
+          );
         });
-        previous = bones.map((b) => b.quaternion.clone());
+        previous = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
+        if (frame % 10 === 0)
+          for (const i of sole) {
+            const point = mesh.applyBoneTransform(
+              i,
+              new THREE.Vector3().fromBufferAttribute(positions, i),
+            );
+            worstFloor = Math.min(worstFloor, point.y);
+          }
       }
-      expect(maximumChange).toBeLessThan(0.25);
       expect(player.isStopping).toBe(false);
-      expect(
-        Math.min(Math.abs(player.phase), Math.abs(player.phase - 0.5), Math.abs(player.phase - 1)),
-      ).toBeLessThan(1e-5);
-      expect(player.action.getEffectiveWeight()).toBeLessThan(1e-5);
-      expect(gltf.scene.getObjectByName('Hips')!.position.y).toBeCloseTo(measured.pelvis[1], 5);
+      expect(foot('Left').z).toBeCloseTo(foot('Right').z, 3);
+      expect(foot('Left').x - foot('Right').x).toBeGreaterThan(0.23);
+      expect(followMax).toBeGreaterThan(0.27);
+      expect(player.action.getEffectiveWeight()).toBe(0);
+      const held = foot('Left');
+      player.update(0.5);
+      expect(foot('Left').distanceTo(held)).toBeLessThan(1e-6);
     }
-    player.setMode('walk');
-    player.update(0.1);
-    player.seek(0.3);
-    player.setMode('bind');
-    player.update(0.1);
+    expect(worstPin).toBeLessThan(0.002);
+    expect(worstFloor).toBeGreaterThan(-0.004);
+    expect(worstAngle).toBeLessThan(0.25);
     player.setMode('walk');
     expect(player.isStopping).toBe(false);
+    player.dispose();
+  }, 20000);
+
+  it('applies stop root displacement once in a rotated, scaled gameplay body without sliding support', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    const body = new THREE.Group();
+    body.scale.setScalar(0.76);
+    body.rotation.y = Math.PI / 2;
+    body.add(gltf.scene);
+    const drive = new CharacterTestDrive(body, player, (WALK.stride / WALK.duration) * 0.76);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(5, 1, 0);
+    camera.lookAt(0, 1, 0);
+    player.seek(0.25);
+    gltf.scene.updateMatrixWorld(true);
+    const before = gltf.scene.getObjectByName('LeftFoot')!.getWorldPosition(new THREE.Vector3());
+    let elapsed = 0,
+      maxPin = 0;
+    for (let frame = 0; frame < 100; frame++) {
+      drive.update(1 / 60, 0, 0, camera);
+      elapsed += 1 / 60;
+      if (elapsed < player.stopPlan!.followStart - 0.02)
+        maxPin = Math.max(
+          maxPin,
+          before.distanceTo(
+            gltf.scene.getObjectByName('LeftFoot')!.getWorldPosition(new THREE.Vector3()),
+          ),
+        );
+    }
+    expect(maxPin).toBeLessThan(0.002);
+    expect(body.position.x).toBeGreaterThan(0.05);
+    expect(Math.abs(body.position.z)).toBeLessThan(0.001);
+    const final = body.position.clone();
+    drive.update(0.5, 0, 0, camera);
+    expect(body.position.distanceTo(final)).toBeLessThan(1e-6);
+    expect(gltf.scene.getObjectByName('Root')!.position.length()).toBeLessThan(1e-6);
     player.dispose();
   });
 

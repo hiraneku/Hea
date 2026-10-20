@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { solveLeg } from './legIK';
 import { taperForearms101172 } from './shape101172';
 import { armRegions101172 } from './skinRegions101172';
 import { measure101172, type CharacterAnatomy } from './anatomy101172';
@@ -272,62 +273,6 @@ function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: Ch
   }
   geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(indices, 4));
   geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(weights, 4));
-}
-
-/** Flat-floor two-bone IK in the sagittal plane, with knees always bending forward.
- * Rotations are solved relative to the authored A-pose, so gait is not tied to the viewer.
- */
-function solveLeg(
-  side: string,
-  ankle: THREE.Vector3,
-  bones: Map<string, THREE.Bone>,
-  scene: THREE.Object3D,
-) {
-  const thigh = bones.get(side + 'Thigh')!,
-    shin = bones.get(side + 'Shin')!,
-    foot = bones.get(side + 'Foot')!;
-  scene.updateMatrixWorld(true);
-  const hip = thigh.getWorldPosition(new THREE.Vector3());
-  const l1 = shin.position.length(),
-    l2 = foot.position.length();
-  const direction = ankle.clone().sub(hip);
-  const distance = Math.min(direction.length(), l1 + l2 - 0.002);
-  direction.normalize();
-  const along = (l1 * l1 + distance * distance - l2 * l2) / (2 * distance);
-  const bend = Math.sqrt(Math.max(0, l1 * l1 - along * along));
-  const pole = new THREE.Vector3(0, 0, 1).addScaledVector(direction, -direction.z).normalize();
-  const knee = hip.clone().addScaledVector(direction, along).addScaledVector(pole, bend);
-  const upperWorld = knee.clone().sub(hip).normalize();
-  const lowerWorld = ankle.clone().sub(knee).normalize();
-  const hingeWorld = upperWorld.clone().cross(lowerWorld).normalize();
-  const bindHinge = shin.position.clone().cross(foot.position).normalize();
-  // Match a full hinge frame, not a single direction with an ambiguous roll.
-  // This keeps the knee's bend axis consistent with the source leg plane.
-  function frame(direction: THREE.Vector3, hinge: THREE.Vector3) {
-    const y = direction.clone().normalize();
-    const z = hinge.clone().cross(y).normalize();
-    const x = y.clone().cross(z).normalize();
-    return new THREE.Quaternion().setFromRotationMatrix(new THREE.Matrix4().makeBasis(x, y, z));
-  }
-  const parentInverse = thigh.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
-  thigh.quaternion
-    .copy(
-      frame(
-        upperWorld.clone().applyQuaternion(parentInverse),
-        hingeWorld.clone().applyQuaternion(parentInverse),
-      ),
-    )
-    .multiply(frame(shin.position, bindHinge).invert());
-  scene.updateMatrixWorld(true);
-  const thighInverse = thigh.getWorldQuaternion(new THREE.Quaternion()).invert();
-  shin.quaternion
-    .copy(
-      frame(
-        lowerWorld.clone().applyQuaternion(thighInverse),
-        hingeWorld.clone().applyQuaternion(thighInverse),
-      ),
-    )
-    .multiply(frame(foot.position, bindHinge).invert());
 }
 
 function makeWalk(

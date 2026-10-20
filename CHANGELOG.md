@@ -7,6 +7,19 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — stop dua langkah sesuai fase dan pijakan
+
+- Ganti fade ke A-pose yang ditolak dengan clip Stopping hasil bake pose/fase:
+  kaki acuan mendarat, transfer berat, kaki kedua melangkah menutup sejajar, lalu
+  tahan pose berdiri. Pemilihan kaki kanan/kiri mengikuti fase Walking.
+- Pin target kaki yang menapak, sesuaikan tinggi telapak dan IK panjang tungkai,
+  gerakkan pelvis/tubuh melalui Root.position. Motor mengonsumsi displacement
+  sekali, bukan menambahkan damping/translasi yang menyeret pijakan.
+- Helper stop dan clip standar reusable di gameplay, bukan efek viewer. Tambahkan
+  review renderer, tes delapan fase, akhir sejajar, floor/foot-lock, dan root motion
+  pada tubuh diputar/diskalakan. Model/Walking v6 dan pemain default tetap utuh.
+- UI tetap ringkas; label pose menjadi Diam / berhenti, bukan A-pose setelah stop.
+
 ### Diperbaiki — berhenti berjalan halus dan preview lebih bersih
 
 - Stop mengikuti sisa setengah langkah sampai kedua kaki menapak, lalu blend

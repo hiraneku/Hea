@@ -88,9 +88,7 @@ test('movement choice toggles Walking back to standing instead of freezing a ste
   await walk.click();
   await expect(walk).toHaveAttribute('aria-pressed', 'false');
   await expect(page.locator('#animation')).toHaveValue('bind');
-  await expect
-    .poll(async () => ['0', '500', '1000'].includes(await page.locator('#phase').inputValue()))
-    .toBe(true);
+  await expect.poll(async () => (await page.locator('#phase').inputValue()) === '1000').toBe(true);
   const phase = await page.locator('#phase').inputValue();
   await page.waitForTimeout(200);
   expect(await page.locator('#phase').inputValue()).toBe(phase);
@@ -117,6 +115,7 @@ test('playable preview moves with keyboard and joystick, releases input, and tes
     .poll(() => page.locator('#drive-status').textContent())
     .not.toBe('Mode main · X 0.000 · Z 0.000');
   await page.keyboard.up('w');
+  await expect.poll(() => page.locator('#phase').inputValue()).toBe('1000');
   await expect
     .poll(async () => {
       const before = await page.locator('#drive-status').textContent();
