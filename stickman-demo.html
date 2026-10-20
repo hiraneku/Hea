@@ -43,8 +43,8 @@
 </head>
 <body>
 <div id="flash"></div>
-<div id="title">STICKMAN — badan sesuai spesifikasi 100 unit
-  <small>Satu permukaan mulus tanpa sambungan (tabung menyapu kurva sendi), pose prosedural + ragdoll. Seret untuk memutar, cubit/scroll untuk zoom.</small>
+<div id="title">STICKMAN — persis gambar referensi
+  <small>Proporsi, pose netral, dan warna diukur langsung dari gambar referensi. Badan satu permukaan mulus tanpa sambungan. Seret untuk memutar, cubit/scroll untuk zoom.</small>
 </div>
 <div id="panel">
   <button data-act="collapse" id="collapseBtn">Sembunyikan Kontrol ▾</button>
@@ -63,12 +63,12 @@
   <div class="row">
     <button data-act="hit">Kena Pukul!</button>
     <button data-act="getup">Bangkit</button>
-    <button data-act="theme" id="themeBtn">Latar: Arena</button>
-    <button data-act="katana" id="katanaBtn" class="on">Katana</button>
+    <button data-act="theme" id="themeBtn">Latar: Studio</button>
+    <button data-act="katana" id="katanaBtn">Katana</button>
     <button data-act="band" id="bandBtn">Ikat Kepala</button>
   </div>
   <div class="row" id="colors">
-    <button class="sw on" data-color="#a000e8" style="background:#a000e8" aria-label="Ungu"></button>
+    <button class="sw on" data-color="#9806f5" style="background:#9806f5" aria-label="Ungu"></button>
     <button class="sw" data-color="#17171c" style="background:#17171c" aria-label="Hitam"></button>
     <button class="sw" data-color="#f2f2f5" style="background:#f2f2f5" aria-label="Putih"></button>
     <button class="sw" data-color="#d23b2e" style="background:#d23b2e" aria-label="Merah"></button>
@@ -83,8 +83,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import {
-  PROP, RADII, BONES, JOINTS, makePose, lerpPose, EASE,
-  computeSkeleton, sweepTube, idlePose, gaitPose, airPose, crouchPose,
+  PROP, BONES, JOINTS, makePose, lerpPose, EASE,
+  computeSkeleton, sweepTube, bodyTubes, idlePose, gaitPose, airPose, crouchPose,
   CASTS, castPoseAt, castDuration,
 } from './stickman.mjs';
 
@@ -98,18 +98,16 @@ document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(42, innerWidth / innerHeight, 0.1, 300);
-camera.position.set(3.0, 1.7, 4.8);
+// Opens on the exact front view of the reference render — no auto-rotate.
+camera.position.set(0, 1.42, 5.6);
 
 const controls = new OrbitControls(camera, renderer.domElement);
-controls.target.set(0, 0.9, 0);
+controls.target.set(0, 0.92, 0);
 controls.enableDamping = true;
 controls.dampingFactor = 0.06;
 controls.minDistance = 1.6;
 controls.maxDistance = 16;
 controls.maxPolarAngle = 1.53;
-controls.autoRotate = true;
-controls.autoRotateSpeed = 0.7;
-addEventListener('pointerdown', () => { controls.autoRotate = false; }, { once: true });
 
 const hemi = new THREE.HemisphereLight(0xcfd8ff, 0x2a1a3e, 0.9);
 scene.add(hemi);
@@ -154,10 +152,10 @@ scene.add(grid);
 const group = new THREE.Group();
 scene.add(group);
 
-// One uniform material for the whole body (spec: #A000E8, rough ~0.65).
+// One uniform material for the whole body (colour sampled from the render).
 const bodyMat = new THREE.MeshStandardMaterial({
-  color: '#a000e8', roughness: 0.65, metalness: 0,
-  emissive: '#a000e8', emissiveIntensity: 0.14,
+  color: '#9806f5', roughness: 0.62, metalness: 0,
+  emissive: '#9806f5', emissiveIntensity: 0.10,
 });
 
 /**
@@ -201,60 +199,19 @@ function fillTube(t, points, radii) {
   t.nor.needsUpdate = true;
 }
 
-// Head: ellipsoid (17w x 19h x 14d) with a subtly tapered jaw.
+// Head: one plain smooth sphere, completely featureless — as rendered.
 const headGroup = new THREE.Group();
 group.add(headGroup);
-const headGeo = new THREE.SphereGeometry(1, 28, 20);
-{
-  const p = headGeo.attributes.position;
-  const v = new THREE.Vector3();
-  for (let i = 0; i < p.count; i++) {
-    v.fromBufferAttribute(p, i);
-    if (v.y < 0) {
-      const f = 1 + v.y * 0.16; // narrow toward the jaw
-      v.x *= f;
-      v.z *= f;
-    }
-    p.setXYZ(i, v.x, v.y, v.z);
-  }
-  headGeo.computeVertexNormals();
-}
-const headMesh = new THREE.Mesh(headGeo, bodyMat);
-headMesh.scale.set(PROP.headRX, PROP.headR, PROP.headRZ);
+const headMesh = new THREE.Mesh(new THREE.SphereGeometry(1, 32, 24), bodyMat);
+headMesh.scale.setScalar(PROP.headR);
 headMesh.castShadow = true;
 headGroup.add(headMesh);
 
-// Small narrow eyes only — they never change the head silhouette.
-const eyeCanvas = document.createElement('canvas');
-eyeCanvas.width = 128; eyeCanvas.height = 64;
-{
-  const g = eyeCanvas.getContext('2d');
-  g.clearRect(0, 0, 128, 64);
-  g.fillStyle = '#f6f2ff';
-  g.beginPath();
-  g.moveTo(4, 38); g.lineTo(34, 20); g.lineTo(112, 24); g.lineTo(124, 34);
-  g.lineTo(84, 44); g.lineTo(28, 43); g.closePath();
-  g.fill();
-}
-const eyeTex = new THREE.CanvasTexture(eyeCanvas);
-const eyeMat = new THREE.MeshBasicMaterial({ map: eyeTex, transparent: true, side: THREE.DoubleSide, depthWrite: false });
-function makeEye(sideSign) {
-  const m = new THREE.Mesh(new THREE.PlaneGeometry(0.085, 0.042), eyeMat);
-  m.position.set(sideSign * 0.06, -0.005, PROP.headRZ * 0.92);
-  m.rotation.y = sideSign * 0.42;
-  if (sideSign < 0) m.scale.x = -1;
-  m.renderOrder = 2;
-  headGroup.add(m);
-  return m;
-}
-makeEye(1);
-makeEye(-1);
-
 const bandMesh = new THREE.Mesh(
-  new THREE.TorusGeometry((PROP.headRX + PROP.headRZ) / 2 * 1.04, 0.024, 8, 28),
+  new THREE.TorusGeometry(PROP.headR * 1.03, 0.022, 8, 28),
   new THREE.MeshStandardMaterial({ color: '#d7263d', roughness: 0.6 }),
 );
-bandMesh.position.y = 0.035;
+bandMesh.position.y = 0.03;
 bandMesh.rotation.x = Math.PI / 2 - 0.18;
 bandMesh.castShadow = true;
 bandMesh.visible = false;
@@ -297,6 +254,7 @@ const katana = new THREE.Group();
     katana.add(part);
   }
 }
+katana.visible = false; // the reference render is unarmed
 group.add(katana);
 
 const UP = new THREE.Vector3(0, 1, 0);
@@ -321,7 +279,7 @@ function headQuatFromJoints(J) {
     new THREE.Matrix4().makeBasis(_x.clone(), y, z));
 }
 
-function drawFoot(mesh, ankle, toe, leftAxis) {
+function drawFoot(mesh, ankle, toe, leftAxis, sideSign) {
   _f.subVectors(toe, ankle);
   const len = Math.max(_f.length(), 1e-5);
   _f.divideScalar(len);
@@ -331,53 +289,26 @@ function drawFoot(mesh, ankle, toe, leftAxis) {
   _fy.crossVectors(_f, _fx);
   _m4.makeBasis(_fx, _fy, _f);
   mesh.quaternion.setFromRotationMatrix(_m4);
-  mesh.position.copy(ankle).lerp(toe, 0.42).addScaledVector(_fy, -0.036);
-  mesh.scale.set(0.035, 0.027, len * 0.62);
+  mesh.position.copy(ankle).lerp(toe, 0.42)
+    .addScaledVector(_fy, -0.036)
+    .addScaledVector(_fx, sideSign * 0.014); // feet splay a touch outward
+  mesh.scale.set(0.058, 0.040, len * 0.62); // chunky rounded foot blob, ~6.6u wide
 }
 
 function drawBody(J, headQuat) {
-  _dirA.subVectors(J.chest, J.pelvis).normalize(); // spine up
-  _dirB.subVectors(J.head, J.neck).normalize(); // head up
-  fillTube(tubeTorso, [
-    J.pelvis.clone().addScaledVector(_dirA, -0.085),
-    J.pelvis.clone().addScaledVector(_dirA, -0.05),
-    J.pelvis.clone(),
-    J.pelvis.clone().lerp(J.chest, 0.45),
-    J.chest.clone(),
-    J.neck.clone(),
-    J.head.clone().addScaledVector(_dirB, -0.06),
-  ], RADII.torso);
-
-  for (const [s, tube] of [['L', tubeArmL], ['R', tubeArmR]]) {
-    _f.subVectors(J[`hand${s}`], J[`elbow${s}`]);
-    if (_f.lengthSq() < 1e-8) _f.set(0, -1, 0); else _f.normalize();
-    fillTube(tube, [
-      J.chest.clone().lerp(J[`shoulder${s}`], 0.35),
-      J[`shoulder${s}`].clone(),
-      J[`elbow${s}`].clone(),
-      J[`hand${s}`].clone(),
-      J[`hand${s}`].clone().addScaledVector(_f, 0.05),
-      J[`hand${s}`].clone().addScaledVector(_f, 0.078),
-    ], RADII.arm);
-  }
-  for (const [s, tube] of [['L', tubeLegL], ['R', tubeLegR]]) {
-    _f.subVectors(J[`ankle${s}`], J[`knee${s}`]);
-    if (_f.lengthSq() < 1e-8) _f.set(0, -1, 0); else _f.normalize();
-    fillTube(tube, [
-      J.pelvis.clone().lerp(J[`hip${s}`], 0.3),
-      J[`hip${s}`].clone(),
-      J[`knee${s}`].clone(),
-      J[`ankle${s}`].clone(),
-      J[`ankle${s}`].clone().addScaledVector(_f, 0.035),
-    ], RADII.leg);
-  }
+  const tubes = bodyTubes(J);
+  fillTube(tubeTorso, tubes.torso.points, tubes.torso.radii);
+  fillTube(tubeArmL, tubes.armL.points, tubes.armL.radii);
+  fillTube(tubeArmR, tubes.armR.points, tubes.armR.radii);
+  fillTube(tubeLegL, tubes.legL.points, tubes.legL.radii);
+  fillTube(tubeLegR, tubes.legR.points, tubes.legR.radii);
 
   headGroup.position.copy(J.head);
   headGroup.quaternion.copy(headQuat || headQuatFromJoints(J));
 
   _x.subVectors(J.hipL, J.hipR).normalize(); // character left axis
-  drawFoot(footL, J.ankleL, J.toeL, _x);
-  drawFoot(footR, J.ankleR, J.toeR, _x);
+  drawFoot(footL, J.ankleL, J.toeL, _x, 1);
+  drawFoot(footR, J.ankleR, J.toeR, _x, -1);
 
   if (katana.visible) {
     _d.subVectors(J.handR, J.elbowR).normalize();
@@ -588,15 +519,16 @@ function setGlow(l, r) {
 }
 
 /* ----------------------------------------------------------------- UI -- */
-let arenaTheme = true;
+let studioTheme = true;
 function applyTheme() {
-  if (arenaTheme) {
-    scene.background = new THREE.Color('#170b26');
-    scene.fog = new THREE.Fog('#170b26', 18, 60);
-    groundMat.color.set('#241335');
-    gridMat.color.set('#be8cff'); gridMat.opacity = 0.35;
-    hemi.intensity = 0.9; key.intensity = 2.4; rim.intensity = 1.6; rim.color.set('#b78cff');
-    bodyMat.emissiveIntensity = 0.14;
+  if (studioTheme) {
+    // Neutral near-black studio, matching the reference render's backdrop.
+    scene.background = new THREE.Color('#151517');
+    scene.fog = new THREE.Fog('#151517', 18, 60);
+    groundMat.color.set('#1c1c1f');
+    gridMat.color.set('#43434a'); gridMat.opacity = 0.25;
+    hemi.intensity = 1.0; key.intensity = 2.2; rim.intensity = 0.55; rim.color.set('#dfe4ff');
+    bodyMat.emissiveIntensity = 0.10;
   } else {
     scene.background = new THREE.Color('#b9cbd9');
     scene.fog = new THREE.Fog('#b9cbd9', 25, 80);
@@ -605,7 +537,7 @@ function applyTheme() {
     hemi.intensity = 1.25; key.intensity = 2.6; rim.intensity = 0.5; rim.color.set('#ffffff');
     bodyMat.emissiveIntensity = 0.04;
   }
-  document.getElementById('themeBtn').textContent = arenaTheme ? 'Latar: Arena' : 'Latar: Terang';
+  document.getElementById('themeBtn').textContent = studioTheme ? 'Latar: Studio' : 'Latar: Terang';
 }
 applyTheme();
 
@@ -638,7 +570,7 @@ panelEl.addEventListener('click', (e) => {
   else if (act.startsWith('cast-')) startCast(act.slice(5));
   else if (act === 'hit') doHit();
   else if (act === 'getup') doGetup();
-  else if (act === 'theme') { arenaTheme = !arenaTheme; applyTheme(); }
+  else if (act === 'theme') { studioTheme = !studioTheme; applyTheme(); }
   else if (act === 'katana') { katana.visible = !katana.visible; btn.classList.toggle('on', katana.visible); }
   else if (act === 'band') { bandMesh.visible = !bandMesh.visible; btn.classList.toggle('on', bandMesh.visible); }
 });

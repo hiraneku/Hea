@@ -1,48 +1,46 @@
 /**
- * Stickman skeleton + procedural poses, built to the supplied 100-unit spec
- * (1 unit = 1.75 cm, total height 1.75 m):
+ * Stickman skeleton + procedural poses, measured pixel-by-pixel off the
+ * supplied reference render (front view, neutral stance). All values in
+ * metres; the figure stands 1.75 m = 100 reference units (1u = 1.75 cm):
  *
- *   head 17w x 19h x 14d ellipsoid, center Y88 · neck ~0 exposed
- *   torso 22 long, 9 wide, 7 deep · shoulder span 15 at Y72
- *   arms 17+17, diameters 5.0/4.5, hand a rounded continuation
- *   legs 24+24, diameters 6.0/5.0, ankle Y5, knee Y25, hip Y49
- *   foot 5 long x 4 wide, simple rounded shape
+ *   head: plain sphere, diameter 17.1u, center Y91.4, no face
+ *   neck: short pinch, 4.1u wide at Y82.5
+ *   torso: 5.4u wide mid-chest, widening to 10.5u at the hips (Y54)
+ *   shoulders (joints) at +/-5.2u, Y74 · pelvis Y56 · crotch Y53.1
+ *   arms: hang straight, diameter 4.2u, tips at Y45.5 beside the thighs
+ *   legs: diameter ~5.3u, hip joints +/-3u, ankles +/-12u at Y5 (slight V)
+ *   feet: rounded blobs ~6.9u wide pointing forward
+ *   body colour sampled from the render: #9806f5
  *
  * A pose is a flat bag of numbers: pelvis height/orientation, spine lean,
  * head tilt, and target positions for both hands and feet in character
  * space (origin at the ground, facing +Z, up +Y, left at +X). Elbows and
- * knees come from analytic two-bone IK. The rendered body is NOT built
- * from these as primitives — see sweepTube(): each limb and the torso are
- * single smooth tubes swept along the joint curve, so bends never show
- * joints, gaps, or intersections.
- *
- * Pure three.js maths, no renderer — tests pin the spec landmarks, bone
- * lengths, IK reach, ground contact, and tube sanity headlessly.
+ * knees come from analytic two-bone IK. The body is rendered as smooth
+ * tubes swept along the joint curves (see sweepTube) — no joint geometry,
+ * no gaps, no primitive intersections.
  */
 import * as THREE from 'three';
 
 export const PROP = {
-  torso: 0.40, // pelvis -> chest joints (Y49 -> ~Y72 plus radii)
-  neck: 0.09,
-  headR: 0.166, // vertical radius: head height 19u = 0.3325 m
-  headRX: 0.149, // head width 17u
-  headRZ: 0.1225, // head depth 14u
-  headLift: 0.28, // chest -> head center (Y72 -> Y88)
-  shoulderHalf: 0.131, // shoulder span 15u
-  upperArm: 0.30, // 17u
-  foreArm: 0.30, // 17u (the rounded hand is tube extension, ~3u)
-  hipHalf: 0.055,
-  thigh: 0.42, // 24u
-  shin: 0.42, // 24u
-  ankleH: 0.088, // ankle center Y5u
-  foot: 0.09, // foot length 5u
+  torso: 0.33, // pelvis Y56 -> chest Y75
+  neck: 0.15,
+  headR: 0.150, // sphere radius: diameter 17.1u
+  headLift: 0.287, // chest -> head center (Y75 -> Y91.4)
+  shoulderHalf: 0.091, // shoulder joints +/-5.2u
+  upperArm: 0.215, // 12.3u
+  foreArm: 0.215, // 12.3u (+ ~4.5u rounded hand from the tube extension)
+  hipHalf: 0.0525, // hip joints +/-3u
+  thigh: 0.455, // 26u
+  shin: 0.455, // 26u
+  ankleH: 0.0875, // ankle center Y5u
+  foot: 0.10, // ankle -> toe
 };
 
-/** Limb radii from the spec diameters, per control point of each tube. */
+/** Tube radii per control point, from the measured silhouette widths. */
 export const RADII = {
-  arm: [0.048, 0.0437, 0.041, 0.0394, 0.030, 0.004], // root-in, shoulder, elbow, wrist, hand, tip
-  leg: [0.055, 0.0525, 0.047, 0.0437, 0.020], // hip-in, hip, knee, ankle, below-ankle cap
-  torso: [0.004, 0.045, 0.072, 0.066, 0.079, 0.052, 0.040], // bottom cap, pelvis low, pelvis, waist, chest, neck, into head
+  arm: [0.040, 0.037, 0.0365, 0.036, 0.035, 0.030, 0.004], // root-in, shoulder, mid-upper, elbow, wrist, hand, tip (dia 4.2u)
+  leg: [0.048, 0.044, 0.044, 0.044, 0.043, 0.020], // hip-in, hip, mid-thigh, knee, ankle, cap (dia ~5.0u)
+  torso: [0.010, 0.088, 0.086, 0.052, 0.059, 0.039, 0.034], // cap, pelvis-low (10.5u), pelvis, waist (5.9u), chest (6.7u), neck, into head
 };
 
 /** Joint pairs used as ragdoll constraints. */
@@ -65,20 +63,20 @@ export const JOINTS = [
 ];
 
 /**
- * Sword-holding stance (the reference pose): standing tall, sword hand up
- * by the shoulder, free hand crossed low in front.
- * Every pose in this file is BASE plus overrides.
+ * The reference stance itself: perfectly neutral — arms hanging straight
+ * down, legs straight in a slight V, facing forward. Every pose in this
+ * file is BASE plus overrides.
  */
 export const BASE = {
-  rootY: 0.88,
-  pelvisPitch: 0.0, pelvisYaw: 0.05, pelvisRoll: 0.0,
-  lean: 0.06, spineYaw: 0.04, spineRoll: 0.0,
-  headPitch: 0.10, headYaw: 0.08,
-  hLx: -0.05, hLy: 0.92, hLz: 0.16,
-  hRx: -0.20, hRy: 1.24, hRz: 0.11,
-  fLx: 0.10, fLy: PROP.ankleH, fLz: 0.04,
-  fRx: -0.10, fRy: PROP.ankleH, fRz: -0.02,
-  toeL: 0.30, toeR: 0.30, // foot pitch, + = toe tips down
+  rootY: 0.98,
+  pelvisPitch: 0.0, pelvisYaw: 0.0, pelvisRoll: 0.0,
+  lean: 0.0, spineYaw: 0.0, spineRoll: 0.0,
+  headPitch: 0.02, headYaw: 0.0,
+  hLx: 0.19, hLy: 0.895, hLz: 0.005,
+  hRx: -0.19, hRy: 0.895, hRz: 0.005,
+  fLx: 0.21, fLy: PROP.ankleH, fLz: 0.0,
+  fRx: -0.21, fRy: PROP.ankleH, fRz: 0.0,
+  toeL: 0.28, toeR: 0.28,
 };
 
 export function makePose(overrides = {}) {
@@ -158,10 +156,12 @@ export function computeSkeleton(p) {
 
   for (const s of ['L', 'R']) {
     const side = s === 'L' ? 1 : -1;
+    // Elbows bulge mostly BACKWARD (barely out), exactly as the render's
+    // straight-looking hanging arms read from the front.
     const pole = _tmp.set(0, 0, 0)
-      .addScaledVector(rightP, side * 0.4)
+      .addScaledVector(rightP, side * 0.12)
       .addScaledVector(upP, -1)
-      .addScaledVector(fwdP, -0.5)
+      .addScaledVector(fwdP, -0.65)
       .clone();
     solve2Bone(
       J[`shoulder${s}`],
@@ -172,9 +172,10 @@ export function computeSkeleton(p) {
 
   for (const s of ['L', 'R']) {
     const side = s === 'L' ? 1 : -1;
+    // Knees bulge straight forward, no sideways splay.
     const pole = _tmp.set(0, 0, 0)
       .addScaledVector(fwdP, 1)
-      .addScaledVector(rightP, side * 0.08)
+      .addScaledVector(rightP, side * 0.02)
       .clone();
     solve2Bone(
       J[`hip${s}`],
@@ -194,9 +195,8 @@ export function computeSkeleton(p) {
 /**
  * Sweep a smooth tube along the curve through `points`, with per-control-
  * point `radii`, writing positions/normals into preallocated arrays shaped
- * [rings x radial]. This is what makes the body one continuous surface:
- * at a bent elbow the tube simply curves — no joint geometry exists.
- * Cross-sections are circles, so parallel-transport frames suffice.
+ * [rings x radial]. One continuous surface per body part: at a bent elbow
+ * the tube simply curves — no joint geometry exists.
  */
 export function sweepTube(points, radii, rings, radial, outPos, outNorm) {
   const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
@@ -254,25 +254,80 @@ export function sweepTube(points, radii, rings, radial, outPos, outNorm) {
   }
 }
 
+/**
+ * The five body tubes for a joint set: control points + radii per part.
+ * Roots start inside the torso so nothing intersects visibly; a guide
+ * point a quarter along each upper limb pins the sweep to the straight
+ * joint line (no outward bow at the root).
+ */
+export function bodyTubes(J) {
+  const up = J.chest.clone().sub(J.pelvis).normalize();
+  const headUp = J.head.clone().sub(J.neck).normalize();
+  const tubes = {
+    torso: {
+      radii: RADII.torso,
+      points: [
+        J.pelvis.clone().addScaledVector(up, -0.085),
+        J.pelvis.clone().addScaledVector(up, -0.05),
+        J.pelvis.clone(),
+        J.pelvis.clone().lerp(J.chest, 0.45),
+        J.chest.clone(),
+        J.neck.clone(),
+        J.head.clone().addScaledVector(headUp, -0.06),
+      ],
+    },
+  };
+  for (const s of ['L', 'R']) {
+    const fore = J[`hand${s}`].clone().sub(J[`elbow${s}`]);
+    if (fore.lengthSq() < 1e-8) fore.set(0, -1, 0); else fore.normalize();
+    tubes[`arm${s}`] = {
+      radii: RADII.arm,
+      points: [
+        J.chest.clone().lerp(J[`shoulder${s}`], 0.35),
+        J[`shoulder${s}`].clone(),
+        J[`shoulder${s}`].clone().lerp(J[`elbow${s}`], 0.3),
+        J[`elbow${s}`].clone(),
+        J[`hand${s}`].clone(),
+        J[`hand${s}`].clone().addScaledVector(fore, 0.05),
+        J[`hand${s}`].clone().addScaledVector(fore, 0.078),
+      ],
+    };
+    const shin = J[`ankle${s}`].clone().sub(J[`knee${s}`]);
+    if (shin.lengthSq() < 1e-8) shin.set(0, -1, 0); else shin.normalize();
+    tubes[`leg${s}`] = {
+      radii: RADII.leg,
+      points: [
+        J.pelvis.clone().lerp(J[`hip${s}`], 0.3),
+        J[`hip${s}`].clone(),
+        J[`hip${s}`].clone().lerp(J[`knee${s}`], 0.3),
+        J[`knee${s}`].clone(),
+        J[`ankle${s}`].clone(),
+        J[`ankle${s}`].clone().addScaledVector(shin, 0.035),
+      ],
+    };
+  }
+  return tubes;
+}
+
 /* -------------------------------------------------------- pose factories -- */
 
-/** Breathing reference stance: barely moves, confident and still. */
+/** The neutral reference stance, breathing almost imperceptibly. */
 export function idlePose(t) {
   const p = makePose();
-  p.lean += 0.02 * Math.sin(t * 1.5);
-  p.rootY += 0.008 * Math.sin(t * 3.0);
-  p.hRy += 0.012 * Math.sin(t * 3.0 + 0.4);
-  p.hLy += 0.012 * Math.sin(t * 3.0);
-  p.headYaw = 0.08 + 0.06 * Math.sin(t * 0.45);
+  p.lean += 0.008 * Math.sin(t * 1.5);
+  p.rootY += 0.004 * Math.sin(t * 3.0);
+  p.hLy += 0.006 * Math.sin(t * 3.0);
+  p.hRy += 0.006 * Math.sin(t * 3.0 + 0.4);
+  p.headYaw = 0.03 * Math.sin(t * 0.45);
   return p;
 }
 
 /** Walk (run=0) → sprint (run=1): elliptical foot paths, counter-swing arms. */
 export function gaitPose(phase, run) {
   const L = THREE.MathUtils.lerp;
-  const stride = L(0.30, 0.46, run);
-  const lift = L(0.11, 0.24, run);
-  const armSwing = L(0.20, 0.32, run);
+  const stride = L(0.34, 0.52, run);
+  const lift = L(0.12, 0.26, run);
+  const armSwing = L(0.18, 0.28, run);
   const p = makePose();
 
   const foot = (ph) => ({
@@ -282,39 +337,39 @@ export function gaitPose(phase, run) {
   });
   const fl = foot(phase);
   const fr = foot(phase + Math.PI);
-  p.fLx = 0.10 + fl.xOut; p.fLy = fl.y; p.fLz = fl.z;
-  p.fRx = -0.10 - fr.xOut; p.fRy = fr.y; p.fRz = fr.z;
-  p.toeL = 0.30 + 0.45 * Math.pow(Math.max(0, Math.sin(phase - 0.6)), 2) * run;
-  p.toeR = 0.30 + 0.45 * Math.pow(Math.max(0, Math.sin(phase + Math.PI - 0.6)), 2) * run;
+  p.fLx = 0.15 + fl.xOut; p.fLy = fl.y; p.fLz = fl.z;
+  p.fRx = -0.15 - fr.xOut; p.fRy = fr.y; p.fRz = fr.z;
+  p.toeL = 0.28 + 0.45 * Math.pow(Math.max(0, Math.sin(phase - 0.6)), 2) * run;
+  p.toeR = 0.28 + 0.45 * Math.pow(Math.max(0, Math.sin(phase + Math.PI - 0.6)), 2) * run;
 
-  const bob = L(0.018, 0.04, run);
-  p.rootY = L(0.85, 0.78, run) + bob * Math.sin(2 * phase + 0.8) - bob * 0.3
-    + run * 0.04 * Math.pow(Math.max(0, Math.sin(2 * phase + 2.2)), 2);
-  p.lean = L(0.10, 0.30, run) + 0.03 * Math.sin(2 * phase);
+  const bob = L(0.02, 0.045, run);
+  p.rootY = L(0.92, 0.82, run) + bob * Math.sin(2 * phase + 0.8) - bob * 0.3
+    + run * 0.045 * Math.pow(Math.max(0, Math.sin(2 * phase + 2.2)), 2);
+  p.lean = L(0.08, 0.26, run) + 0.03 * Math.sin(2 * phase);
   p.pelvisRoll = 0.05 * Math.sin(phase) * (1 - run * 0.5);
   p.pelvisYaw = 0.08 * Math.sin(phase);
   p.spineYaw = -0.10 * Math.sin(phase);
-  p.headPitch = 0.10;
+  p.headPitch = 0.08;
   p.headYaw = 0;
 
-  const handY = L(0.92, 0.98, run) + 0.02 * Math.sin(2 * phase);
-  p.hLx = 0.19; p.hLy = handY; p.hLz = armSwing * Math.cos(phase) + 0.04;
-  p.hRx = -0.19; p.hRy = handY + 0.05; p.hRz = -armSwing * Math.cos(phase) + 0.04;
+  const handY = L(0.95, 1.00, run) + 0.02 * Math.sin(2 * phase);
+  p.hLx = 0.17; p.hLy = handY; p.hLz = armSwing * Math.cos(phase) + 0.03;
+  p.hRx = -0.17; p.hRy = handY; p.hRz = -armSwing * Math.cos(phase) + 0.03;
   return p;
 }
 
 /** Airborne: k=+1 rising (split), k=-1 falling (braced to land). */
 export function airPose(k) {
   const rise = makePose({
-    rootY: 0.86, lean: 0.16, headPitch: -0.02, headYaw: 0,
-    hLx: 0.42, hLy: 1.52, hLz: 0.08, hRx: -0.36, hRy: 1.56, hRz: -0.06,
-    fLx: 0.11, fLy: 0.52, fLz: 0.32, fRx: -0.11, fRy: 0.47, fRz: -0.30,
+    rootY: 0.94, lean: 0.14, headPitch: -0.02, headYaw: 0,
+    hLx: 0.34, hLy: 1.52, hLz: 0.08, hRx: -0.34, hRy: 1.52, hRz: 0.08,
+    fLx: 0.14, fLy: 0.55, fLz: 0.34, fRx: -0.14, fRy: 0.50, fRz: -0.32,
     toeL: 0.55, toeR: 0.55,
   });
   const fall = makePose({
-    rootY: 0.84, lean: 0.24, headPitch: 0.16, headYaw: 0,
-    hLx: 0.46, hLy: 1.02, hLz: 0.13, hRx: -0.40, hRy: 1.10, hRz: 0.02,
-    fLx: 0.12, fLy: 0.30, fLz: 0.08, fRx: -0.12, fRy: 0.33, fRz: -0.05,
+    rootY: 0.92, lean: 0.22, headPitch: 0.14, headYaw: 0,
+    hLx: 0.38, hLy: 1.06, hLz: 0.12, hRx: -0.38, hRy: 1.06, hRz: 0.12,
+    fLx: 0.15, fLy: 0.32, fLz: 0.08, fRx: -0.15, fRy: 0.35, fRz: -0.05,
     toeL: 0.4, toeR: 0.4,
   });
   return lerpPose(fall, rise, THREE.MathUtils.clamp((k + 1) / 2, 0, 1));
@@ -323,9 +378,9 @@ export function airPose(k) {
 /** Deep crouch / squat, the landing absorb. */
 export function crouchPose() {
   return makePose({
-    rootY: 0.58, lean: 0.38, headYaw: 0,
-    hLx: 0.24, hLy: 0.80, hLz: 0.26, hRx: -0.26, hRy: 0.86, hRz: 0.12,
-    fLx: 0.14, fLz: 0.12, fRx: -0.14, fRz: -0.10,
+    rootY: 0.62, lean: 0.36, headYaw: 0,
+    hLx: 0.22, hLy: 0.82, hLz: 0.24, hRx: -0.22, hRy: 0.82, hRz: 0.24,
+    fLx: 0.17, fLz: 0.12, fRx: -0.17, fRz: -0.10,
   });
 }
 
@@ -339,8 +394,8 @@ export const CASTS = {
   bara: {
     label: 'Bara', color: '#ff7a26', fx: 'fireball', fxAt: 0.27, glow: 'R',
     keys: [
-      { d: 0.18, ease: 'out', p: { hRx: -0.24, hRy: 1.10, hRz: -0.20, hLx: 0.22, hLy: 1.04, hLz: 0.20, spineYaw: -0.35, lean: 0.05, rootY: 0.86, headYaw: 0 } },
-      { d: 0.09, ease: 'out', p: { hRx: -0.09, hRy: 1.20, hRz: 0.55, hLx: 0.20, hLy: 0.98, hLz: 0.02, spineYaw: 0.32, pelvisYaw: 0.16, lean: 0.34, rootY: 0.84 } },
+      { d: 0.18, ease: 'out', p: { hRx: -0.20, hRy: 1.14, hRz: -0.17, hLx: 0.20, hLy: 1.06, hLz: 0.18, spineYaw: -0.35, lean: 0.05, rootY: 0.96, headYaw: 0 } },
+      { d: 0.09, ease: 'out', p: { hRx: -0.07, hRy: 1.24, hRz: 0.44, hLx: 0.18, hLy: 1.00, hLz: 0.02, spineYaw: 0.32, pelvisYaw: 0.16, lean: 0.32, rootY: 0.94 } },
       { d: 0.14, ease: 'linear', p: {} },
       { d: 0.32, ease: 'inout', p: { ...BASE } },
     ],
@@ -348,16 +403,16 @@ export const CASTS = {
   prisma: {
     label: 'Prisma', color: '#57e6ff', fx: 'ring', fxAt: 0.30, glow: 'both',
     keys: [
-      { d: 0.30, ease: 'out', p: { hLx: 0.58, hLy: 1.44, hLz: 0.06, hRx: -0.58, hRy: 1.44, hRz: 0.06, lean: -0.06, rootY: 0.90, headPitch: -0.10, headYaw: 0, spineYaw: 0 } },
-      { d: 0.38, ease: 'linear', p: { hLy: 1.47, hRy: 1.47 } },
+      { d: 0.30, ease: 'out', p: { hLx: 0.44, hLy: 1.48, hLz: 0.05, hRx: -0.44, hRy: 1.48, hRz: 0.05, lean: -0.06, rootY: 1.00, headPitch: -0.10, headYaw: 0, spineYaw: 0 } },
+      { d: 0.38, ease: 'linear', p: { hLy: 1.51, hRy: 1.51 } },
       { d: 0.35, ease: 'inout', p: { ...BASE } },
     ],
   },
   nova: {
     label: 'Nova', color: '#b78cff', fx: 'shell', fxAt: 0.45, glow: 'both',
     keys: [
-      { d: 0.35, ease: 'inout', p: { hLx: 0.28, hLy: 0.86, hLz: -0.07, hRx: -0.28, hRy: 0.86, hRz: -0.07, rootY: 0.66, lean: 0.22, spineYaw: 0, headYaw: 0 } },
-      { d: 0.10, ease: 'out', p: { hLx: 0.11, hLy: 1.16, hLz: 0.50, hRx: -0.11, hRy: 1.16, hRz: 0.50, lean: 0.38, rootY: 0.84 } },
+      { d: 0.35, ease: 'inout', p: { hLx: 0.24, hLy: 0.92, hLz: -0.06, hRx: -0.24, hRy: 0.92, hRz: -0.06, rootY: 0.72, lean: 0.22, spineYaw: 0, headYaw: 0 } },
+      { d: 0.10, ease: 'out', p: { hLx: 0.09, hLy: 1.20, hLz: 0.42, hRx: -0.09, hRy: 1.20, hRz: 0.42, lean: 0.38, rootY: 0.92 } },
       { d: 0.16, ease: 'linear', p: {} },
       { d: 0.35, ease: 'inout', p: { ...BASE } },
     ],
@@ -365,8 +420,8 @@ export const CASTS = {
   fall: {
     label: 'FALL', color: '#a64dff', fx: 'shockwave', fxAt: 0.41, glow: 'both',
     keys: [
-      { d: 0.30, ease: 'out', p: { hLx: 0.24, hLy: 1.78, hLz: 0.13, hRx: -0.24, hRy: 1.78, hRz: 0.13, rootY: 0.92, lean: -0.08, headPitch: -0.08, headYaw: 0, spineYaw: 0 } },
-      { d: 0.11, ease: 'in', p: { hLx: 0.20, hLy: 0.18, hLz: 0.40, hRx: -0.20, hRy: 0.18, hRz: 0.40, rootY: 0.42, lean: 0.95, headPitch: 0.30, fLx: 0.20, fLz: -0.04, fRx: -0.20, fRz: -0.04 } },
+      { d: 0.30, ease: 'out', p: { hLx: 0.20, hLy: 1.70, hLz: 0.12, hRx: -0.20, hRy: 1.70, hRz: 0.12, rootY: 0.99, fLx: 0.16, fRx: -0.16, lean: -0.08, headPitch: -0.08, headYaw: 0, spineYaw: 0 } },
+      { d: 0.11, ease: 'in', p: { hLx: 0.16, hLy: 0.26, hLz: 0.36, hRx: -0.16, hRy: 0.26, hRz: 0.36, rootY: 0.47, lean: 1.00, headPitch: 0.30, fLx: 0.22, fLz: -0.04, fRx: -0.22, fRz: -0.04 } },
       { d: 0.28, ease: 'linear', p: {} },
       { d: 0.48, ease: 'inout', p: { ...BASE } },
     ],
