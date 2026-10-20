@@ -419,3 +419,25 @@ menguji nol weight kepala pada bahu dan pemisahan weight forearm/thigh, material
 GLB putih, flight height/floor/pose, hover 10 detik tanpa auto-land, bob/descent,
 scaled root consumer, input setelah landing, pause dan reset. Renderer QA juga
 memeriksa envelope flight dari tiga sudut. Kualitas gerak tetap perlu review pengguna.
+
+## V8 — hover lurus/rapat dan recovery stance
+
+Flight membentuk chain paha–betis lurus di udara dengan arah hampir vertikal;
+jarak ankle sekitar 17 cm, bukan 44 cm dari bind model. Upper arm dan forearm
+diarahkan rileks ke bawah di dekat badan. Blend airborne dimulai setelah takeoff
+serta selesai menjelang kontak lantai; knee bend hanya persiapan/penyerapan landing,
+bukan pose hover. Bob/breathing tetap memakai playback reusable yang sama.
+
+Landing memakai X/Z kaki yang ditangkap saat entry. Untuk entry diam dari stance
+stopping, quaternion seluruh tulang dan posisi pelvis kembali ke pose entry;
+recovery tungkai memakai IK agar telapak tetap kontak. Entry Walking menutup
+kedua kaki ke kedalaman bersama, bukan mengembalikan pose stride melayang.
+Walking hanya dilanjutkan oleh intent gerak motor yang masih aktif.
+
+Skin v8 memakai partisi longitudinal sepanjang limb tanpa kernel jarak yang
+mengubah bobot melintang penampang. Shoulder/arm mask ditransisikan pada graf
+permukaan welded selama 300 iterasi, dengan label shaft/tubuh tetap di luar
+zona bahu. Ini menghilangkan diskontinuitas klasifikasi horizontal di armpit.
+Clavicle kini terbatas dekat shoulder. Sumber GLB dan bentuk selain taper forearm
+yang sudah disetujui tetap tidak diubah. Test mengukur edge stretch mesh saat
+hover, knee angle, lebar kaki, posisi tangan, dan recovery stance dari stopping.

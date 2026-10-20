@@ -602,7 +602,7 @@ async function boot() {
       info.append(row);
     }
     note.textContent =
-      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V7 mengisolasi skin leher dari bahu, membatasi weight lengan, dan memakai material putih pada aset turunan. Leher dan kepala bisa diuji menoleh; mode main memakai clip Walking yang sama. Pemisahan weight lengan/paha tetap dipertahankan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
+      'Aset gameplay sungguhan: 28 tulang, skin weights, dan clip Walking tersimpan di GLB. V8 merapatkan dan meluruskan kaki saat terbang, merilekskan lengan, serta menghaluskan skin sambungan bahu dan tungkai. Material tetap putih pada aset turunan. Leher dan kepala bisa diuji menoleh; mode main memakai clip Walking yang sama. Pemisahan weight lengan/paha tetap dipertahankan; tidak lagi membalik model 180°. Aktifkan skeleton untuk melihat titik sendi dan panah arah depan. Gerak in-place (+Z); perpindahan di dunia tetap dikendalikan motor gameplay. Rig & langkah ini masih tahap review, belum mengganti pemain aktif.';
     document.querySelector<HTMLInputElement>('#wireframe')!.onchange = (e) => {
       for (const material of materials) material.wireframe = (e.target as HTMLInputElement).checked;
     };

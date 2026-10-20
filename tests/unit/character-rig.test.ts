@@ -913,6 +913,66 @@ describe('portable 101172 rig and Walking asset', () => {
     }
     player.dispose();
   });
+  it('hovers with straight close-set legs and relaxed arms, then restores the captured stopped stance', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.rootMotionEnabled = true;
+    player.setMode('walk', true);
+    player.seek(0.31);
+    player.setMode('bind');
+    player.update(3);
+    const initial = mesh.skeleton.bones.map((b) => ({
+      q: b.quaternion.clone(),
+      p: b.position.clone(),
+    }));
+    const point = (name: string) =>
+      gltf.scene.getObjectByName(name)!.getWorldPosition(new THREE.Vector3());
+    const before = ['LeftFoot', 'RightFoot'].map(point);
+    player.fly();
+    const plan = player.flightPlan!;
+    player.update(plan.apex);
+    gltf.scene.updateMatrixWorld(true);
+    for (const side of ['Left', 'Right']) {
+      const hip = point(side + 'Thigh'),
+        knee = point(side + 'Shin'),
+        ankle = point(side + 'Foot');
+      expect(knee.clone().sub(hip).angleTo(ankle.clone().sub(knee))).toBeLessThan(0.005);
+      expect(Math.abs(point(side + 'Hand').x - point(side + 'UpperArm').x)).toBeLessThan(0.065);
+    }
+    expect(point('LeftFoot').x - point('RightFoot').x).toBeLessThan(0.19);
+    const pos = mesh.geometry.getAttribute('position');
+    const index = mesh.geometry.index!;
+    let worst = 0,
+      checked = 0;
+    for (let i = 0; i < index.count; i += 3)
+      for (let j = 0; j < 3; j++) {
+        const a = index.getX(i + j),
+          b = index.getX(i + ((j + 1) % 3));
+        const pa = new THREE.Vector3().fromBufferAttribute(pos, a);
+        const pb = new THREE.Vector3().fromBufferAttribute(pos, b);
+        if (pa.y < 0.3 || pa.y > 1.57) continue;
+        const length = pa.distanceTo(pb);
+        if (length < 0.004) continue;
+        const ratio =
+          mesh.applyBoneTransform(a, pa).distanceTo(mesh.applyBoneTransform(b, pb)) / length;
+        worst = Math.max(worst, ratio);
+        checked++;
+      }
+    expect(checked).toBeGreaterThan(1000);
+    expect(worst).toBeLessThan(2);
+    player.land();
+    player.update(plan.clip.duration - plan.apex);
+    gltf.scene.updateMatrixWorld(true);
+    ['LeftFoot', 'RightFoot'].forEach((name, i) =>
+      expect(point(name).distanceTo(before[i])).toBeLessThan(0.0001),
+    );
+    mesh.skeleton.bones.forEach((b, i) => {
+      expect(
+        b.quaternion.clone().normalize().angleTo(initial[i].q.clone().normalize()),
+      ).toBeLessThan(0.00001);
+      expect(b.position.distanceTo(initial[i].p)).toBeLessThan(0.00001);
+    });
+    player.dispose();
+  });
   it('holds flight in a scaled motor, lands on request, resumes Walking and resets midair', () => {
     const body = new THREE.Group();
     body.scale.setScalar(0.76);

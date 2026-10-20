@@ -7,6 +7,17 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diganti / diperbaiki — flight dan skin v8
+
+- Hover berkaki lurus dan lebih rapat, tangan rileks dekat badan; hapus ankle tuck.
+- Landing dari diam mengembalikan pose berdiri yang ditangkap sebelum takeoff,
+  bukan ankle bawaan model yang lebar. Entry dari Walking tetap menutup stride.
+- Bobot limb longitudinal menghindari shear penampang; transisi bahu dihaluskan
+  mengikuti konektivitas mesh yang dilas, bukan potongan horizontal armpit.
+- Pertahankan warna putih, isolasi leher/bahu, dan model asli tanpa perubahan.
+- Tambah regresi kelurusan kaki, kedekatan lengan, stretch edge mesh aktual,
+  serta posisi/quaternion berdiri sebelum dan sesudah flight.
+
 ### Diganti / diperbaiki — flight, skin v7 dan stickman putih
 
 - Ganti ArcaneJump yang ditolak dengan tekukan singkat, naik dan sustained hover.

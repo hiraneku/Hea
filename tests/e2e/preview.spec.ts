@@ -62,7 +62,7 @@ test('Walking can pause, scrub, change speed and return to bind pose', async ({ 
   await expect(phase).toHaveValue('0');
   await expect(page.getByRole('link', { name: 'Unduh GLB rig + Walking' })).toHaveAttribute(
     'href',
-    /models\/101172-rigged\.glb\?revision=7&gait=1$/,
+    /models\/101172-rigged\.glb\?revision=8&gait=1$/,
   );
 });
 

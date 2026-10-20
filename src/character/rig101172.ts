@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { solveLeg } from './legIK';
 import { stampWalkingGait } from './WalkingGait';
 import { taperForearms101172 } from './shape101172';
-import { armRegions101172 } from './skinRegions101172';
+import { armInfluence101172 } from './skinRegions101172';
 import { measure101172, type CharacterAnatomy } from './anatomy101172';
 
 /** Authored landmarks for 101172, in metres after normalizing to a 2 m stature.
@@ -19,7 +19,7 @@ export const WALK = {
   contactAdvance: 0.25,
   clearance: 0.12,
 } as const;
-export const RIG_REVISION = 7;
+export const RIG_REVISION = 8;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;
@@ -181,7 +181,7 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
 
 function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: CharacterAnatomy) {
   const position = geometry.getAttribute('position');
-  const armRegions = armRegions101172(geometry);
+  const armRegions = armInfluence101172(geometry);
   const indices = new Uint16Array(position.count * 4);
   const weights = new Float32Array(position.count * 4);
   // Skin a joint along the segment to its child, not its parent segment.
@@ -222,12 +222,7 @@ function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: Ch
   for (let vertex = 0; vertex < position.count; vertex++) {
     p.fromBufferAttribute(position, vertex);
     const ax = Math.abs(p.x);
-    // Midway between the surface of the trunk and the arm centreline at each height.
-    const armBorder = THREE.MathUtils.lerp(0.14, 0.095, smooth(1.0, 1.5, p.y));
-    const armMask =
-      p.y < 1.4
-        ? armRegions[vertex]
-        : smooth(armBorder - 0.018, armBorder + 0.035, ax) * (1 - smooth(1.5, 1.59, p.y));
+    const armMask = armRegions[vertex];
     const seam = smooth(anatomy.crotch - 0.055, anatomy.crotch + 0.015, p.y);
     const seamSupport = 1 - seam * (1 - smooth(0.0, 0.055, ax));
     const legMask =
@@ -257,8 +252,9 @@ function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: Ch
           const upper = smooth(limb.elbow[1] - 0.04, limb.elbow[1] + 0.04, p.y);
           const hand = 1 - smooth(limb.wrist[1] - 0.035, limb.wrist[1] + 0.035, p.y);
           if (segment.name.endsWith('Clavicle'))
-            mask *= smooth(limb.elbow[1] + 0.06, limb.shoulder[1] - 0.025, p.y);
-          if (segment.name.endsWith('UpperArm')) mask *= upper;
+            mask *= smooth(limb.shoulder[1] - 0.055, limb.shoulder[1] + 0.025, p.y);
+          if (segment.name.endsWith('UpperArm'))
+            mask *= upper * (1 - smooth(limb.shoulder[1] - 0.055, limb.shoulder[1] + 0.025, p.y));
           else if (segment.name.endsWith('ForeArm')) mask *= (1 - upper) * (1 - hand);
           else if (segment.name.endsWith('Hand')) mask *= hand;
         }
@@ -276,9 +272,14 @@ function weightSkin(geometry: THREE.BufferGeometry, joints: Joint[], anatomy: Ch
         }
         new THREE.Line3(segment.a, segment.b).closestPointToPoint(p, true, nearest);
         const d2 = p.distanceToSquared(nearest);
-        // Compact smooth falloff around each segment; a small finite kernel blends joints.
+        // Limb partitions are longitudinal, constant across the shaft section.
+        // Distance kernels here caused cross-section shear/fins near bent joints.
+        // Keep distance falloff only for axial/torso influences.
         const radius = segment.name === 'Head' ? 0.09 : 0.038;
-        return { index: segment.index, weight: mask * Math.exp(-d2 / (2 * radius * radius)) };
+        return {
+          index: segment.index,
+          weight: mask * (arm || leg ? 1 : Math.exp(-d2 / (2 * radius * radius))),
+        };
       })
       .sort((a, b) => b.weight - a.weight)
       .slice(0, 4);

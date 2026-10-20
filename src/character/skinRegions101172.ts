@@ -45,3 +45,41 @@ export function armRegions101172(geometry: THREE.BufferGeometry): Uint8Array {
     if (below(i) && minimum.get(find(i))! > 0.72) regions[i] = 1;
   return regions;
 }
+
+/** Harmonic shoulder transition on the actual welded surface. A horizontal
+ * classifier cut used to assign neighbouring armpit vertices to unrelated bones,
+ * producing triangular fins when the arms moved. Keep shaft labels, diffuse only
+ * across the connected shoulder surface, and weld UV seams during diffusion. */
+export function armInfluence101172(geometry: THREE.BufferGeometry): Float32Array {
+  const labels = armRegions101172(geometry);
+  const p = geometry.getAttribute('position');
+  const canonical = new Int32Array(p.count);
+  const welded = new Map<string, number>();
+  for (let i = 0; i < p.count; i++) {
+    const key = [p.getX(i), p.getY(i), p.getZ(i)].map((v) => Math.round(v * 1e5)).join(',');
+    const found = welded.get(key);
+    canonical[i] = found ?? i;
+    if (found === undefined) welded.set(key, i);
+  }
+  const neighbours = new Map<number, Set<number>>();
+  const active = (i: number) => p.getY(i) > 1.36 && p.getY(i) < 1.59;
+  const index = geometry.index;
+  const vertex = (i: number) => canonical[index ? index.getX(i) : i];
+  for (let i = 0; i < (index?.count ?? p.count); i += 3) {
+    const tri = [vertex(i), vertex(i + 1), vertex(i + 2)];
+    for (const a of tri)
+      if (active(a)) {
+        let set = neighbours.get(a);
+        if (!set) neighbours.set(a, (set = new Set()));
+        for (const b of tri) if (b !== a) set.add(b);
+      }
+  }
+  const weights = Float32Array.from(labels);
+  const entries = [...neighbours].map(([i, ns]) => [i, [...ns]] as const);
+  // Fixed body above the shoulder and fixed connected shafts below the armpit.
+  for (let iteration = 0; iteration < 300; iteration++)
+    for (const [i, ns] of entries)
+      weights[i] = ns.reduce((sum, j) => sum + weights[j], 0) / ns.length;
+  for (let i = 0; i < p.count; i++) weights[i] = weights[canonical[i]];
+  return weights;
+}

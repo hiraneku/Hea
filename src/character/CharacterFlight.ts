@@ -74,6 +74,7 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
       },
     ]),
   ) as Record<'Left' | 'Right', { p: THREE.Vector3; q: THREE.Quaternion }>;
+  const stationary = forwardSpeed < 0.01 && Math.abs(start.Left.p.z - start.Right.p.z) < 0.08;
   const gather = 0.1,
     charge = 0.16,
     takeoff = 0.28,
@@ -105,9 +106,9 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
     sides.map((s) => [
       s,
       new THREE.Vector3(
-        (s === 'Left' ? anatomy.left : anatomy.right).ankle[0],
+        start[s].p.x,
         floorY(s, new THREE.Quaternion()),
-        (s === 'Left' ? anatomy.left : anatomy.right).ankle[2] + rootEnd.z,
+        (stationary ? start[s].p.z : (start.Left.p.z + start.Right.p.z) / 2) + rootEnd.z,
       ),
     ]),
   ) as Record<'Left' | 'Right', THREE.Vector3>;
@@ -135,7 +136,7 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
         ) - 0.008,
     ),
   );
-  // Compact takeoff and open, relaxed flight silhouette: no casting/coil gesture.
+  // Compact takeoff; the airborne limb solver below closes the source A-pose.
   const poses = [
     {
       t: gather,
@@ -159,7 +160,7 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
       twist: 0,
       arm: [0.015, 0.015],
       elbow: [-0.12, -0.12],
-      spread: [0.18, -0.18],
+      spread: [-0.1, 0.1],
     },
     {
       t: apex,
@@ -167,7 +168,7 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
       twist: 0,
       arm: [-0.035, -0.035],
       elbow: [-0.18, -0.18],
-      spread: [0.28, -0.28],
+      spread: [-0.15, 0.15],
     },
     {
       t: landing,
@@ -175,7 +176,7 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
       twist: 0,
       arm: [-0.04, -0.04],
       elbow: [-0.18, -0.18],
-      spread: [0.14, -0.14],
+      spread: [-0.08, 0.08],
     },
     {
       t: impact,
@@ -275,7 +276,7 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
       ease(t / takeoff),
     );
     if (frame > 0)
-      for (const [i, s] of sides.entries()) {
+      for (const s of sides) {
         const q = start[s].q.clone();
         let ankle: THREE.Vector3;
         if (t <= takeoff) {
@@ -284,13 +285,8 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
           ankle.y = Math.max(ankle.y, floorY(s, q));
         } else {
           ankle = start[s].p.clone().lerp(targets[s], ease(u));
-          const tuck = Math.sin(Math.PI * u) ** 2;
-          const airQ = new THREE.Quaternion().setFromEuler(
-            new THREE.Euler((i === 0 ? 0.12 : 0.1) * tuck, 0, 0),
-          );
-          q.slerp(airQ, ease(u / 0.18));
-          ankle.z -= (i === 0 ? 0.04 : 0.035) * tuck;
-          ankle.y = floorY(s, q) + root.position.y + (i === 0 ? 0.065 : 0.055) * tuck;
+          q.slerp(new THREE.Quaternion(), ease(u / 0.18));
+          ankle.y = floorY(s, q) + root.position.y;
           if (t >= landing) ankle.copy(targets[s]);
         }
         solveLeg(s, ankle, bones, scene);
@@ -306,6 +302,63 @@ export function makeCharacterFlight(model: THREE.Object3D, forwardSpeed = 0): Fl
           .multiply(q);
         bones.get(s + 'Toes')!.quaternion.identity();
       }
+    // Straight anatomical chains, not a lifted ankle target (which bends knees).
+    // Blend only after takeoff and just before contact, keeping the hover straight.
+    const air = ease((t - takeoff) / 0.22) * (1 - ease((t - (landing - 0.14)) / 0.14));
+    const aim = (name: string, child: string, direction: THREE.Vector3) => {
+      scene.updateMatrixWorld(true);
+      const bone = bones.get(name)!;
+      const desired = new THREE.Quaternion().setFromUnitVectors(
+        bones.get(child)!.position.clone().normalize(),
+        direction.normalize(),
+      );
+      desired.premultiply(bone.parent!.getWorldQuaternion(new THREE.Quaternion()).invert());
+      bone.quaternion.slerp(desired, air);
+    };
+    if (air > 0)
+      for (const side of sides) {
+        const sign = side === 'Left' ? 1 : -1;
+        const legDirection = new THREE.Vector3(sign * 0.035, -1, -0.025);
+        aim(side + 'Thigh', side + 'Shin', legDirection.clone());
+        aim(side + 'Shin', side + 'Foot', legDirection.clone());
+        scene.updateMatrixWorld(true);
+        const foot = bones.get(side + 'Foot')!;
+        const flat = foot.parent!.getWorldQuaternion(new THREE.Quaternion()).invert();
+        foot.quaternion.slerp(flat, air);
+        aim(side + 'UpperArm', side + 'ForeArm', new THREE.Vector3(sign * 0.1, -1, 0.02));
+        aim(side + 'ForeArm', side + 'Hand', new THREE.Vector3(sign * 0.045, -1, -0.06));
+      }
+    // Recover the captured standing pose, including pelvis and arm orientation.
+    // Never snap from a walking stride back into that same mid-stride pose.
+    if (stationary && t > impact) {
+      const recovery = ease((t - impact) / (duration - impact));
+      for (const [name, bone] of bones) {
+        if (!/Thigh|Shin|Foot|Toes|ToeEnd/.test(name))
+          bone.quaternion.slerp(rest.get(name)!.q, recovery);
+        if (name === 'Hips') bone.position.lerp(rest.get(name)!.p, recovery);
+      }
+      for (const side of sides) {
+        const q = new THREE.Quaternion().slerp(start[side].q, recovery);
+        const ankle = targets[side].clone();
+        ankle.y = THREE.MathUtils.lerp(floorY(side, q), start[side].p.y, recovery);
+        solveLeg(side, ankle, bones, scene);
+        scene.updateMatrixWorld(true);
+        bones
+          .get(side + 'Foot')!
+          .quaternion.copy(
+            bones
+              .get(side + 'Shin')!
+              .getWorldQuaternion(new THREE.Quaternion())
+              .invert(),
+          )
+          .multiply(q);
+      }
+      if (frame === frames)
+        for (const [name, bone] of bones) {
+          bone.quaternion.copy(rest.get(name)!.q);
+          if (name === 'Hips') bone.position.copy(rest.get(name)!.p);
+        }
+    }
     scene.updateMatrixWorld(true);
     times.push(t);
     for (const [n, b] of bones) {
