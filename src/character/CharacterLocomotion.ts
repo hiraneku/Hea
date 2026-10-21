@@ -116,7 +116,7 @@ export class CharacterLocomotion {
     );
     hips.rotation.set(
       0.012 + run * 0.045 + sprint * 0.025,
-      Math.sin(cycle) * (0.035 + run * 0.035) * (1 - lateral),
+      Math.sin(cycle) * (0.035 + run * 0.035) * (1 - lateral) * Math.max(0, direction.z),
       -Math.sin(cycle) * 0.018,
     );
     const targets: {
@@ -222,7 +222,7 @@ export class CharacterLocomotion {
       .get('Spine')!
       .rotation.set(
         0.015 + run * 0.045 * (1 - lateral),
-        -Math.sin(cycle) * (0.025 + run * 0.035) * (1 - lateral),
+        -Math.sin(cycle) * (0.025 + run * 0.035) * (1 - lateral) * Math.max(0, direction.z),
         lateral * Math.sin(cycle) * 0.012,
       );
     for (const [name, bone] of this.actual) {

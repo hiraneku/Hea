@@ -22,7 +22,8 @@ export class CharacterPivot {
   private fromYaw = 0;
   private progress = 0;
   private weight = 0;
-  private duration = 0.28;
+  private readonly duration = 0.3;
+  private turnSpeed = 0;
   private readonly floor = { Left: 0.194, Right: 0.194 };
   constructor(private readonly model: THREE.Object3D) {
     this.rig = clone(model);
@@ -53,17 +54,16 @@ export class CharacterPivot {
   }
   reset() {
     this.side = this.pending = undefined;
-    this.progress = this.weight = 0;
+    this.progress = this.weight = this.turnSpeed = 0;
   }
   private neutral(side: Side) {
     return new THREE.Vector3(side === 'Left' ? 0.15 : -0.15, this.floor[side], -0.045);
   }
-  private begin(side: Side, rate: number) {
+  private begin(side: Side) {
     this.side = side;
     this.from.copy(this.feet[side]);
     this.fromYaw = this.yaw[side];
     this.progress = 0;
-    this.duration = THREE.MathUtils.clamp(0.3 / (1 + Math.abs(rate) * 0.65), 0.1, 0.3);
   }
   apply(dt: number, rate: number) {
     if (dt <= 0) return this.weight > 0.001;
@@ -86,14 +86,22 @@ export class CharacterPivot {
       }
       // Restart even during blend-out. Previously a quick stop/restart could
       // leave both feet anchored with no active step until the legs crossed.
-      this.begin(this.pending ?? (rate > 0 ? 'Left' : 'Right'), rate);
+      this.begin(this.pending ?? (rate > 0 ? 'Left' : 'Right'));
       this.pending = undefined;
     }
+    this.turnSpeed += (Math.abs(rate) - this.turnSpeed) * (1 - Math.exp(-10 * dt));
     const delta = rate * dt;
     for (const s of sides) {
       this.feet[s].applyAxisAngle(up, -delta);
       this.yaw[s] -= delta;
-      if (s !== this.side) this.feet[s].y = this.floor[s];
+      if (s !== this.side) {
+        this.feet[s].y = this.floor[s];
+        // Fast drags use a rolling/swivelling support, not a faster lift cycle.
+        // Relax the world anchor continuously before anatomical bounds engage.
+        const swivel = 1 - Math.exp(-Math.max(0, this.turnSpeed - 1.5) * 6 * dt);
+        this.feet[s].lerp(this.neutral(s), swivel);
+        this.yaw[s] = THREE.MathUtils.lerp(this.yaw[s], 0, swivel);
+      }
       const sign = s === 'Left' ? 1 : -1;
       // Predict the next support failure, not just the current ankle position.
       // A support may pivot on its forefoot, but may never stay pinned through
@@ -105,16 +113,15 @@ export class CharacterPivot {
     if (this.side) {
       this.from.applyAxisAngle(up, -delta);
       this.fromYaw -= delta;
-      this.duration = Math.min(
-        this.duration,
-        THREE.MathUtils.clamp(0.3 / (1 + Math.abs(rate) * 0.65), 0.1, 0.3),
-      );
-      const exchange = this.pending && this.pending !== this.side ? 2.5 : 1;
-      this.progress = Math.min(1, this.progress + (dt * exchange) / this.duration);
+      // One committed step takes 300 ms, even during rapid reversals. Never
+      // multiply phase speed to rescue the other anchor (the old foot chatter).
+      this.progress = Math.min(1, this.progress + dt / this.duration);
       const blend = THREE.MathUtils.smootherstep(this.progress, 0, 1);
       const s = this.side;
       this.feet[s].copy(this.from).lerp(this.neutral(s), blend);
-      this.feet[s].y += Math.sin(Math.PI * this.progress) ** 2 * 0.032;
+      this.feet[s].y +=
+        Math.sin(Math.PI * this.progress) ** 2 *
+        THREE.MathUtils.lerp(0.032, 0.014, THREE.MathUtils.clamp((this.turnSpeed - 1.5) / 3, 0, 1));
       this.yaw[s] = THREE.MathUtils.lerp(this.fromYaw, 0, blend);
       if (this.progress >= 1) {
         const next = this.pending ?? (s === 'Left' ? 'Right' : 'Left');
@@ -125,7 +132,7 @@ export class CharacterPivot {
           this.feet[next].distanceTo(this.neutral(next)) > 0.025 ||
           Math.abs(this.yaw[next]) > 0.08
         )
-          this.begin(next, rate);
+          this.begin(next);
       }
     }
     for (const s of sides) {
@@ -142,7 +149,8 @@ export class CharacterPivot {
       ) {
         // Release the sole and roll/reorient briefly while the other step lands.
         // Holding the old world anchor here was the source of the folded-leg pose.
-        foot.y = this.floor[s] + 0.012;
+        // Do not toggle support height at the clamp: that created a second,
+        // frame-dependent up/down oscillation on top of the actual step.
         this.pending = s;
       }
       foot.x = x;
@@ -150,7 +158,7 @@ export class CharacterPivot {
       this.yaw[s] = yaw;
     }
     if (!this.side && this.pending) {
-      this.begin(this.pending, rate);
+      this.begin(this.pending);
       this.pending = undefined;
     }
     this.weight += ((this.side || turning ? 1 : 0) - this.weight) * (1 - Math.exp(-14 * dt));

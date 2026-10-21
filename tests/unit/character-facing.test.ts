@@ -27,6 +27,16 @@ describe('camera, body and movement separation', () => {
     facing.update(0, 0, true, 0, false);
     expect(facing.yaw).toBe(before);
   });
+  it('keeps locked backward travel camera-facing on either side of the 180 degree seam', () => {
+    for (const view of [0, Math.PI - 0.01, -Math.PI + 0.01]) {
+      const facing = new CharacterFacing();
+      facing.reset(view);
+      for (let i = 0; i < 240; i++) {
+        facing.update(1 / 60, view, true, view + Math.PI + (i % 2 ? 0.0001 : -0.0001), true);
+        expect(Math.abs(angleDelta(facing.yaw, view))).toBeLessThan(0.001);
+      }
+    }
+  });
   it('faces travel unlocked, but keeps a small diagonal allowance under lock', () => {
     const free = new CharacterFacing(),
       locked = new CharacterFacing();

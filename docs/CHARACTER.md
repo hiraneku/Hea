@@ -562,3 +562,22 @@ diagonal membaurkan keduanya. Ini dipakai game dan preview melalui overlay sama.
 Test baru sengaja gagal pada GERAK 2 (ankle crossover/twist) sebelum perbaikan;
 memeriksa lane, twist, pause/restart/reversal dan rentang hand Z untuk lateral.
 Review renderer menambah kasus pivot-stress selain pivot normal dan gait lain.
+
+## GERAK 4 — ritme pivot dan lock mundur
+
+Menggantikan durasi adaptif/pengali exchange GERAK 3 yang menimbulkan lift chatter
+saat drag cepat. Satu swing kini selalu 300 ms (tidak dipotong saat reversal),
+dengan lift 32 ke 14 mm sesuai kecepatan putaran yang disaring 10/s. Support
+merelaksasi world anchor ke neutral secara kontinu pada kecepatan di atas 1,5 rad/s;
+sole tetap ground-level, tidak lagi toggle +12 mm ketika batas tercapai. Lane/yaw
+bounds tetap menjadi pengaman terakhir, bukan pemicu siklus naik-turun tambahan.
+Ini kompromi terkontrol: swivel/slide kecil ketika drag cepat, bukan world pin kaku
+atau langkah berfrekuensi tinggi. Tes cadence memakai posisi ankle hasil rig pada
+25/60/120 FPS, termasuk reversal cepat; tes lane/twist lama tetap berlaku.
+
+Lock memakai allowance `0.3 * sin(travel - view)` sehingga mundur tepat memiliki
+allowance nol, termasuk melintasi seam ±PI. Diagonal masih memiliki allowance kecil.
+Gait mundur juga meniadakan yaw pelvis/spine; lean dan balance lain tetap ada.
+Tes arah backward dengan jitter ±0,0001 rad serta tiga yaw kamera melengkapi tes
+pelvis/chest mundur pada seluruh pace. Perbaikan ada pada controller bersama,
+bukan patch preview saja; tidak mengubah model sumber atau kecepatan world.

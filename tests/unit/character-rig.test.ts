@@ -1387,6 +1387,60 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(body.position.length()).toBe(0);
     player.dispose();
   });
+  it.each([0, 1, 2])('keeps the backward pelvis/chest facing forward at pace %s', (pace) => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.setMode('bind', true);
+    const gait = new CharacterLocomotion(gltf.scene);
+    for (let i = 0; i < 240; i++) {
+      player.update(1 / 60);
+      gait.apply(1 / 60, { x: 0, forward: -1, pace, airborne: false, turnRate: 0 });
+      if (i < 60) continue;
+      for (const name of ['Hips', 'Spine']) {
+        const yaw = new THREE.Euler().setFromQuaternion(
+          gltf.scene.getObjectByName(name)!.quaternion,
+          'YXZ',
+        ).y;
+        expect(Math.abs(yaw)).toBeLessThan(0.006);
+      }
+    }
+    player.dispose();
+  });
+  it.each([25, 60, 120])(
+    'bounds foot lift cadence during fast camera drags and reversals at %s FPS',
+    (fps) => {
+      const body = new THREE.Group();
+      body.add(gltf.scene);
+      const player = new CharacterPlayback(gltf.scene, gltf.animations);
+      player.setMode('bind', true);
+      const gait = new CharacterLocomotion(gltf.scene);
+      let previous = 0.19,
+        trough = previous,
+        rising = false,
+        peaks = 0;
+      for (let i = 0; i < fps * 6; i++) {
+        const dt = 1 / fps;
+        const rate = i < fps * 3 ? 4.5 : Math.floor(i / (fps * 0.35)) % 2 ? -4.5 : 4.5;
+        player.update(dt);
+        body.rotation.y += rate * dt;
+        gait.apply(dt, { x: 0, forward: 0, pace: 0, airborne: false, turnRate: rate });
+        body.updateMatrixWorld(true);
+        const y = body.worldToLocal(
+          gltf.scene.getObjectByName('LeftFoot')!.getWorldPosition(new THREE.Vector3()),
+        ).y;
+        if (y > previous + 0.00001) rising = true;
+        if (rising && y < previous - 0.00001) {
+          if (previous - trough > 0.006) peaks++;
+          rising = false;
+          trough = y;
+        }
+        if (!rising) trough = Math.min(trough, y);
+        previous = y;
+      }
+      expect(peaks).toBeGreaterThan(3);
+      expect(peaks).toBeLessThanOrEqual(12);
+      player.dispose();
+    },
+  );
   it('keeps preview world speed camera-relative and never adds lateral root speed', () => {
     const body = new THREE.Group();
     body.scale.setScalar(0.76);

@@ -27,8 +27,9 @@ export class CharacterFacing {
     const delta = angleDelta(view, this.yaw);
     let target = this.yaw;
     if (moving) {
-      // Lock-on keeps chest mostly camera-facing, with a small diagonal allowance.
-      target = locked ? view + THREE.MathUtils.clamp(angleDelta(travel, view), -0.3, 0.3) : travel;
+      // Lateral allowance vanishes at both forward AND backward travel. A
+      // clamped angle jumped from +0.3 to -0.3 at the backward +/-PI seam.
+      target = locked ? view + Math.sin(angleDelta(travel, view)) * 0.3 : travel;
     } else if (Math.abs(delta) > HEAD_LIMIT) {
       target = view - Math.sign(delta) * HEAD_LIMIT;
     }

@@ -7,6 +7,18 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — GERAK 4: drag cepat dan mundur saat lock
+
+- Batasi langkah pivot menjadi 300 ms tanpa pengali pergantian support. Drag cepat
+  kini memakai swivel tumpuan kontinu dan lift lebih rendah, bukan kaki mengangkat
+  semakin cepat. Hapus toggle tinggi support ketika batas anatomi tersentuh.
+- Saring kecepatan putaran untuk transisi lift/swivel; pertahankan batas lane dan
+  twist, restart saat blend-out, dan netral ketika hanya menoleh.
+- Allowance badan saat lock memakai komponen lateral sinus, sehingga arah mundur
+  tepat tetap menghadap kamera tanpa loncatan ±0,3 rad di seam ±180 derajat.
+- Hilangkan ayunan yaw pelvis/spine pada gait mundur; kontrol bebas, side-step
+  tidak menyilang, pace, model dan flight tetap dipertahankan.
+
 ### Diperbaiki — GERAK 3: pivot aman dan step-together
 
 - Perbaiki pivot yang tidak memulai langkah kembali saat input yaw datang saat
