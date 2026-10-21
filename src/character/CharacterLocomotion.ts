@@ -4,6 +4,33 @@ import { solveLeg } from './legIK';
 import { CharacterPivot } from './CharacterPivot';
 import type { CharacterAnatomy } from './anatomy101172';
 
+/** Continuous procedural foot target. Phase is per foot, in [0, 1].
+ * Match stance velocity and zero acceleration at lift-off/contact; rolling
+ * changes ankle height through the measured sole, never a 25 mm lift reset. */
+export function sampleLocomotionStep(
+  phase: number,
+  stance: number,
+  stride: number,
+  clearance: number,
+  roll: number,
+) {
+  if (phase < stance)
+    return {
+      travel: stride * (0.5 - phase / stance),
+      lift: 0,
+      pitch: roll * THREE.MathUtils.smootherstep(phase / stance, 0.72, 1),
+    };
+  const u = (phase - stance) / (1 - stance);
+  const m = (-stride * (1 - stance)) / stance;
+  const liftPhase = u + 0.12 * Math.sin(2 * Math.PI * u);
+  return {
+    travel: -stride * 0.5 + m * u + (stride - m) * THREE.MathUtils.smootherstep(u, 0, 1),
+    lift: clearance * Math.sin(Math.PI * liftPhase) ** 3,
+    pitch:
+      roll * (1 - THREE.MathUtils.smootherstep(u, 0, 0.55)) - 0.04 * Math.sin(Math.PI * u) ** 3,
+  };
+}
+
 export interface LocomotionFrame {
   /** Actual velocity in normalized character +Z-forward space, metres/second. */
   x: number;
@@ -80,8 +107,15 @@ export class CharacterLocomotion {
       return;
     }
     if (moving || frame.airborne) this.pivot.reset();
-    const directional = moving && (Math.abs(frame.x) > speed * 0.12 || frame.forward < 0);
-    const target = !frame.airborne && moving && (frame.pace > 0 || directional) ? 1 : 0;
+    // Small heading corrections must not switch between two different poses
+    // at a binary 12% lateral threshold every few frames.
+    const directional = moving
+      ? Math.max(
+          THREE.MathUtils.smoothstep(Math.abs(frame.x) / speed, 0.08, 0.22),
+          frame.forward < 0 ? 1 : 0,
+        )
+      : 0;
+    const target = !frame.airborne && moving ? (frame.pace > 0 ? 1 : directional) : 0;
     const alpha = 1 - Math.exp(-12 * dt);
     this.weight += (target - this.weight) * alpha;
     this.pace += (frame.pace - this.pace) * (1 - Math.exp(-6 * dt));
@@ -132,20 +166,16 @@ export class CharacterLocomotion {
     ] as const) {
       const sign = side === 'Left' ? 1 : -1;
       const phase = (this.phase + offset) % 1;
-      let travel: number, lift: number, pitch: number;
-      if (phase < stance) {
-        const u = phase / stance;
-        travel = stride * (0.5 - u);
-        // Late stance rolls the sole into toe-off, never reverses the foot.
-        pitch = -Math.max(0, (u - 0.72) / 0.28) * (0.12 + run * 0.18);
-        lift = Math.max(0, (u - 0.8) / 0.2) * 0.025;
-      } else {
-        const u = (phase - stance) / (1 - stance);
-        const blend = THREE.MathUtils.smootherstep(u, 0, 1);
-        travel = stride * (-0.5 + blend);
-        lift = Math.sin(Math.PI * u) ** 1.5 * (0.055 + run * 0.105 + sprint * 0.035);
-        pitch = Math.sin(Math.PI * u) * (0.06 + run * 0.1);
-      }
+      const step = sampleLocomotionStep(
+        phase,
+        stance,
+        stride,
+        0.055 + run * 0.105 + sprint * 0.035,
+        0.12 + run * 0.18,
+      );
+      const travel = step.travel;
+      let lift = step.lift,
+        pitch = step.pitch;
       const ankle = new THREE.Vector3(sign * 0.14, 0.194 + lift, -0.035).addScaledVector(
         direction,
         travel,
@@ -154,16 +184,16 @@ export class CharacterLocomotion {
       // with modest sole yaw. Keep the knee pole forward instead of twisting
       // the entire leg into the lateral direction. Never grapevine.
       const sidePhase = phase;
-      let sideTravel: number, sideLift: number;
-      const reach = 0.05 + run * 0.012;
-      if (sidePhase < stance) {
-        sideTravel = THREE.MathUtils.lerp(reach, -reach, sidePhase / stance);
-        sideLift = 0;
-      } else {
-        const u = (sidePhase - stance) / (1 - stance);
-        sideTravel = THREE.MathUtils.lerp(-reach, reach, THREE.MathUtils.smootherstep(u, 0, 1));
-        sideLift = Math.sin(Math.PI * u) ** 1.5 * (0.026 + run * 0.019 + sprint * 0.01);
-      }
+      const reach = 0.043 + run * 0.009;
+      const sideStep = sampleLocomotionStep(
+        sidePhase,
+        stance,
+        2 * reach,
+        0.026 + run * 0.019 + sprint * 0.01,
+        0,
+      );
+      const sideTravel = sideStep.travel,
+        sideLift = sideStep.lift;
       const sideAnkle = new THREE.Vector3(
         sign * 0.13 + Math.sign(direction.x) * sideTravel,
         0.194,
@@ -190,22 +220,32 @@ export class CharacterLocomotion {
     }
     // Raise the pelvis towards neutral extension, only lowering as far as the
     // planted foot's reach requires. No permanent bent-knee run/strafe stance.
-    for (const target of targets)
-      if (target.phase < stance) {
-        const thigh = this.bones.get(target.side + 'Thigh')!;
-        const length =
-          this.bones.get(target.side + 'Shin')!.position.length() +
-          this.bones.get(target.side + 'Foot')!.position.length() -
-          0.004;
-        const dx = target.ankle.x - hips.position.x - thigh.position.x;
-        const dz = target.ankle.z - hips.position.z - thigh.position.z;
-        hips.position.y = Math.min(
-          hips.position.y,
-          target.ankle.y +
-            Math.sqrt(Math.max(0.1, length * length - dx * dx - dz * dz)) -
-            thigh.position.y,
-        );
-      }
+    for (const target of targets) {
+      const thigh = this.bones.get(target.side + 'Thigh')!;
+      const length =
+        this.bones.get(target.side + 'Shin')!.position.length() +
+        this.bones.get(target.side + 'Foot')!.position.length() -
+        0.004;
+      const dx = target.ankle.x - hips.position.x - thigh.position.x;
+      const dz = target.ankle.z - hips.position.z - thigh.position.z;
+      // Release after lift-off AND re-engage before landing. Switching a
+      // binding height cap at either boundary stamps the pelvis down abruptly.
+      const swing = (target.phase - stance) / (1 - stance);
+      const release =
+        target.phase < stance
+          ? 0
+          : 0.15 *
+            THREE.MathUtils.smootherstep(swing, 0, 0.15) *
+            (1 - THREE.MathUtils.smootherstep(swing, 0.65, 1));
+      const cap =
+        target.ankle.y +
+        Math.sqrt(Math.max(0.1, length * length - dx * dx - dz * dz)) -
+        thigh.position.y +
+        release;
+      const difference = hips.position.y - cap;
+      hips.position.y =
+        (hips.position.y + cap - Math.sqrt(difference * difference + 0.002 ** 2)) / 2;
+    }
     for (const { side, ankle, q, offset } of targets) {
       const sign = side === 'Left' ? 1 : -1;
       solveLeg(side, ankle, this.bones, this.rig);

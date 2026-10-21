@@ -7,6 +7,15 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Koreksi hentakan/getaran langkah prosedural
+
+- Hilangkan reset lift 25 mm dan putus pitch/kecepatan pada sambungan stance–swing
+  overlay. Pakai lintasan quintic serta lift/roll kontinu, bukan memperlambat game.
+- Lepas/aktifkan batas reach pelvis secara halus dan ubah gate lateral biner
+  menjadi bobot kontinu agar koreksi arah kecil tidak menggetarkan pose.
+- Walking revisi 2/rig v9 dan GLB tidak diubah. Rincian pemeriksaan serta batas
+  review visual di [koreksi hentakan langkah](docs/STEP_SMOOTHNESS.md).
+
 ### Task 2 — polish gerakan yang sudah ada, tanpa clip combat baru
 
 - Stabilkan pilihan arah putar dekat pembalikan 180° saat input bergetar,

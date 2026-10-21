@@ -1323,6 +1323,30 @@ describe('portable 101172 rig and Walking asset', () => {
     player.dispose();
   });
 
+  it('does not toggle overlay weight when a small heading correction crosses the old threshold', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.setMode('bind', true);
+    const gait = new CharacterLocomotion(gltf.scene);
+    let previous = 0,
+      worst = 0;
+    for (let i = 0; i < 360; i++) {
+      const x = i % 2 ? 0.119 : 0.121;
+      player.update(1 / 120);
+      gait.apply(1 / 120, {
+        x,
+        forward: Math.sqrt(1 - x * x),
+        pace: 0,
+        airborne: false,
+        turnRate: 0,
+      });
+      const weight = Reflect.get(gait, 'weight') as number;
+      if (i > 120) worst = Math.max(worst, Math.abs(weight - previous));
+      previous = weight;
+    }
+    expect(worst).toBeLessThan(0.003);
+    player.dispose();
+  });
+
   it('builds distinct directional running/sprint poses without moving the physics root', () => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
     player.setMode('bind', true);
