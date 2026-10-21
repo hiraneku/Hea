@@ -1387,6 +1387,72 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(minFloor).toBeGreaterThan(-0.005);
     player.dispose();
   });
+  it.each([30, 60, 120])(
+    'retargets sprint with folded recovery, flight and forward torso at %s fps',
+    (fps) => {
+      const player = new CharacterPlayback(gltf.scene, gltf.animations);
+      player.setMode('bind', true);
+      const gait = new CharacterLocomotion(gltf.scene);
+      let folded = 0,
+        flight = 0,
+        lean = 0,
+        maxHipDelta = 0,
+        minSole = Infinity;
+      const positions = mesh.geometry.getAttribute('position');
+      const soles: number[] = [];
+      for (let v = 0; v < positions.count; v += 20) if (positions.getY(v) < 0.1) soles.push(v);
+      let previousHip: THREE.Vector3 | undefined;
+      for (let i = 0; i < fps * 4; i++) {
+        player.update(1 / fps);
+        gait.apply(1 / fps, { x: 0, forward: 4.4, pace: 2, airborne: false, turnRate: 0 });
+        gltf.scene.updateMatrixWorld(true);
+        const hips = gltf.scene.getObjectByName('Hips')!.getWorldPosition(new THREE.Vector3());
+        const neck = gltf.scene.getObjectByName('Neck')!.getWorldPosition(new THREE.Vector3());
+        if (i > fps * 2) {
+          lean = Math.max(lean, neck.z - hips.z);
+          if (previousHip) maxHipDelta = Math.max(maxHipDelta, hips.distanceTo(previousHip));
+
+          for (const side of ['Left', 'Right']) {
+            const hip = gltf.scene
+              .getObjectByName(side + 'Thigh')!
+              .getWorldPosition(new THREE.Vector3());
+            const knee = gltf.scene
+              .getObjectByName(side + 'Shin')!
+              .getWorldPosition(new THREE.Vector3());
+            const ankle = gltf.scene
+              .getObjectByName(side + 'Foot')!
+              .getWorldPosition(new THREE.Vector3());
+            const upper = knee.clone().sub(hip).normalize();
+            const lower = ankle.clone().sub(knee).normalize();
+            folded = Math.max(folded, Math.acos(THREE.MathUtils.clamp(upper.dot(lower), -1, 1)));
+
+            expect(hip.distanceTo(knee)).toBeCloseTo(
+              gltf.scene.getObjectByName(side + 'Shin')!.position.length(),
+              5,
+            );
+          }
+          let soleFloor = Infinity;
+          for (const v of soles) {
+            const point = mesh.applyBoneTransform(
+              v,
+              new THREE.Vector3().fromBufferAttribute(positions, v),
+            );
+            soleFloor = Math.min(soleFloor, point.y);
+          }
+          minSole = Math.min(minSole, soleFloor);
+          if (soleFloor > 0.02) flight++;
+        }
+        previousHip = hips;
+      }
+      expect(minSole).toBeGreaterThan(-0.005);
+      expect(folded).toBeGreaterThan(1.6);
+      expect(flight).toBeGreaterThan(fps / 30);
+      expect(lean).toBeGreaterThan(0.2);
+      expect(maxHipDelta).toBeLessThan((0.025 * 120) / fps);
+      expect(gltf.scene.getObjectByName('Root')!.position.length()).toBeLessThan(1e-6);
+      player.dispose();
+    },
+  );
   it('keeps a neutral pelvis while looking and uses a straight support leg for stationary pivots', () => {
     const body = new THREE.Group();
     body.add(gltf.scene);

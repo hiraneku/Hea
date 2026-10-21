@@ -7,6 +7,16 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### SPRINT 1 — adaptasi referensi stickman
+
+- Adaptasi sprint maju dari `IMG_20261021_222013_942.mp4`: cadence berbasis
+  referensi, langkah lebih panjang, recovery kaki terlipat lebih awal, torso
+  lebih condong, ayunan tangan lebih tegas dan fase lepas tumpuan yang terlihat.
+- Pertahankan kontak kompak untuk arah terkunci, anatomi/GLB, jalan/lari biasa,
+  GERAK 8, kontrol kepala dan semua kecepatan serta fisika gameplay.
+- Shared overlay berlaku di arena dan mode main preview, berlabel SPRINT 1.
+  Pemeriksaan dan batas kecocokan: [SPRINT_REFERENCE](docs/SPRINT_REFERENCE.md).
+
 ### Koreksi hentakan/getaran langkah prosedural
 
 - Hilangkan reset lift 25 mm dan putus pitch/kecepatan pada sambungan stance–swing

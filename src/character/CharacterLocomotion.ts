@@ -31,6 +31,25 @@ export function sampleLocomotionStep(
   };
 }
 
+/** Sprint recovery: fold the trailing leg early, then open it for touchdown.
+ * Keep the same C2 stance joins as walking; the reference's held 2D poses are
+ * intentionally interpolated rather than copied as abrupt joint changes. */
+export function sampleSprintStep(
+  phase: number,
+  stance: number,
+  stride: number,
+  clearance: number,
+  roll: number,
+) {
+  const step = sampleLocomotionStep(phase, stance, stride, clearance, roll);
+  if (phase >= stance) {
+    const u = (phase - stance) / (1 - stance);
+    const recovery = u + 0.2 * Math.sin(Math.PI * u);
+    step.lift = clearance * Math.sin(Math.PI * recovery) ** 3;
+  }
+  return step;
+}
+
 export interface LocomotionFrame {
   /** Actual velocity in normalized character +Z-forward space, metres/second. */
   x: number;
@@ -123,13 +142,26 @@ export class CharacterLocomotion {
     const run = THREE.MathUtils.clamp(this.pace, 0, 1);
     const sprint = THREE.MathUtils.clamp(this.pace - 1, 0, 1);
     const lateral = speed > 0 ? Math.abs(frame.x) / speed : 0;
+    // Only the forward component gets the reference's long sagittal stride.
+    // Locked lateral/backward sprint retains its compact directional contacts.
+    const attack =
+      sprint * THREE.MathUtils.smoothstep(frame.forward / Math.max(speed, 0.001), 0.25, 0.85);
     const stance = THREE.MathUtils.lerp(0.62, 0.42 - sprint * 0.055, run);
-    const nominalStride = THREE.MathUtils.lerp(
+    const sprintStance = THREE.MathUtils.lerp(stance, 0.35, attack);
+    let nominalStride = THREE.MathUtils.lerp(
       0.42 + run * 0.29 + sprint * 0.06,
       0.3 + run * 0.04,
       lateral,
     );
-    const cadence = THREE.MathUtils.clamp((speed * stance) / nominalStride, 0.6, 2.9);
+    nominalStride = THREE.MathUtils.lerp(nominalStride, 1.0, attack);
+    // Reference ~0.73 s/full cycle. Adapt to actual speed instead of the old
+    // ~3 Hz leg churn, without altering the gameplay motor or world position.
+    const referenceCadence = THREE.MathUtils.clamp((1 / 0.734) * Math.sqrt(speed / 4.4), 1.05, 1.9);
+    const cadence = THREE.MathUtils.lerp(
+      THREE.MathUtils.clamp((speed * stance) / nominalStride, 0.6, 2.9),
+      referenceCadence,
+      attack,
+    );
     this.phase = (this.phase + dt * cadence) % 1;
     for (const [name, bone] of this.bones) {
       bone.position.copy(this.rest.get(name)!.p);
@@ -139,17 +171,27 @@ export class CharacterLocomotion {
     root.position.set(0, 0, 0);
     const hips = this.bones.get('Hips')!;
     const cycle = this.phase * Math.PI * 2;
-    const stride = Math.min(nominalStride, (speed * stance) / cadence);
+    const stride = Math.min(nominalStride, (speed * sprintStance) / cadence);
+    const halfPhase = this.phase % 0.5;
+    const flightU = (halfPhase - sprintStance) / (0.5 - sprintStance);
+    // Lift the whole posed body during the shared non-contact window. This is
+    // presentation only, never a jump or an addition to gameplay translation.
+    const flightLift =
+      attack * (flightU > 0 && flightU < 1 ? 0.065 * Math.sin(Math.PI * flightU) ** 4 : 0);
     const direction = moving
       ? new THREE.Vector3(frame.x / speed, 0, frame.forward / speed)
       : new THREE.Vector3(0, 0, 1);
     hips.position.set(
       Math.sin(cycle) * (0.012 + run * 0.008),
-      1.105 + sprint * 0.005 - Math.cos(cycle * 2 - 2.2) * (0.004 + run * 0.012),
+      1.105 +
+        sprint * 0.005 -
+        Math.cos(cycle * 2 - 2.2) * (0.004 + run * 0.012) +
+        attack * (0.018 - 0.025 * Math.cos(cycle * 2 - sprintStance * Math.PI * 2)) +
+        flightLift,
       this.anatomy.pelvis[2],
     );
     hips.rotation.set(
-      0.012 + run * 0.045 + sprint * 0.025,
+      0.012 + run * 0.045 + sprint * 0.025 + attack * 0.2,
       Math.sin(cycle) * (0.035 + run * 0.035) * (1 - lateral) * Math.max(0, direction.z),
       -Math.sin(cycle) * 0.018,
     );
@@ -168,11 +210,14 @@ export class CharacterLocomotion {
       const phase = (this.phase + offset) % 1;
       const step = sampleLocomotionStep(
         phase,
-        stance,
+        sprintStance,
         stride,
         0.055 + run * 0.105 + sprint * 0.035,
         0.12 + run * 0.18,
       );
+      const sprintStep = sampleSprintStep(phase, sprintStance, stride, 0.48, 0.42);
+      step.lift = THREE.MathUtils.lerp(step.lift, sprintStep.lift, attack);
+      step.pitch = THREE.MathUtils.lerp(step.pitch, sprintStep.pitch, attack);
       const travel = step.travel;
       let lift = step.lift,
         pitch = step.pitch;
@@ -209,7 +254,8 @@ export class CharacterLocomotion {
       const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(footQ.clone().invert());
       let low = Infinity;
       for (const point of this.soles[side]) low = Math.min(low, point.dot(normal));
-      ankle.y = 0.007 - low + lift;
+      // Small sprint margin covers the sole sweep during quaternion interpolation.
+      ankle.y = 0.007 + attack * 0.006 - low + lift + flightLift;
       targets.push({
         side,
         ankle,
@@ -230,9 +276,9 @@ export class CharacterLocomotion {
       const dz = target.ankle.z - hips.position.z - thigh.position.z;
       // Release after lift-off AND re-engage before landing. Switching a
       // binding height cap at either boundary stamps the pelvis down abruptly.
-      const swing = (target.phase - stance) / (1 - stance);
+      const swing = (target.phase - sprintStance) / (1 - sprintStance);
       const release =
-        target.phase < stance
+        target.phase < sprintStance
           ? 0
           : 0.15 *
             THREE.MathUtils.smootherstep(swing, 0, 0.15) *
@@ -258,18 +304,24 @@ export class CharacterLocomotion {
       this.bones
         .get(side + 'UpperArm')!
         .rotation.set(
-          -swing * (0.18 + run * 0.28 + sprint * 0.1) * (1 - lateral) ** 2,
+          -swing * (0.18 + run * 0.28 + sprint * 0.1 + attack * 0.36) * (1 - lateral) ** 2,
           0,
           -sign * 0.045 + lateral * Math.sin(cycle) * 0.015,
         );
       this.bones
         .get(side + 'ForeArm')!
-        .rotation.set(-0.18 - (run * 0.9 + sprint * 0.12 + swing * 0.1) * (1 - lateral), 0, 0);
+        .rotation.set(
+          -0.18 -
+            (run * 0.9 + sprint * 0.12 + swing * 0.1 + attack * (0.22 + swing * 0.12)) *
+              (1 - lateral),
+          0,
+          0,
+        );
     }
     this.bones
       .get('Spine')!
       .rotation.set(
-        0.015 + run * 0.045 * (1 - lateral),
+        0.015 + run * 0.045 * (1 - lateral) + attack * 0.14,
         -Math.sin(cycle) * (0.025 + run * 0.035) * (1 - lateral) * Math.max(0, direction.z),
         lateral * Math.sin(cycle) * 0.012,
       );
