@@ -1,6 +1,6 @@
 {
   "characterRig": 9,
-  "movementSystem": 1,
-  "codeRevision": "733560a",
+  "movementSystem": 2,
+  "codeRevision": "movement-2",
   "publishing": "branch-docs"
 }

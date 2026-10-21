@@ -36,7 +36,7 @@ describe('camera, body and movement separation', () => {
     }
     expect(free.yaw).toBeCloseTo(Math.PI / 2, 4);
     expect(locked.yaw).toBeCloseTo(0.3, 4);
-    expect(directionalSpeed(-1)).toBeLessThan(directionalSpeed(0));
+    expect(directionalSpeed(0)).toBeLessThan(directionalSpeed(-1));
     expect(directionalSpeed(0)).toBeLessThan(directionalSpeed(1));
     expect(GROUND_PACES[0]).toBeLessThan(GROUND_PACES[1]);
     expect(GROUND_PACES[1]).toBeLessThan(GROUND_PACES[2]);

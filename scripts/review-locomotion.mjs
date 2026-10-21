@@ -23,7 +23,9 @@ try {
     player.rootMotionEnabled = true;
     const scene = new T.Scene();
     scene.background = new T.Color('#c5cecb');
-    scene.add(gltf.scene);
+    const holder = new T.Group();
+    holder.add(gltf.scene);
+    scene.add(holder);
     scene.add(new T.HemisphereLight('#ffffff', '#777777', 2.2));
     const light = new T.DirectionalLight('#ffffff', 3);
     light.position.set(3, 5, 4);
@@ -52,12 +54,14 @@ try {
     let time = 0;
     player.setMode('bind', true);
     const gait = new CharacterLocomotion(gltf.scene);
-    window.reviewMotion = (pace, x, forward, angle) => {
+    window.reviewMotion = (pace, x, forward, angle, turnRate = 0, seconds = 0.8) => {
       gait.reset();
+      holder.quaternion.identity();
       player.setMode('bind', true);
-      for (let i = 0; i < 100; i++) {
+      for (let i = 0; i < Math.ceil(seconds * 120); i++) {
         player.update(1/120);
-        gait.apply(1/120, {pace, x, forward, airborne:false, turnRate:0});
+        holder.rotation.y += turnRate / 120;
+        gait.apply(1/120, {pace, x, forward, airborne:false, turnRate});
       }
       camera.position.set(Math.sin(angle)*5, 1.1, Math.cos(angle)*5);
       camera.lookAt(0, 1.1, 0);
@@ -66,9 +70,9 @@ try {
     };
   });
   await mkdir('.cache/motion-review', {recursive:true});
-  for (const [name, pace, x, z] of [['run',1,0,4],['sprint',2,0,6],['strafe',1,3,0],['back',1,0,-3]])
+  for (const [name, pace, x, z, rate] of [['run',1,0,3.7,0],['sprint',2,0,5.8,0],['strafe',0,1,0,0],['back',0,0,-1,0],['pivot',0,0,0,1.2],['look-idle',0,0,0,0]])
     for (const [view, angle] of [['front',0],['side',Math.PI/2]]) {
-      await page.evaluate(([pace,x,z,angle]) => window.reviewMotion(pace,x,z,angle), [pace,x,z,angle]);
+      await page.evaluate(([pace,x,z,angle,rate]) => window.reviewMotion(pace,x,z,angle,rate), [pace,x,z,angle,rate]);
       await page.screenshot({path:`.cache/motion-review/${name}-${view}.png`});
     }
 } finally {

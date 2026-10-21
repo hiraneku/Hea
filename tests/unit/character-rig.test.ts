@@ -1275,6 +1275,106 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(minFloor).toBeGreaterThan(-0.005);
     player.dispose();
   });
+  it('keeps a neutral pelvis while looking and uses a straight support leg for stationary pivots', () => {
+    const body = new THREE.Group();
+    body.add(gltf.scene);
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.setMode('bind', true);
+    const gait = new CharacterLocomotion(gltf.scene);
+    const hips = gltf.scene.getObjectByName('Hips')!;
+    const initialY = hips.position.y;
+    for (let i = 0; i < 60; i++) {
+      player.update(1 / 60);
+      gait.apply(1 / 60, { x: 0, forward: 0, pace: 0, airborne: false, turnRate: 0 });
+      expect(hips.position.y).toBeCloseTo(initialY, 6);
+    }
+    let worstSupportBend = 0,
+      lowestPelvis = Infinity,
+      pinned = 0;
+    const point = (name: string) =>
+      gltf.scene.getObjectByName(name)!.getWorldPosition(new THREE.Vector3());
+    let previous = { Left: point('LeftFoot'), Right: point('RightFoot') };
+    for (let i = 0; i < 180; i++) {
+      player.update(1 / 120);
+      body.rotation.y += 1.2 / 120;
+      gait.apply(1 / 120, { x: 0, forward: 0, pace: 0, airborne: false, turnRate: 1.2 });
+      body.updateMatrixWorld(true);
+      const bends = ['Left', 'Right'].map((side) => {
+        const hip = point(side + 'Thigh'),
+          knee = point(side + 'Shin'),
+          ankle = point(side + 'Foot');
+        return knee.sub(hip).angleTo(ankle.sub(point(side + 'Shin')));
+      });
+      if (i > 60) {
+        worstSupportBend = Math.max(worstSupportBend, Math.min(...bends));
+        lowestPelvis = Math.min(lowestPelvis, hips.position.y);
+        for (const side of ['Left', 'Right'] as const)
+          if (point(side + 'Foot').distanceTo(previous[side]) < 0.002) pinned++;
+      }
+      previous = { Left: point('LeftFoot'), Right: point('RightFoot') };
+    }
+    expect(lowestPelvis).toBeGreaterThan(1.075);
+    expect(worstSupportBend).toBeLessThan(0.3);
+    expect(pinned).toBeGreaterThan(30);
+    expect(body.position.length()).toBe(0);
+    player.dispose();
+  });
+  it('uses compact crossover steps with front/back clearance rather than a wide side shuffle', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    player.setMode('bind', true);
+    const gait = new CharacterLocomotion(gltf.scene);
+    let minGap = Infinity,
+      maxGap = -Infinity,
+      minCrossDepth = Infinity;
+    for (let i = 0; i < 480; i++) {
+      player.update(1 / 120);
+      gait.apply(1 / 120, { x: 1, forward: 0, pace: 0, airborne: false, turnRate: 0 });
+      gltf.scene.updateMatrixWorld(true);
+      if (i < 80) continue;
+      const l = gltf.scene.getObjectByName('LeftFoot')!.getWorldPosition(new THREE.Vector3());
+      const r = gltf.scene.getObjectByName('RightFoot')!.getWorldPosition(new THREE.Vector3());
+      minGap = Math.min(minGap, l.x - r.x);
+      maxGap = Math.max(maxGap, l.x - r.x);
+      if (l.x < r.x) minCrossDepth = Math.min(minCrossDepth, Math.abs(l.z - r.z));
+    }
+    expect(minGap).toBeLessThan(-0.025);
+    expect(maxGap).toBeLessThan(0.4);
+    expect(minCrossDepth).toBeGreaterThan(0.12);
+    player.dispose();
+  });
+  it('keeps preview world speed camera-relative and never adds lateral root speed', () => {
+    const body = new THREE.Group();
+    body.scale.setScalar(0.76);
+    body.add(gltf.scene);
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    const drive = new CharacterArenaDrive(body, player);
+    const camera = new THREE.PerspectiveCamera();
+    camera.position.set(0, 1, -5);
+    camera.lookAt(0, 1, 0);
+    camera.updateMatrixWorld(true);
+    const distances: number[] = [];
+    for (const locked of [false, true])
+      for (const [x, z] of [
+        [0, 1],
+        [1, 0],
+        [0, -1],
+        [1, 1],
+      ]) {
+        drive.resetMotion();
+        body.position.set(0, 0, 0);
+        drive.locked = locked;
+        for (let i = 0; i < 60; i++) drive.update(1 / 60, x, z, camera);
+        const start = body.position.clone();
+        for (let i = 0; i < 60; i++) drive.update(1 / 60, x, z, camera);
+        distances.push(body.position.distanceTo(start));
+      }
+    expect(distances[0]).toBeCloseTo(1, 2);
+    expect(distances[1]).toBeCloseTo(0.72, 2);
+    expect(distances[2]).toBeCloseTo(0.82, 2);
+    expect(distances[3]).toBeLessThan(distances[0]);
+    for (let i = 0; i < 4; i++) expect(distances[i]).toBeCloseTo(distances[i + 4], 3);
+    player.dispose();
+  });
   it('preview uses camera-relative lock, all pace tiers, bounded head and idle turning', () => {
     const body = new THREE.Group();
     body.add(gltf.scene);

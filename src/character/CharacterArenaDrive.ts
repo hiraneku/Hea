@@ -64,7 +64,7 @@ export class CharacterArenaDrive {
     const desiredSpeed = moving
       ? GROUND_PACES[this.pace] *
         magnitude *
-        (this.locked ? directionalSpeed(forward / Math.max(1, Math.hypot(x, forward))) : 1)
+        directionalSpeed(forward / Math.max(0.001, Math.hypot(x, forward)))
       : 0;
     this.speed += (desiredSpeed - this.speed) * (1 - Math.exp(-8 * dt));
     const travel = moving ? Math.atan2(direction.x, direction.z) : this.facing.yaw;
@@ -77,14 +77,13 @@ export class CharacterArenaDrive {
         desiredSpeed / (this.playback.authoredWalkSpeed * this.body.scale.x),
       );
     this.playback.setMode(moving ? 'walk' : 'bind');
-    const authored = this.playback.isStarting || this.playback.isStopping;
     this.playback.update(dt);
     const root = this.playback.consumeRootMotion().multiply(this.body.scale);
     this.body.position.y += root.y;
     if (moving) this.lastDirection.copy(direction).normalize();
-    if (flying || !authored)
-      this.body.position.addScaledVector(this.lastDirection, (moving ? this.speed : 0) * dt);
-    else this.body.position.addScaledVector(this.lastDirection, Math.hypot(root.x, root.z));
+    // Same ownership as the arena: root X/Z never add an extra launch/strafe boost.
+    if (!moving && this.speed < 0.02) this.speed = 0;
+    this.body.position.addScaledVector(this.lastDirection, this.speed * dt);
     const local = this.lastDirection
       .clone()
       .multiplyScalar(this.speed / this.body.scale.x)

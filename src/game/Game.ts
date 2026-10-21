@@ -1209,7 +1209,7 @@ export class Game {
     );
     if (!this.flightEnabled) {
       const magnitude = Math.hypot(move.x, move.z);
-      const directional = this.lockedOn && magnitude > 0 ? directionalSpeed(move.z / magnitude) : 1;
+      const directional = magnitude > 0 ? directionalSpeed(move.z / magnitude) : 1;
       wish.multiplyScalar((GROUND_PACES[this.pace] * directional) / FLIGHT.speed);
     }
     // The dash leaves the motor running hot: once the burst itself is over, movement stays

@@ -509,3 +509,31 @@ physics menentukan tinggi karakter pada arena, belum terrain IK per telapak.
 Angka ini dapat disetel setelah review gameplay. Test teknis bukan jaminan kualitas
 visual di setiap sudut/perangkat; review renderer tersedia lewat
 `scripts/review-locomotion.mjs` (output di `.cache/motion-review`).
+
+## GERAK 2 — koreksi pivot, crossover dan running
+
+Menggantikan parameter GERAK 1 yang ditolak secara visual. `CharacterPivot`
+menangani idle turning, tidak memakai fase walking. Anchor support dikontra-rotasi
+terhadap yaw badan; kaki swing direorientasi ke stance netral dalam 0,18–0,32 s
+(angkat 3,2 cm normalized), kemudian support berganti. Tinggi pelvis dihitung
+berdasarkan jangkauan tungkai. Menoleh tanpa rotasi badan tidak menambahkan pose
+kaki apa pun. Batas yaw stationary 2,5–4,5 rad/s memberi waktu kaki untuk pivot.
+
+Strafe sekarang crossover/grapevine pendek. Lebar base ankle berkurang sesuai
+komponen lateral, stride lateral 0,30–0,34 m normalized; kaki trailing melintas
+pada jalur depan dan leading pada jalur belakang (beda depth 0,17 m). Tidak ada
+lagi clamp X yang melarang crossing. Diagonal mencampur komponen ini secara kontinu.
+
+Pace world baru: jalan 1,0 m/s, lari 2,8 m/s, sprint 4,4 m/s. Modifier berdasarkan
+input relatif kamera: maju 100%, samping 72%, mundur 82%, diagonal interpolasi.
+Berlaku locked maupun unlocked; tidak mengubah kecepatan flight/dash. Preview
+menggunakan motor world dan mengabaikan root X/Z, sama seperti arena, sehingga
+start/stop tidak menambahkan speed boost. Root Y tetap digunakan oleh flight preview.
+
+Running memakai pelvis lebih tinggi dengan batas reach kaki stance, bukan basis
+hip 1,025 m yang membuat semua pose terlihat jongkok. Lift recovery 0,16–0,195 m,
+stance ratio lari 0,42/sprint 0,365, cadence diselaraskan dengan actual speed dan
+stride. Knee flex mengikuti foot swing dan dukungan, bukan tekukan menetap di
+kedua kaki. Tetap gait procedural, bukan motion capture; belum terrain IK per sole.
+Regresi menilai actual bone/mesh, support knee, root dan crossover depth. Review
+renderer menambah stationary pivot dan idle di samping run/sprint/strafe/back.

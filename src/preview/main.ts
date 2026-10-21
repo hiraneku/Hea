@@ -28,7 +28,7 @@ app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>
   <main>
     <section class="stage" aria-label="Preview karakter 3D">
-      <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION} · GERAK 1</p></div>
+      <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION} · GERAK 2</p></div>
       <div id="viewport"></div><div id="joint-labels" class="joint-labels" aria-hidden="true" hidden></div>
       <div id="drive-pad" role="group" aria-label="Joystick gerak" hidden><span id="drive-knob"></span><small>GERAK</small></div>
       <button id="drive-flight" class="drive-flight" aria-label="Terbang" hidden disabled>TERBANG</button>

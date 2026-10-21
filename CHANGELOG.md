@@ -7,6 +7,23 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — GERAK 2: pivot netral, crossover dan pace
+
+- Pisahkan stationary pivot dari gait jalan/lari. Kaki penopang mengimbangi yaw
+  badan, kaki lain mengangkat singkat dan menghadap ulang; panggul mengikuti
+  jangkauan kaki, bukan crouch/bob walking. Menoleh dalam batas tidak mengubah kaki.
+- Gerak samping memakai crossover pendek dengan jalur depan/belakang yang
+  terpisah. Hapus pembatas X yang sebelumnya memaksa kaki selalu membuka.
+- Jalan netral 1 m/s; lari 2,8 m/s; sprint 4,4 m/s. Samping 72%, mundur 82%,
+  maju 100%, berlaku juga tanpa lock. Normalisasi diagonal tetap dipertahankan.
+- Motor preview kini membuang root X/Z seperti game: tidak ada tambahan dorongan
+  launch/stop yang dapat membuat gerakan samping lebih cepat.
+- Rework running: pelvis lebih tinggi/adaptif terhadap kontak, recovery tumit
+  lebih rendah, stance/swing dan cadence dari kecepatan/langkah, ayunan lengan
+  lebih terkendali. Hilangkan pose rendah/tekukan besar yang menetap.
+- Tambah regresi pelvis netral, kelurusan kaki penopang, pivot tanpa translation,
+  crossover/clearance, dan urutan kecepatan arah yang baru.
+
 ### Ditambahkan — camera-led facing, directional locomotion dan tiga pace
 
 - Kepala/leher mengikuti kamera sampai yaw ±60°, mendongak 35° dan menunduk
