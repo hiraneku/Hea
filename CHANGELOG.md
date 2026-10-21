@@ -7,6 +7,16 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Rumah Senja — interior keluarga dua lantai
+
+- Area `/house/` tersendiri: timber-frame, perapian batu, dapur dan meja makan
+  empat kursi, kamar orang tua, kamar dua anak, serta sudut baca.
+- Geometri/tekstur lokal, cahaya sore, kasau, jendela, linen dan dekor keluarga.
+- Eksplorasi kamera setinggi mata dengan joystick/WASD, collision, tangga 17
+  anak dan void lantai atas; tur lima ruangan serta denah dua lantai.
+- Batch geometri dan cache shadow statis untuk mengurangi beban perangkat.
+  Arena, karakter, sprint dan fisika gameplay tetap utuh. Rincian: docs/HOUSE.md.
+
 ### SPRINT 2 — koreksi kemiripan pose referensi
 
 - Ganti travel kaki yang masih berpola jalan dengan pose sprint tersendiri:
