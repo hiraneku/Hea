@@ -1,4 +1,33 @@
-# Sprint reference — SPRINT 1
+# Sprint reference — SPRINT 2
+
+## Koreksi setelah SPRINT 1 ditolak
+
+SPRINT 1 belum diterima pengguna karena kurang mirip. Lintasan travel kaki masih
+mengikuti kurva jalan, sekalipun lift lebih tinggi. Mengangkat kaki saja tidak
+menghasilkan urutan pose pada video. Revisi ini mengganti travel **dan** lift
+sprint dengan interval pose quintic Hermite C2: heel recovery, knee drive,
+extension, retraction ke touchdown.
+
+- Tumpuan per kaki dipersingkat dari 35% menjadi 23% siklus untuk lebih banyak
+  fase kedua kaki lepas tanah; ini pilihan adaptasi visual, bukan hasil pengukuran
+  kontak presisi yang tidak tersedia dari animasi stickman.
+- Lift puncak target 0,60 m dalam ruang karakter tinggi 2 m, dengan recovery
+  terlipat dan lutut depan ditahan sebelum tungkai membuka.
+- Condong panggul/spine lebih kuat. Sudut aktual garis Hips–Neck pada pemeriksaan
+  stabil sekitar 42,5 derajat, bukan hanya menilai nilai Euler input. Lipatan
+  lutut puncak sekitar 141 derajat pada kandidat sebelum penyempurnaan ekstensi.
+- Ekstensi depan diikuti retraction sebelum contact, bukan kaki lurus diseret.
+  Release batas reach pelvis kembali mengikat lebih awal agar tungkai yang
+  membuka tidak menjangkau di luar anatomi.
+- Target lutut/pose, kontinuitas setiap interval baru, tumpuan skinned sole dan
+  perpindahan pelvis diuji pada 30/60/120 fps. Assertion lama tidak dilonggarkan.
+- Final: 313 tes unit/27 file serta enam tes browser desktop/mobile terpilih.
+  Rangkaian 12 pose final dari samping, depan, oblique dibuka dan diperiksa.
+  Ini tetap pemeriksaan sampel pose, bukan klaim kecocokan visual sempurna.
+- Label terbaru **SPRINT 2**. Fisika, speed, GLB, GERAK 8 dan jalur jalan biasa
+  tidak diubah.
+
+## Riwayat SPRINT 1 (bukan status versi terbaru)
 
 Referensi: `IMG_20261021_222013_942.mp4`, 1080 × 1920, 62 frame video,
 PTS 0–2,035 detik (~30 fps). Ini animasi stickman 2D tampak samping, bukan mocap.

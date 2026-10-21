@@ -1396,6 +1396,7 @@ describe('portable 101172 rig and Walking asset', () => {
       let folded = 0,
         flight = 0,
         lean = 0,
+        angle = 0,
         maxHipDelta = 0,
         minSole = Infinity;
       const positions = mesh.geometry.getAttribute('position');
@@ -1410,6 +1411,7 @@ describe('portable 101172 rig and Walking asset', () => {
         const neck = gltf.scene.getObjectByName('Neck')!.getWorldPosition(new THREE.Vector3());
         if (i > fps * 2) {
           lean = Math.max(lean, neck.z - hips.z);
+          angle = Math.max(angle, Math.atan2(neck.z - hips.z, neck.y - hips.y));
           if (previousHip) maxHipDelta = Math.max(maxHipDelta, hips.distanceTo(previousHip));
 
           for (const side of ['Left', 'Right']) {
@@ -1445,8 +1447,11 @@ describe('portable 101172 rig and Walking asset', () => {
         previousHip = hips;
       }
       expect(minSole).toBeGreaterThan(-0.005);
-      expect(folded).toBeGreaterThan(1.6);
-      expect(flight).toBeGreaterThan(fps / 30);
+      expect(folded).toBeGreaterThan(2.0);
+      expect(folded).toBeLessThan(2.7);
+      expect(angle).toBeGreaterThan(0.6);
+      expect(angle).toBeLessThan(0.85);
+      expect(flight).toBeGreaterThan(fps * 0.3);
       expect(lean).toBeGreaterThan(0.2);
       expect(maxHipDelta).toBeLessThan((0.025 * 120) / fps);
       expect(gltf.scene.getObjectByName('Root')!.position.length()).toBeLessThan(1e-6);

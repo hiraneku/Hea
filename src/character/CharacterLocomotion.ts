@@ -31,9 +31,22 @@ export function sampleLocomotionStep(
   };
 }
 
-/** Sprint recovery: fold the trailing leg early, then open it for touchdown.
- * Keep the same C2 stance joins as walking; the reference's held 2D poses are
- * intentionally interpolated rather than copied as abrupt joint changes. */
+/** Quintic Hermite interval with zero acceleration at both authored poses. */
+function sprintInterval(t: number, a: number, b: number, va = 0, vb = 0) {
+  const d = b - a;
+  return (
+    a +
+    va * t +
+    (10 * d - 6 * va - 4 * vb) * t ** 3 +
+    (-15 * d + 8 * va + 7 * vb) * t ** 4 +
+    (6 * d - 3 * va - 3 * vb) * t ** 5
+  );
+}
+
+/** Authored sagittal sprint poses: trailing heel folds, knee drives forward,
+ * lower leg opens, then the foot retracts into touchdown. Unlike SPRINT 1,
+ * travel and clearance are BOTH authored; a larger walking arc is insufficient.
+ * All pose intervals and stance joins preserve position/velocity/acceleration. */
 export function sampleSprintStep(
   phase: number,
   stance: number,
@@ -42,11 +55,25 @@ export function sampleSprintStep(
   roll: number,
 ) {
   const step = sampleLocomotionStep(phase, stance, stride, clearance, roll);
-  if (phase >= stance) {
-    const u = (phase - stance) / (1 - stance);
-    const recovery = u + 0.2 * Math.sin(Math.PI * u);
-    step.lift = clearance * Math.sin(Math.PI * recovery) ** 3;
-  }
+  if (phase < stance) return step;
+  const u = (phase - stance) / (1 - stance);
+  const velocity = -(1 - stance) / stance;
+  // u, foot travel/stride, lift/clearance, d(travel/stride)/du.
+  const poses = [
+    [0, -0.5, 0, velocity],
+    [0.18, -0.65, 0.96, 0],
+    [0.55, 0.08, 1, 1.4],
+    [0.68, 0.24, 0.72, 1.6],
+    [0.88, 0.8, 0.015, 0],
+    [1, 0.5, 0, velocity],
+  ];
+  const index = u < 0.18 ? 0 : u < 0.55 ? 1 : u < 0.68 ? 2 : u < 0.88 ? 3 : 4;
+  const a = poses[index],
+    b = poses[index + 1];
+  const span = b[0] - a[0];
+  const t = THREE.MathUtils.clamp((u - a[0]) / span, 0, 1);
+  step.travel = stride * sprintInterval(t, a[1], b[1], a[3] * span, b[3] * span);
+  step.lift = clearance * sprintInterval(t, a[2], b[2]);
   return step;
 }
 
@@ -147,7 +174,7 @@ export class CharacterLocomotion {
     const attack =
       sprint * THREE.MathUtils.smoothstep(frame.forward / Math.max(speed, 0.001), 0.25, 0.85);
     const stance = THREE.MathUtils.lerp(0.62, 0.42 - sprint * 0.055, run);
-    const sprintStance = THREE.MathUtils.lerp(stance, 0.35, attack);
+    const sprintStance = THREE.MathUtils.lerp(stance, 0.23, attack);
     let nominalStride = THREE.MathUtils.lerp(
       0.42 + run * 0.29 + sprint * 0.06,
       0.3 + run * 0.04,
@@ -191,7 +218,7 @@ export class CharacterLocomotion {
       this.anatomy.pelvis[2],
     );
     hips.rotation.set(
-      0.012 + run * 0.045 + sprint * 0.025 + attack * 0.2,
+      0.012 + run * 0.045 + sprint * 0.025 + attack * 0.48,
       Math.sin(cycle) * (0.035 + run * 0.035) * (1 - lateral) * Math.max(0, direction.z),
       -Math.sin(cycle) * 0.018,
     );
@@ -215,7 +242,8 @@ export class CharacterLocomotion {
         0.055 + run * 0.105 + sprint * 0.035,
         0.12 + run * 0.18,
       );
-      const sprintStep = sampleSprintStep(phase, sprintStance, stride, 0.48, 0.42);
+      const sprintStep = sampleSprintStep(phase, sprintStance, stride, 0.6, 0.42);
+      step.travel = THREE.MathUtils.lerp(step.travel, sprintStep.travel, attack);
       step.lift = THREE.MathUtils.lerp(step.lift, sprintStep.lift, attack);
       step.pitch = THREE.MathUtils.lerp(step.pitch, sprintStep.pitch, attack);
       const travel = step.travel;
@@ -282,7 +310,12 @@ export class CharacterLocomotion {
           ? 0
           : 0.15 *
             THREE.MathUtils.smootherstep(swing, 0, 0.15) *
-            (1 - THREE.MathUtils.smootherstep(swing, 0.65, 1));
+            (1 -
+              THREE.MathUtils.smootherstep(
+                swing,
+                THREE.MathUtils.lerp(0.65, 0.5, attack),
+                THREE.MathUtils.lerp(1, 0.85, attack),
+              ));
       const cap =
         target.ankle.y +
         Math.sqrt(Math.max(0.1, length * length - dx * dx - dz * dz)) -
@@ -321,7 +354,7 @@ export class CharacterLocomotion {
     this.bones
       .get('Spine')!
       .rotation.set(
-        0.015 + run * 0.045 * (1 - lateral) + attack * 0.14,
+        0.015 + run * 0.045 * (1 - lateral) + attack * 0.22,
         -Math.sin(cycle) * (0.025 + run * 0.035) * (1 - lateral) * Math.max(0, direction.z),
         lateral * Math.sin(cycle) * 0.012,
       );

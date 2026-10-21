@@ -41,18 +41,31 @@ describe('reference sprint recovery', () => {
     expect(sample(0.85).travel).toBeGreaterThan(0);
     expect(sample(0.85).lift).toBeLessThan(0.03);
   });
-  it.each([0, 0.35])('preserves continuous position and velocity at phase %s', (at) => {
-    const h = 1e-6;
-    const sample = (p: number) => sampleSprintStep((p + 1) % 1, 0.35, 1, 0.48, 0.42);
-    for (const key of ['travel', 'lift', 'pitch'] as const) {
-      const a = sample(at - h)[key],
-        b = sample(at)[key],
-        c = sample(at + h)[key];
-      expect(Math.abs(c - a)).toBeLessThan(0.00008);
-      expect(Math.abs((b - a) / h - (c - b) / h)).toBeLessThan(0.001);
-      const aa = sample(at - 2 * h)[key],
-        cc = sample(at + 2 * h)[key];
-      expect(Math.abs((b - 2 * a + aa) / h ** 2 - (cc - 2 * c + b) / h ** 2)).toBeLessThan(0.15);
-    }
-  });
+  it.each([0, 0.35, ...[0.18, 0.55, 0.68, 0.88].map((u) => 0.35 + 0.65 * u)])(
+    'preserves continuous position and velocity at phase %s',
+    (at) => {
+      const h = 1e-6;
+      const sample = (p: number) => sampleSprintStep((p + 1) % 1, 0.35, 1, 0.48, 0.42);
+      for (const key of ['travel', 'lift', 'pitch'] as const) {
+        const a = sample(at - h)[key],
+          b = sample(at)[key],
+          c = sample(at + h)[key];
+        expect(Math.abs(c - a)).toBeLessThan(0.00008);
+        expect(Math.abs((b - a) / h - (c - b) / h)).toBeLessThan(0.001);
+        const aa = sample(at - 2 * h)[key],
+          cc = sample(at + 2 * h)[key];
+        expect(Math.abs((b - 2 * a + aa) / h ** 2 - (cc - 2 * c + b) / h ** 2)).toBeLessThan(0.15);
+      }
+    },
+  );
+});
+
+it('retains a compact high knee until the opposite toe-off, then reaches and retracts', () => {
+  const sample = (u: number) => sampleSprintStep(0.23 + 0.77 * u, 0.23, 0.74, 0.6, 0.42);
+  expect(sample(0.55).travel).toBeCloseTo(0.74 * 0.08);
+  expect(sample(0.55).lift).toBeCloseTo(0.6);
+  expect(sample(0.72).lift).toBeGreaterThan(0.4);
+  expect(sample(0.88).travel).toBeGreaterThan(0.58);
+  expect(sample(0.88).lift).toBeLessThan(0.02);
+  expect(sample(0.99).travel).toBeLessThan(sample(0.88).travel);
 });

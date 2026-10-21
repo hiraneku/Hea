@@ -7,6 +7,15 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### SPRINT 2 — koreksi kemiripan pose referensi
+
+- Ganti travel kaki yang masih berpola jalan dengan pose sprint tersendiri:
+  heel recovery, knee drive, extension dan retraction dengan interval C2.
+- Perkuat condong badan dan lipatan kaki, pendekkan tumpuan sprint maju serta
+  pertahankan lutut depan sebelum tungkai membuka untuk mendarat.
+- Pertahankan anatomi, kecepatan/physics, jalan/lari dan GERAK 8. Preview SPRINT 2.
+  Riwayat penolakan SPRINT 1 dan batas review di docs/SPRINT_REFERENCE.md.
+
 ### SPRINT 1 — adaptasi referensi stickman
 
 - Adaptasi sprint maju dari `IMG_20261021_222013_942.mp4`: cadence berbasis
