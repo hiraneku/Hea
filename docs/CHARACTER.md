@@ -15,6 +15,10 @@ Walking terbaru: **revision 2** (rig tetap v9). Lihat
 Peningkatan ini hanya memperbaiki bake Walking dan pembacaan kontak saat load;
 controller gameplay serta perilaku GERAK 8 tidak didesain ulang.
 
+Polish sistem gerak (Task 2): lihat [audit, perubahan terarah dan verifikasi](MOVEMENT_POLISH.md).
+Walking revisi 2 tidak diubah; pembalikan arah, offset flight/dash dan pitch look
+menjadi fokus, bukan clip combat baru.
+
 ## Konvensi dan rig
 
 Aset hasil dinormalisasi ke tinggi **2 m**, telapak di Y=0, arah depan **+Z**, up +Y.

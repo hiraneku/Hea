@@ -18,9 +18,11 @@ export class CharacterFacing {
   private previousView = 0;
   private idleTarget = 0;
   private wasMoving = false;
+  private turnSign = 0;
   reset(yaw = 0) {
     this.yaw = this.previousView = this.idleTarget = yaw;
     this.wasMoving = false;
+    this.turnSign = 0;
     this.headYaw = this.turnRate = 0;
   }
   update(dt: number, view: number, moving: boolean, travel: number, locked: boolean) {
@@ -47,7 +49,13 @@ export class CharacterFacing {
     this.wasMoving = moving;
     const before = this.yaw;
     const response = THREE.MathUtils.clamp(12 + cameraRate * 3, 12, 45);
-    const step = angleDelta(target, this.yaw) * (1 - Math.exp(-response * dt));
+    let error = angleDelta(target, this.yaw);
+    // Near an exact reversal both turn directions are equally short. Input noise
+    // across the antipode must not reverse the body every frame. Commit only in
+    // this narrow cone; ordinary turns still use the shortest path and same cap.
+    if (Math.abs(error) > Math.PI - 0.12 && this.turnSign) error = Math.abs(error) * this.turnSign;
+    else if (Math.abs(error) > 0.02) this.turnSign = Math.sign(error);
+    const step = error * (1 - Math.exp(-response * dt));
     const maxStep =
       (moving
         ? THREE.MathUtils.clamp(3 + cameraRate * 1.5, 3, 12)

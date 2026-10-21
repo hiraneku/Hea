@@ -238,6 +238,8 @@ export class Game {
   private fallTilt = 0;
   private tiltQuaternion = new THREE.Quaternion();
   private tiltEuler = new THREE.Euler();
+  /** Presentation only: toggling the motor must not teleport the model pivot. */
+  private characterFlightBlend = 1;
   private testCamera: { at: number[]; look: number[] } | null = null;
   /** A dash pressed a moment too early (cooldown, tumble) fires as soon as it is allowed. */
   private dashBuffer = 0;
@@ -810,6 +812,7 @@ export class Game {
     this.impulse.set(0, 0, 0);
     this.airDash.reset();
     this.flightEnabled = true;
+    this.characterFlightBlend = 1;
     this.verticalVelocity = this.groundJumps = 0;
     this.heavyPenetrations = [];
     this.groundReactions = [];
@@ -1698,26 +1701,31 @@ export class Game {
       9,
       dt,
     );
-    const groundVelocity = Math.hypot(this.velocity.x, this.velocity.z);
+    // Dash is additive world travel, not a clip. Use it for visual facing/lean
+    // as well as ordinary thrust, including a dash initiated from a still hover.
+    // Physics, steering, damage-facing and invulnerability keep their owners.
+    const presentationVelocity = this.velocity.clone().add(this.airDash.velocity);
+    const groundVelocity = Math.hypot(presentationVelocity.x, presentationVelocity.z);
     const travelYaw =
       groundVelocity > 0.1
-        ? Math.atan2(-this.velocity.x, -this.velocity.z)
+        ? Math.atan2(-presentationVelocity.x, -presentationVelocity.z)
         : this.characterFacing.yaw;
     this.characterFacing.update(dt, this.yaw, groundVelocity > 0.15, travelYaw, this.lockedOn);
-    const visualVelocity = this.velocity.clone().applyAxisAngle(UP, -this.characterFacing.yaw);
+    this.characterFlightBlend = damp(this.characterFlightBlend, this.flightEnabled ? 1 : 0, 12, dt);
+    const visualVelocity = presentationVelocity.applyAxisAngle(UP, -this.characterFacing.yaw);
     const pose = new THREE.Quaternion().setFromEuler(
       new THREE.Euler(
-        this.flightEnabled ? clamp(visualVelocity.z * 0.012, -0.12, 0.12) : 0,
+        clamp(visualVelocity.z * 0.012, -0.12, 0.12) * this.characterFlightBlend,
         this.characterFacing.yaw,
-        this.flightEnabled ? clamp(-visualVelocity.x * 0.012, -0.1, 0.1) : 0,
+        clamp(-visualVelocity.x * 0.012, -0.1, 0.1) * this.characterFlightBlend,
         'YXZ',
       ),
     );
     this.avatar.quaternion.copy(this.playerTumble.step(dt, pose));
     // A slow hover bob while flying gently, fading out with speed.
     const cruise = Math.min(1, this.velocity.length() / FLIGHT.speed);
-    const bob = this.flightEnabled ? Math.sin(this.time * 2.2) * 0.05 * (1 - cruise) : 0;
-    const restingPivot = (this.flightEnabled ? 0.85 : 0.66) + bob;
+    const bob = Math.sin(this.time * 2.2) * 0.05 * (1 - cruise) * this.characterFlightBlend;
+    const restingPivot = THREE.MathUtils.lerp(0.66, 0.85, this.characterFlightBlend) + bob;
     this.avatar.position.y +=
       restingPivot * (1 - this.playerTumble.weight) +
       (supportHeight(this.avatar.quaternion, new THREE.Vector3(0.325, 0.65, 0.325)) + 0.025) *

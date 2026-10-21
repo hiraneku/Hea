@@ -8,6 +8,41 @@ import {
 } from '../../src/character/CharacterFacing';
 
 describe('camera, body and movement separation', () => {
+  it.each([
+    [0, 1],
+    [0, -1],
+    [3.1, 1],
+    [-3.1, -1],
+  ])('commits to one short antipodal turn from heading %s, sign %s', (heading, sign) => {
+    for (const fps of [30, 60, 120]) {
+      const facing = new CharacterFacing();
+      facing.reset(heading);
+      for (let i = 0; i < fps; i++) {
+        const before = facing.yaw;
+        facing.update(
+          1 / fps,
+          heading,
+          true,
+          heading + sign * (Math.PI + (i % 2 ? 0.09 : -0.09)),
+          false,
+        );
+        const step = angleDelta(facing.yaw, before) * sign;
+        expect(step).toBeGreaterThanOrEqual(-1e-8);
+        expect(step).toBeLessThanOrEqual(3 / fps + 1e-8);
+      }
+      expect(angleDelta(facing.yaw, heading) * sign).toBeGreaterThan(2.5);
+      const stopped = facing.yaw;
+      facing.update(1 / fps, heading, false, 0, false);
+      expect(facing.yaw).toBe(stopped);
+    }
+  });
+  it('clears the previous turn commitment on reset', () => {
+    const facing = new CharacterFacing();
+    facing.update(1 / 60, 0, true, 1, false);
+    facing.reset();
+    facing.update(1 / 60, 0, true, -Math.PI + 0.02, false);
+    expect(facing.yaw).toBeLessThan(0);
+  });
   it('keeps the body planted inside the neck limit and follows beyond it', () => {
     const facing = new CharacterFacing();
     for (let i = 0; i < 120; i++) facing.update(1 / 60, 0.8, false, 0, false);

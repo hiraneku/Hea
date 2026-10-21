@@ -4,8 +4,9 @@
  * a child: an articulated model with its own animation clips, hidden while the jointed ragdoll
  * takes over or the camera sits in the player's eyes.
  *
- * The asset is CC0 (see public/models/AVATAR-LICENSE.txt). If it cannot be fetched the box is left
- * exactly as it was: the game plays the same without it.
+ * The current 101172 asset supplies Walking only. Other pose names below are a legacy optional
+ * clip contract, not evidence that jump/run/death clips exist. Required-model load failure is
+ * surfaced by Game; the box is not a silent fallback. See docs/CHARACTER.md for model provenance.
  */
 import * as THREE from 'three';
 import { CharacterArmSpace } from '../character/CharacterArmSpace';
@@ -100,7 +101,7 @@ export class AvatarModel {
     return [...this.actions.keys()];
   }
 
-  /** Load the asset and line it up on the body. Failures are silent: the box stays. */
+  /** Load the asset and line it up on the body. Game reports required-model failures. */
   async load() {
     try {
       const gltf = await new GLTFLoader().loadAsync(this.url);
@@ -210,7 +211,7 @@ export class AvatarModel {
         turnRate: state.turnRate ?? 0,
       });
       this.armSpace?.apply();
-      this.look?.apply(state.headYaw ?? 0, state.headPitch ?? 0);
+      this.look?.apply(state.headYaw ?? 0, state.headPitch ?? 0, dt);
       this.wasAirborne = state.airborne;
       this.pose = next;
       return;

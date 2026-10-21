@@ -100,7 +100,7 @@ export class CharacterArenaDrive {
     });
     this.body.quaternion.multiply(this.gait.flightLean(dt, local.x, local.z, flying));
     this.armSpace.apply();
-    this.look.apply(this.facing.headYaw, -Math.asin(THREE.MathUtils.clamp(view.y, -1, 1)));
+    this.look.apply(this.facing.headYaw, -Math.asin(THREE.MathUtils.clamp(view.y, -1, 1)), dt);
     this.body.position.x = THREE.MathUtils.clamp(this.body.position.x, -5, 5);
     this.body.position.z = THREE.MathUtils.clamp(this.body.position.z, -5, 5);
     return this.body.position.clone().sub(before);

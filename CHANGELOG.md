@@ -7,6 +7,19 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Task 2 — polish gerakan yang sudah ada, tanpa clip combat baru
+
+- Stabilkan pilihan arah putar dekat pembalikan 180° saat input bergetar,
+  tanpa mengubah turn cap atau aturan GERAK 8.
+- Blend offset/lean presentasi saat mode flight berganti; sertakan velocity dash
+  dalam orientasi visual, tanpa mengubah motor, durasi dash atau invulnerability.
+- Smooth pitch Neck/Head sesudah mixer dengan target dibatasi sebelum filter;
+  yaw tidak diberi lapisan delay tambahan. API inspeksi pose langsung tetap.
+- Audit dan pertahankan double-jump, physics flight, tumble/slide/recovery serta
+  Walking revisi 2. Ragdoll balok lama masih berbeda siluet dari karakter putih.
+- Tambah regresi unit/browser dan capture game asli; rincian pemeriksaan visual,
+  hasil tes dan keterbatasan di [laporan Task 2](docs/MOVEMENT_POLISH.md).
+
 ### Walking revision 2 — telapak tertanam dan swing lebih terkendali
 
 - Perbaiki bake `Walking` pada rig v9 yang sama: lane kaki tetap, kompensasi pivot

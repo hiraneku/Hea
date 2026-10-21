@@ -6,6 +6,7 @@ import * as THREE from 'three';
 export class CharacterLook {
   private readonly joints: { bone: THREE.Object3D; base: THREE.Quaternion; share: number }[];
   private applied = false;
+  private pitch = 0;
   constructor(private readonly model: THREE.Object3D) {
     this.joints = [
       ['Neck', 0.65],
@@ -21,10 +22,17 @@ export class CharacterLook {
     this.applied = false;
   }
   /** Angles in radians, relative to the character's body, not the camera. */
-  apply(yaw: number, pitch: number) {
+  apply(yaw: number, pitch: number, dt?: number) {
     this.clear();
     yaw = THREE.MathUtils.clamp(yaw, (-60 * Math.PI) / 180, (60 * Math.PI) / 180);
     pitch = THREE.MathUtils.clamp(pitch, (-35 * Math.PI) / 180, (45 * Math.PI) / 180);
+    // Gameplay supplies dt; direct pose inspection keeps its immediate API.
+    // Clamp BEFORE filtering so looking beyond the limit cannot build up a
+    // hidden saturated target and delay the return. Yaw is already filtered by
+    // CharacterFacing and must not get a second layer of input latency.
+    this.pitch =
+      dt === undefined ? pitch : THREE.MathUtils.damp(this.pitch, pitch, 22, Math.max(0, dt));
+    pitch = this.pitch;
     for (const j of this.joints) {
       j.base.copy(j.bone.quaternion);
       j.bone.quaternion.multiply(
