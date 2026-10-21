@@ -7,6 +7,17 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### GERAK 7 — backward tanpa lock adalah backpedal
+
+- Sesuai pilihan eksplisit pengguna: input mundur tanpa lock mempertahankan yaw
+  badan sebelum input, bukan berputar mengikuti travel maupun menghadap kamera.
+  Berlaku juga diagonal belakang, dan arah tetap dipertahankan setelah release.
+- Gerak maju/samping bebas tetap mengikuti travel; lock dan kontrol kepala tidak
+  diubah. Tidak menyentuh gait/arm spacing GERAK 6 maupun kecepatan.
+- Ganti assertion lama yang justru menuntut putaran PI dengan assertion heading
+  tidak berubah DAN displacement sungguh mundur. Uji analog HP start normal tanpa
+  helper pemaksa lock, keyboard, heading awal yang tidak sejajar kamera, dan seam.
+
 ### Koreksi GERAK 6 setelah penolakan GERAK 5
 
 - Hapus auto-lock saat game dimulai pada perangkat touch. Lock harus diminta

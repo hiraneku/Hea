@@ -66,6 +66,21 @@ describe('camera, body and movement separation', () => {
     for (let i = 0; i < 240; i++) facing.update(1 / 60, 0, false, 0, false);
     expect(facing.yaw).toBe(yaw);
   });
+  it.each([0, 0.7, -0.6, 3.1, -3.1])(
+    'backpedals without redirecting the previous body heading %s to travel or camera',
+    (heading) => {
+      const facing = new CharacterFacing();
+      facing.reset(heading);
+      const view = heading + 0.25;
+      for (let i = 0; i < 180; i++) {
+        facing.update(1 / 60, view, true, view + Math.PI + (i % 2 ? 0.15 : -0.15), false);
+        expect(facing.yaw).toBe(heading);
+        expect(facing.turnRate).toBe(0);
+      }
+      for (let i = 0; i < 120; i++) facing.update(1 / 60, view, false, heading, false);
+      expect(facing.yaw).toBe(heading);
+    },
+  );
   it('faces travel unlocked, but keeps a small diagonal allowance under lock', () => {
     const free = new CharacterFacing(),
       locked = new CharacterFacing();

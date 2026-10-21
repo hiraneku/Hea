@@ -1506,6 +1506,29 @@ describe('portable 101172 rig and Walking asset', () => {
       player.dispose();
     },
   );
+  it.each([-0.7, 0.6])(
+    'preview backpedals while preserving a non-camera body heading %s',
+    (heading) => {
+      const body = new THREE.Group();
+      body.add(gltf.scene);
+      body.rotation.y = heading;
+      const player = new CharacterPlayback(gltf.scene, gltf.animations);
+      const drive = new CharacterArenaDrive(body, player);
+      drive.resetMotion();
+      const camera = new THREE.PerspectiveCamera();
+      camera.position.set(0, 1, -5);
+      camera.lookAt(0, 1, 0);
+      camera.updateMatrixWorld(true);
+      for (let i = 0; i < 90; i++) {
+        drive.update(1 / 60, 0, -1, camera);
+        expect(body.rotation.y).toBeCloseTo(heading, 6);
+      }
+      expect(body.position.z).toBeLessThan(-0.2);
+      for (let i = 0; i < 90; i++) drive.update(1 / 60, 0, 0, camera);
+      expect(body.rotation.y).toBeCloseTo(heading, 6);
+      player.dispose();
+    },
+  );
   it('keeps preview world speed camera-relative and never adds lateral root speed', () => {
     const body = new THREE.Group();
     body.scale.setScalar(0.76);

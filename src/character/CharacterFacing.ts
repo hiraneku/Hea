@@ -32,7 +32,14 @@ export class CharacterFacing {
     if (moving) {
       // Lateral allowance vanishes at both forward AND backward travel. A
       // clamped angle jumped from +0.3 to -0.3 at the backward +/-PI seam.
-      target = locked ? view + Math.sin(angleDelta(travel, view)) * 0.3 : travel;
+      const backward = Math.cos(angleDelta(travel, view)) < -0.1;
+      // Backward input is backpedalling, not a command to turn 180 degrees.
+      // Hold the actual pre-existing heading, which need not equal camera yaw.
+      target = locked
+        ? view + Math.sin(angleDelta(travel, view)) * 0.3
+        : backward
+          ? this.yaw
+          : travel;
       this.idleTarget = this.yaw;
     } else {
       // Releasing movement is not a new look command. Hold the last heading,

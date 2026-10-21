@@ -626,3 +626,16 @@ menonaktifkan flight, mengirim backward melalui CDP analog HP/keyboard desktop,
 memeriksa selisih yaw badan/kamera mendekati PI dan hold setelah release. Tidak
 memanggil face/scenario. Model/kecepatan tidak berubah. Tetap perlu review pengguna
 atas rasa gerak; angka lulus bukan jaminan natural-motion acceptance.
+
+## GERAK 7 — pilihan backpedal eksplisit
+
+Pengguna memilih tetap membelakangi kamera saat menarik analog mundur tanpa lock,
+bukan memutar badan mengikuti perjalanan. Ini menggantikan interpretasi GERAK 5/6
+yang salah. `CharacterFacing` menahan yaw badan aktual ketika travel berada di
+sektor belakang kamera (`cos(travel-view) < -0.1`), termasuk diagonal belakang.
+Tidak mengunci yaw ke kamera: heading awal miring tetap miring. Setelah release,
+idle target menahan arah itu; input kamera baru saat idle masih bisa meminta pivot.
+Gerak maju/samping bebas, lock, gait dan arm envelope GERAK 6 tidak berubah.
+Tes gameplay asli sekarang memeriksa heading sebelum/selama/setelah backward dan
+jarak perpindahan mundur positif; tidak lagi menerima putaran PI. Unit mencakup
+heading nonzero dan seam. Body/gaze/translation dipisahkan, bukan reverse mesh.
