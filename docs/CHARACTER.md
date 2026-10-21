@@ -639,3 +639,18 @@ Gerak maju/samping bebas, lock, gait dan arm envelope GERAK 6 tidak berubah.
 Tes gameplay asli sekarang memeriksa heading sebelum/selama/setelah backward dan
 jarak perpindahan mundur positif; tidak lagi menerima putaran PI. Unit mencakup
 heading nonzero dan seam. Body/gaze/translation dipisahkan, bukan reverse mesh.
+
+## GERAK 8 — menggantikan backpedal GERAK 7
+
+Koreksi akhir pengguna: tanpa lock badan tetap mengikuti arah perjalanan ketika
+bergerak, termasuk ketika analog mundur. Yang dipertahankan adalah arah SETELAH
+berhenti. Hapus pengecualian sektor backward GERAK 7 dari CharacterFacing, tetapi
+pertahankan idleTarget/wasMoving sehingga release menyimpan yaw aktual, bukan
+mengaktifkan idle pivot karena kamera sudah berada di belakang tubuh. Kepala tetap
+memudar ke netral ketika arah pandang kamera tidak terjangkau leher. Drag kamera
+baru saat diam tetap dapat meminta pivot. Lock ON tidak diubah.
+
+Regresi unit, motor preview dan game normal memeriksa (1) yaw mengikuti travel
+sebelum release, (2) displacement benar-benar menuju arah input, (3) yaw tidak
+berbalik ke kamera setelah release, (4) kepala tidak dipuntir ke belakang. Termasuk
+heading awal miring, seam dan analog HP. Ini bukan lagi tes backpedal GERAK 7.

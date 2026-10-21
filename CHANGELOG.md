@@ -7,6 +7,16 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### GERAK 8 — arah jalan selama bergerak, hold hanya setelah berhenti
+
+- Batalkan backpedal GERAK 7. Tanpa lock, badan selalu menghadap travel, termasuk
+  input mundur dan diagonal belakang. Saat analog dilepas, yaw terakhir ditahan;
+  tidak kembali otomatis ke arah kamera. Kepala tetap independen dan terbatas.
+- Regresi membedakan dua fase: wajib sudah berputar menghadap travel ketika
+  input masih ditahan, lalu wajib tetap pada heading itu setelah release.
+  Game normal diuji dengan analog touch HP dan keyboard tanpa helper pemaksa lock.
+- Tidak mengubah arm spacing, lateral gait, pace, maupun default lock OFF GERAK 6.
+
 ### GERAK 7 — backward tanpa lock adalah backpedal
 
 - Sesuai pilihan eksplisit pengguna: input mundur tanpa lock mempertahankan yaw

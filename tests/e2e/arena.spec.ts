@@ -2273,7 +2273,7 @@ test('camera leads the head before the body and pace has three tiers in the aren
   expect(Math.abs(avatar.headYaw)).toBeLessThanOrEqual(Math.PI / 3 + 0.001);
 });
 
-test('unlocked backpedalling holds its heading while the head alone tracks the camera', async ({
+test('unlocked backward walking faces travel and retains that heading after release', async ({
   page,
 }) => {
   await load(page);
@@ -2289,23 +2289,22 @@ test('unlocked backpedalling holds its heading while the head alone tracks the c
     .avatarModel.bodyYaw;
   await page.keyboard.down('s');
   await step(page, 2);
+  const walking = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
   expect(
-    (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel.bodyYaw,
-  ).toBeCloseTo(originalHeading, 4);
+    Math.abs(Math.atan2(Math.sin(walking.bodyYaw - Math.PI), Math.cos(walking.bodyYaw - Math.PI))),
+  ).toBeLessThan(0.01);
+  expect(Math.abs(walking.bodyYaw - originalHeading)).toBeGreaterThan(2.8);
   await page.keyboard.up('s');
   await step(page, 0.8);
   const before = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
-  expect(before.bodyYaw).toBeCloseTo(originalHeading, 4);
+  expect(before.bodyYaw).toBeCloseTo(walking.bodyYaw, 3);
   await step(page, 2);
   const after = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
   expect(after.bodyYaw).toBeCloseTo(before.bodyYaw, 4);
-  const cameraYaw = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).camera.yaw;
-  const gaze = Math.atan2(Math.sin(cameraYaw - after.bodyYaw), Math.cos(cameraYaw - after.bodyYaw));
-  expect(Math.abs(gaze)).toBeLessThan(Math.PI / 3);
-  expect(after.headYaw).toBeCloseTo(gaze, 3);
+  expect(Math.abs(after.headYaw)).toBeLessThan(0.02);
 });
 
-test('a normal game backpedals with unchanged body heading on desktop and touch', async ({
+test('a normal game faces backward travel then holds its final heading on desktop and touch', async ({
   page,
   context,
 }, info) => {
@@ -2317,8 +2316,6 @@ test('a normal game backpedals with unchanged body heading on desktop and touch'
   await page.evaluate(() => window.__HEA_DEBUG__.harness!.freeze(true));
   await page.locator('#flight-toggle').click();
   await step(page, 2);
-  const initialHeading = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel
-    .bodyYaw;
   const initialPosition = (await state(page)).position;
   const cdp = info.project.name === 'mobile' ? await context.newCDPSession(page) : undefined;
   if (cdp) {
@@ -2336,12 +2333,22 @@ test('a normal game backpedals with unchanged body heading on desktop and touch'
   } else await page.keyboard.down('s');
   await step(page, 2);
   const held = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
-  expect(held.avatarModel.bodyYaw).toBeCloseTo(initialHeading, 4);
+  const facingError = held.avatarModel.bodyYaw - held.camera.yaw - Math.PI;
+  expect(Math.abs(Math.atan2(Math.sin(facingError), Math.cos(facingError)))).toBeLessThan(0.01);
   const moved = (await state(page)).position;
   const backwardDistance =
     (moved.x - initialPosition.x) * Math.sin(held.camera.yaw) +
     (moved.z - initialPosition.z) * Math.cos(held.camera.yaw);
   expect(backwardDistance).toBeGreaterThan(0.1);
+  const meshForward = await page.evaluate(() => {
+    const mesh = window.__HEA_DEBUG__.harness!.scene().getObjectByName('HEA_101172')!;
+    return mesh.getWorldDirection(mesh.position.clone()).toArray();
+  });
+  // Check the actual rendered GLB transform, not just the controller's yaw.
+  expect(
+    meshForward[0] * Math.sin(held.camera.yaw) + meshForward[2] * Math.cos(held.camera.yaw),
+  ).toBeGreaterThan(0.99);
+  await page.screenshot({ path: `.cache/movement8-${info.project.name}-moving.png` });
   if (cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   else await page.keyboard.up('s');
   await step(page, 0.8);
@@ -2349,8 +2356,11 @@ test('a normal game backpedals with unchanged body heading on desktop and touch'
   await step(page, 2);
   const after = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
   expect(after.bodyYaw).toBeCloseTo(stopped.bodyYaw, 4);
-  const cameraYaw = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).camera.yaw;
-  const gaze = Math.atan2(Math.sin(cameraYaw - after.bodyYaw), Math.cos(cameraYaw - after.bodyYaw));
-  expect(Math.abs(gaze)).toBeLessThan(Math.PI / 3);
-  expect(after.headYaw).toBeCloseTo(gaze, 3);
+  expect(Math.abs(after.headYaw)).toBeLessThan(0.02);
+  const stoppedForward = await page.evaluate(() => {
+    const mesh = window.__HEA_DEBUG__.harness!.scene().getObjectByName('HEA_101172')!;
+    return mesh.getWorldDirection(mesh.position.clone()).toArray();
+  });
+  for (let i = 0; i < 3; i++) expect(stoppedForward[i]).toBeCloseTo(meshForward[i], 3);
+  await page.screenshot({ path: `.cache/movement8-${info.project.name}-stopped.png` });
 });

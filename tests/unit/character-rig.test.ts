@@ -1507,7 +1507,7 @@ describe('portable 101172 rig and Walking asset', () => {
     },
   );
   it.each([-0.7, 0.6])(
-    'preview backpedals while preserving a non-camera body heading %s',
+    'preview faces backward travel from heading %s and holds it only after stopping',
     (heading) => {
       const body = new THREE.Group();
       body.add(gltf.scene);
@@ -1521,11 +1521,16 @@ describe('portable 101172 rig and Walking asset', () => {
       camera.updateMatrixWorld(true);
       for (let i = 0; i < 90; i++) {
         drive.update(1 / 60, 0, -1, camera);
-        expect(body.rotation.y).toBeCloseTo(heading, 6);
       }
       expect(body.position.z).toBeLessThan(-0.2);
+      const reached = body.quaternion.clone();
+      const facing = new THREE.Vector3(0, 0, 1).applyQuaternion(reached);
+      const facingYaw = Math.atan2(facing.x, facing.z);
+      expect(
+        Math.abs(Math.atan2(Math.sin(facingYaw - Math.PI), Math.cos(facingYaw - Math.PI))),
+      ).toBeLessThan(0.005);
       for (let i = 0; i < 90; i++) drive.update(1 / 60, 0, 0, camera);
-      expect(body.rotation.y).toBeCloseTo(heading, 6);
+      expect(body.quaternion.angleTo(reached)).toBeLessThan(0.000001);
       player.dispose();
     },
   );
