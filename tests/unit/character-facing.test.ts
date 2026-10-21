@@ -37,6 +37,35 @@ describe('camera, body and movement separation', () => {
       }
     }
   });
+  it.each([Math.PI, Math.PI - 0.2, -Math.PI + 0.2])(
+    'holds unlocked last heading after release at %s without a backward gaze',
+    (travel) => {
+      const facing = new CharacterFacing();
+      for (let i = 0; i < 240; i++) facing.update(1 / 60, 0, true, travel, false);
+      const heading = facing.yaw;
+      for (let i = 0; i < 240; i++) {
+        facing.update(1 / 60, 0, false, 0, false);
+        expect(Math.abs(angleDelta(facing.yaw, heading))).toBeLessThan(0.00001);
+        expect(Math.abs(facing.headYaw)).toBeLessThan(0.02);
+        expect(facing.turnRate).toBe(0);
+      }
+      // Explicit camera input can still request a safe, smooth stationary pivot.
+      facing.update(1 / 60, 0.5, false, 0, false);
+      for (let i = 0; i < 180; i++) facing.update(1 / 60, 0.5, false, 0, false);
+      expect(Math.abs(angleDelta(0.5, facing.yaw))).toBeLessThanOrEqual(HEAD_LIMIT + 0.001);
+    },
+  );
+  it('does not finish the old moving heading or snap the head on release during a turn', () => {
+    const facing = new CharacterFacing();
+    for (let i = 0; i < 15; i++) facing.update(1 / 60, 0, true, Math.PI, false);
+    const yaw = facing.yaw;
+    const head = facing.headYaw;
+    facing.update(1 / 60, 0, false, 0, false);
+    expect(facing.yaw).toBe(yaw);
+    expect(Math.abs(facing.headYaw - head)).toBeLessThan(0.1);
+    for (let i = 0; i < 240; i++) facing.update(1 / 60, 0, false, 0, false);
+    expect(facing.yaw).toBe(yaw);
+  });
   it('faces travel unlocked, but keeps a small diagonal allowance under lock', () => {
     const free = new CharacterFacing(),
       locked = new CharacterFacing();

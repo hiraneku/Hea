@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CharacterArmSpace } from './CharacterArmSpace';
 import { CharacterFacing, GROUND_PACES, directionalSpeed, angleDelta } from './CharacterFacing';
 import { CharacterLocomotion } from './CharacterLocomotion';
 import { CharacterLook } from './CharacterLook';
@@ -14,6 +15,7 @@ export class CharacterArenaDrive {
   readonly facing = new CharacterFacing();
   private readonly gait: CharacterLocomotion;
   private readonly look: CharacterLook;
+  private readonly armSpace: CharacterArmSpace;
   private readonly lastDirection = new THREE.Vector3(0, 0, 1);
   private speed = 0;
   constructor(
@@ -23,6 +25,7 @@ export class CharacterArenaDrive {
     playback.rootMotionEnabled = true;
     this.gait = new CharacterLocomotion(playback.model);
     this.look = new CharacterLook(playback.model);
+    this.armSpace = new CharacterArmSpace(playback.model);
   }
   cyclePace() {
     this.pace = (this.pace + 1) % 3;
@@ -96,6 +99,7 @@ export class CharacterArenaDrive {
       turnRate: this.facing.turnRate,
     });
     this.body.quaternion.multiply(this.gait.flightLean(dt, local.x, local.z, flying));
+    this.armSpace.apply();
     this.look.apply(this.facing.headYaw, -Math.asin(THREE.MathUtils.clamp(view.y, -1, 1)));
     this.body.position.x = THREE.MathUtils.clamp(this.body.position.x, -5, 5);
     this.body.position.z = THREE.MathUtils.clamp(this.body.position.z, -5, 5);

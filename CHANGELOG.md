@@ -7,6 +7,21 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — GERAK 5: duel walk, arm clearance, heading setelah berhenti
+
+- Lateral lock memakai ritme stance/swing berjalan dengan kaki/knee-pole menyerong
+  terbatas menuju gerak, bukan telapak frontal kaku atau berputar penuh 90 derajat.
+  Badan tetap berallowance kecil ke sisi gerak dan kepala camera-facing; lane kaki
+  pendek tanpa crossover, pace dan arah perpindahan world tidak berubah.
+- Tambahkan constraint akhir `CharacterArmSpace`: upper-arm menjaga ruang keluar
+  kecil (bukan T/A-pose lebar), siku rileks; preserve ayunan dan pose yang sudah lebih
+  terbuka. Berlaku game, motor preview dan pemeriksaan clip termasuk pivot/flight.
+- Saat tidak lock, melepas input menyimpan heading badan terakhir, termasuk saat
+  sedang berbelok. Kamera diam tidak lagi memicu auto-pivot menghadap kembali.
+  Drag kamera baru tetap dapat memulai pivot melampaui jangkauan leher.
+- Gaze berangsur kembali ke depan tubuh ketika arah kamera berada di belakang
+  tubuh; tidak clamp terus ke ±60 derajat atau berpindah sisi di seam ±180 derajat.
+
 ### Diperbaiki — GERAK 4: drag cepat dan mundur saat lock
 
 - Batasi langkah pivot menjadi 300 ms tanpa pengali pergantian support. Drag cepat

@@ -8,6 +8,7 @@
  * exactly as it was: the game plays the same without it.
  */
 import * as THREE from 'three';
+import { CharacterArmSpace } from '../character/CharacterArmSpace';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CharacterLook } from '../character/CharacterLook';
 import { CharacterLocomotion } from '../character/CharacterLocomotion';
@@ -63,6 +64,7 @@ export class AvatarModel {
   private playback?: CharacterPlayback;
   private wasAirborne = false;
   private look?: CharacterLook;
+  private armSpace?: CharacterArmSpace;
   private locomotion?: CharacterLocomotion;
   loadError?: string;
   private actions = new Map<AvatarPose, THREE.AnimationAction>();
@@ -160,6 +162,7 @@ export class AvatarModel {
         this.playback.rootMotionEnabled = true;
         this.playback.setMode('bind', true);
         this.look = new CharacterLook(model);
+        this.armSpace = new CharacterArmSpace(model);
         this.locomotion = new CharacterLocomotion(model);
       } else this.actions.get('idle')?.play();
       this.pose = 'idle';
@@ -206,6 +209,7 @@ export class AvatarModel {
         airborne: state.airborne,
         turnRate: state.turnRate ?? 0,
       });
+      this.armSpace?.apply();
       this.look?.apply(state.headYaw ?? 0, state.headPitch ?? 0);
       this.wasAirborne = state.airborne;
       this.pose = next;

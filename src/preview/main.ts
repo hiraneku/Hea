@@ -2,6 +2,7 @@ import '@fontsource/inter/latin-400.css';
 import '@fontsource/inter/latin-600.css';
 import '@fontsource/barlow-condensed/latin-700.css';
 import * as THREE from 'three';
+import { CharacterArmSpace } from '../character/CharacterArmSpace';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CharacterLook } from '../character/CharacterLook';
@@ -28,7 +29,7 @@ app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>
   <main>
     <section class="stage" aria-label="Preview karakter 3D">
-      <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION} · GERAK 4</p></div>
+      <div class="stage-heading"><p>KARAKTER <span>·</span> v${RIG_REVISION} · GERAK 5</p></div>
       <div id="viewport"></div><div id="joint-labels" class="joint-labels" aria-hidden="true" hidden></div>
       <div id="drive-pad" role="group" aria-label="Joystick gerak" hidden><span id="drive-knob"></span><small>GERAK</small></div>
       <button id="drive-flight" class="drive-flight" aria-label="Terbang" hidden disabled>TERBANG</button>
@@ -129,6 +130,7 @@ async function boot() {
   view();
   let playback: CharacterPlayback | undefined;
   let look: CharacterLook | undefined;
+  let armSpace: CharacterArmSpace | undefined;
   let driving = false;
   let updateDrive: ((dt: number) => void) | undefined;
   let applyInspectionMotion: (() => void) | undefined;
@@ -163,6 +165,7 @@ async function boot() {
     else {
       playback?.update(visibleDt);
       applyInspectionMotion?.();
+      armSpace?.apply();
     }
     if (!driving)
       look?.apply(
@@ -277,6 +280,7 @@ async function boot() {
     playback.setMode('bind', true);
     playback.update(0);
     look = new CharacterLook(model);
+    armSpace = new CharacterArmSpace(model);
     headBone = model.getObjectByName('Head');
     const drive = new CharacterArenaDrive(holder, playback);
     const paceButton = document.createElement('button');

@@ -17,6 +17,7 @@ try {
     const T = await import('/node_modules/three/build/three.module.js');
     const { GLTFLoader } = await import('/node_modules/three/examples/jsm/loaders/GLTFLoader.js');
     const { CharacterPlayback } = await import('/src/character/CharacterPlayback.ts');
+    const { CharacterArmSpace } = await import('/src/character/CharacterArmSpace.ts');
     const { CharacterLocomotion } = await import('/src/character/CharacterLocomotion.ts');
     const gltf = await new GLTFLoader().loadAsync('/models/101172-rigged.glb');
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
@@ -54,6 +55,7 @@ try {
     let time = 0;
     player.setMode('bind', true);
     const gait = new CharacterLocomotion(gltf.scene);
+    const arms = new CharacterArmSpace(gltf.scene);
     window.reviewMotion = (pace, x, forward, angle, turnRate = 0, seconds = 0.8) => {
       gait.reset();
       holder.quaternion.identity();
@@ -64,6 +66,7 @@ try {
         const rate = turnRate === 99 ? (t < 0.6 ? 4.5 : t < 0.85 ? 0 : t < 1.45 ? -4.5 : t < 1.7 ? 0 : 4.5) : turnRate;
         holder.rotation.y += rate / 120;
         gait.apply(1/120, {pace, x, forward, airborne:false, turnRate:rate});
+        arms.apply();
       }
       camera.position.set(Math.sin(angle)*5, 1.1, Math.cos(angle)*5);
       camera.lookAt(0, 1.1, 0);
@@ -72,7 +75,7 @@ try {
     };
   });
   await mkdir('.cache/motion-review', {recursive:true});
-  for (const [name, pace, x, z, rate] of [['run',1,0,3.7,0],['sprint',2,0,5.8,0],['strafe',0,1,0,0],['back',0,0,-1,0],['pivot',0,0,0,1.2],['pivot-stress',0,0,0,99],['look-idle',0,0,0,0]])
+  for (const [name, pace, x, z, rate] of [['run',1,0,3.7,0],['sprint',2,0,5.8,0],['strafe',0,1,0,0],['strafe-left',0,-1,0,0],['back',0,0,-1,0],['pivot',0,0,0,1.2],['pivot-stress',0,0,0,99],['look-idle',0,0,0,0]])
     for (const [view, angle] of [['front',0],['side',Math.PI/2]]) {
       await page.evaluate(([pace,x,z,angle,rate]) => window.reviewMotion(pace,x,z,angle,rate,rate===99?2.2:0.8), [pace,x,z,angle,rate]);
       await page.screenshot({path:`.cache/motion-review/${name}-${view}.png`});

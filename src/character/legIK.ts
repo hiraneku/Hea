@@ -6,6 +6,7 @@ export function solveLeg(
   ankle: THREE.Vector3,
   bones: Map<string, THREE.Bone>,
   scene: THREE.Object3D,
+  poleYaw = 0,
 ) {
   const thigh = bones.get(side + 'Thigh')!,
     shin = bones.get(side + 'Shin')!,
@@ -19,7 +20,8 @@ export function solveLeg(
   direction.normalize();
   const along = (l1 * l1 + distance * distance - l2 * l2) / (2 * distance);
   const bend = Math.sqrt(Math.max(0, l1 * l1 - along * along));
-  const pole = new THREE.Vector3(0, 0, 1).addScaledVector(direction, -direction.z).normalize();
+  const pole = new THREE.Vector3(Math.sin(poleYaw), 0, Math.cos(poleYaw));
+  pole.addScaledVector(direction, -pole.dot(direction)).normalize();
   const knee = hip.clone().addScaledVector(direction, along).addScaledVector(pole, bend);
   const upper = knee.clone().sub(hip).normalize(),
     lower = ankle.clone().sub(knee).normalize();

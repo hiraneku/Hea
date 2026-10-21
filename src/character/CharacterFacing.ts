@@ -16,8 +16,11 @@ export class CharacterFacing {
   headYaw = 0;
   turnRate = 0;
   private previousView = 0;
+  private idleTarget = 0;
+  private wasMoving = false;
   reset(yaw = 0) {
-    this.yaw = this.previousView = yaw;
+    this.yaw = this.previousView = this.idleTarget = yaw;
+    this.wasMoving = false;
     this.headYaw = this.turnRate = 0;
   }
   update(dt: number, view: number, moving: boolean, travel: number, locked: boolean) {
@@ -25,14 +28,21 @@ export class CharacterFacing {
     const cameraRate = Math.abs(angleDelta(view, this.previousView)) / dt;
     this.previousView = view;
     const delta = angleDelta(view, this.yaw);
-    let target = this.yaw;
+    let target: number;
     if (moving) {
       // Lateral allowance vanishes at both forward AND backward travel. A
       // clamped angle jumped from +0.3 to -0.3 at the backward +/-PI seam.
       target = locked ? view + Math.sin(angleDelta(travel, view)) * 0.3 : travel;
-    } else if (Math.abs(delta) > HEAD_LIMIT) {
-      target = view - Math.sign(delta) * HEAD_LIMIT;
+      this.idleTarget = this.yaw;
+    } else {
+      // Releasing movement is not a new look command. Hold the last heading,
+      // even when the camera's forward vector is behind this unlocked body.
+      if (this.wasMoving) this.idleTarget = this.yaw;
+      else if (cameraRate > 0.001 && Math.abs(delta) > HEAD_LIMIT)
+        this.idleTarget = view - Math.sign(delta) * HEAD_LIMIT;
+      target = this.idleTarget;
     }
+    this.wasMoving = moving;
     const before = this.yaw;
     const response = THREE.MathUtils.clamp(12 + cameraRate * 3, 12, 45);
     const step = angleDelta(target, this.yaw) * (1 - Math.exp(-response * dt));
@@ -43,8 +53,14 @@ export class CharacterFacing {
     this.yaw += THREE.MathUtils.clamp(step, -maxStep, maxStep);
     this.turnRate = angleDelta(this.yaw, before) / dt;
     let desiredHead = THREE.MathUtils.clamp(angleDelta(view, this.yaw), -HEAD_LIMIT, HEAD_LIMIT);
-    if (Math.abs(angleDelta(view, this.yaw)) > 2.7 && Math.abs(this.headYaw) > 0.01)
-      desiredHead = Math.sign(this.headYaw) * HEAD_LIMIT;
+    // A camera behind the body is not a request to look through the spine.
+    // Fade to the body's forward gaze continuously, including the +/-PI seam.
+    const behind = THREE.MathUtils.smoothstep(
+      Math.abs(angleDelta(view, this.yaw)),
+      Math.PI / 2,
+      Math.PI - 0.15,
+    );
+    desiredHead *= 1 - behind;
     this.headYaw += (desiredHead - this.headYaw) * (1 - Math.exp(-22 * dt));
   }
 }

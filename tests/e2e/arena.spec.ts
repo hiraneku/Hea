@@ -2272,3 +2272,29 @@ test('camera leads the head before the body and pace has three tiers in the aren
   expect(avatar.bodyYaw - initialBody).toBeGreaterThan(1);
   expect(Math.abs(avatar.headYaw)).toBeLessThanOrEqual(Math.PI / 3 + 0.001);
 });
+
+test('unlocked backward walking holds its final heading and neutral head after input release', async ({
+  page,
+}) => {
+  await load(page);
+  await page.locator('#start-button').click();
+  await page.evaluate(() => {
+    const h = window.__HEA_DEBUG__.harness!;
+    h.freeze(true);
+    h.scenario('walk');
+    h.face(0);
+    h.step(0.2);
+  });
+  await page.keyboard.down('s');
+  await step(page, 2);
+  await page.keyboard.up('s');
+  await step(page, 0.8);
+  const before = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
+  expect(Math.abs(Math.atan2(Math.sin(before.bodyYaw), Math.cos(before.bodyYaw)))).toBeGreaterThan(
+    2.9,
+  );
+  await step(page, 2);
+  const after = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
+  expect(after.bodyYaw).toBeCloseTo(before.bodyYaw, 4);
+  expect(Math.abs(after.headYaw)).toBeLessThan(0.02);
+});

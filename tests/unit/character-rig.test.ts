@@ -6,6 +6,7 @@ import { GLTFLoader, type GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { armRegions101172 } from '../../src/character/skinRegions101172';
 import { CharacterLocomotion } from '../../src/character/CharacterLocomotion';
 import { CharacterArenaDrive } from '../../src/character/CharacterArenaDrive';
+import { CharacterArmSpace } from '../../src/character/CharacterArmSpace';
 import { CharacterLook } from '../../src/character/CharacterLook';
 import { CharacterTestDrive } from '../../src/character/CharacterTestDrive';
 import { taperForearms101172 } from '../../src/character/shape101172';
@@ -1387,6 +1388,68 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(body.position.length()).toBe(0);
     player.dispose();
   });
+  it.each([-1, 1])(
+    'angles duel-walk soles obliquely without following the lateral travel fully (%s)',
+    (x) => {
+      const player = new CharacterPlayback(gltf.scene, gltf.animations);
+      player.setMode('bind', true);
+      const gait = new CharacterLocomotion(gltf.scene);
+      for (let i = 0; i < 240; i++) {
+        player.update(1 / 60);
+        gait.apply(1 / 60, { x, forward: 0, pace: 0, airborne: false, turnRate: 0 });
+        if (i < 60) continue;
+        gltf.scene.updateMatrixWorld(true);
+        for (const side of ['Left', 'Right']) {
+          const foot = gltf.scene.getObjectByName(side + 'Foot')!;
+          const q = foot.getWorldQuaternion(new THREE.Quaternion());
+          const yaw = new THREE.Euler().setFromQuaternion(q, 'YXZ').y;
+          expect(x * yaw).toBeGreaterThan(0.3);
+          expect(x * yaw).toBeLessThan(0.55);
+        }
+      }
+      player.dispose();
+    },
+  );
+  it.each(['idle', 'forward', 'side', 'back', 'pivot', 'flight'])(
+    'keeps relaxed arm clearance in %s without accumulating on repeated frames',
+    (mode) => {
+      const player = new CharacterPlayback(gltf.scene, gltf.animations);
+      player.setMode('bind', true);
+      if (mode === 'forward') player.setMode('walk', true);
+      if (mode === 'flight') player.fly(0);
+      const gait = new CharacterLocomotion(gltf.scene);
+      const arms = new CharacterArmSpace(gltf.scene);
+      for (let i = 0; i < 120; i++) {
+        player.update(1 / 60);
+        gait.apply(1 / 60, {
+          x: mode === 'side' ? 1 : 0,
+          forward: mode === 'back' ? -1 : mode === 'forward' ? 1 : 0,
+          pace: 0,
+          airborne: mode === 'flight',
+          turnRate: mode === 'pivot' ? 4.5 : 0,
+        });
+        arms.apply();
+        gltf.scene.updateMatrixWorld(true);
+        for (const [side, sign] of [
+          ['Left', 1],
+          ['Right', -1],
+        ] as const) {
+          const upper = gltf.scene.getObjectByName(side + 'UpperArm')!;
+          const hand = gltf.scene.getObjectByName(side + 'Hand')!;
+          expect(sign * upper.rotation.z).toBeGreaterThanOrEqual(0.0999);
+          const gap =
+            sign *
+            (hand.getWorldPosition(new THREE.Vector3()).x -
+              upper.getWorldPosition(new THREE.Vector3()).x);
+          expect(gap).toBeGreaterThan(0.08);
+          const q = upper.quaternion.clone();
+          for (let n = 0; n < 5; n++) arms.apply();
+          expect(upper.quaternion.angleTo(q)).toBeLessThan(0.00001);
+        }
+      }
+      player.dispose();
+    },
+  );
   it.each([0, 1, 2])('keeps the backward pelvis/chest facing forward at pace %s', (pace) => {
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
     player.setMode('bind', true);

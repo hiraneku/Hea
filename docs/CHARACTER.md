@@ -581,3 +581,31 @@ Gait mundur juga meniadakan yaw pelvis/spine; lean dan balance lain tetap ada.
 Tes arah backward dengan jitter ±0,0001 rad serta tiga yaw kamera melengkapi tes
 pelvis/chest mundur pada seluruh pace. Perbaikan ada pada controller bersama,
 bukan patch preview saja; tidak mengubah model sumber atau kecepatan world.
+
+## GERAK 5 — duel walk dan heading/gaze terpisah
+
+Lateral berjalan memakai stance/swing ratio pace yang sama dengan gait reguler,
+lead-side swing lebih dulu dan kaki berikutnya menyusul dengan offset setengah
+siklus. Reach pendek 50–62 mm di lane sendiri; telapak yaw maksimum 0,42 rad
+relatif badan ke sisi gerak (bukan 90 derajat). `solveLeg` menerima pole yaw opsional
+agar lutut mengikuti arah telapak, tanpa mengubah pemanggil pivot/clip lain.
+Target kaki menambahkan depth excursion kecil untuk rasa berjalan, bukan dua
+kaki selalu sejajar frontal. Batas lane, kecepatan world dan pivot GERAK 4 tetap.
+
+`CharacterArmSpace` dipakai setelah pose lengkap di AvatarModel, motor dan preview
+clip inspection. UpperArm dibatasi keluar minimal 0,10 rad relatif bind; elbow
+flex minimal 0,12 rad. Constraint idempoten, bukan additive berulang, sehingga
+pause/scrub tidak membuat lengan makin membuka. Swing sagittal, shoulder dan skin
+weights tidak dimodifikasi. Uji world-space hand clearance mencakup idle, forward,
+backward, lateral, pivot dan flight; review render dipakai untuk mencegah pose
+terlalu membuka (nilai awal 0,24 rad diturunkan setelah pemeriksaan).
+
+`CharacterFacing` menyimpan target idle saat input dilepas, bukan menganggap
+selisih kamera yang sudah ada sebagai input baru. Badan berhenti pada yaw terakhir
+meski belum mencapai target gerak. Hanya perubahan kamera baru di luar cone leher
+yang meminta idle pivot; target pivot itu dipertahankan sampai selesai. Gaze
+head di belakang tubuh memudar halus ke netral antara 90 derajat dan PI−0,15;
+di seam belakang bobot nol sehingga tidak memutar leher berganti ±60 derajat.
+Batas leher/pitch dan smoothing tetap berlaku. Pengujian meliputi release saat
+arah balik dan saat belok belum selesai, kamera baru, serta posisi kamera di
+kedua sisi seam. Tidak mengubah GLB asli maupun derivative.
