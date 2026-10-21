@@ -151,9 +151,9 @@ export class CharacterLocomotion {
         travel,
       );
       // Duel walk: an ordinary stance/toe-off/swing rhythm, travelling sideways
-      // while knees and soles face only obliquely into travel. Never grapevine.
-      const leading = Math.sign(direction.x) === sign;
-      const sidePhase = (this.phase + stance + (leading ? 0 : 0.5)) % 1;
+      // with modest sole yaw. Keep the knee pole forward instead of twisting
+      // the entire leg into the lateral direction. Never grapevine.
+      const sidePhase = phase;
       let sideTravel: number, sideLift: number;
       const reach = 0.05 + run * 0.012;
       if (sidePhase < stance) {
@@ -162,19 +162,19 @@ export class CharacterLocomotion {
       } else {
         const u = (sidePhase - stance) / (1 - stance);
         sideTravel = THREE.MathUtils.lerp(-reach, reach, THREE.MathUtils.smootherstep(u, 0, 1));
-        sideLift = Math.sin(Math.PI * u) ** 1.5 * (0.045 + run * 0.025 + sprint * 0.01);
+        sideLift = Math.sin(Math.PI * u) ** 1.5 * (0.026 + run * 0.019 + sprint * 0.01);
       }
       const sideAnkle = new THREE.Vector3(
         sign * 0.13 + Math.sign(direction.x) * sideTravel,
         0.194,
-        -0.035 + direction.z * travel + sideTravel * 0.3,
+        -0.035 + direction.z * travel,
       );
       ankle.lerp(sideAnkle, lateral);
       ankle.x = sign * THREE.MathUtils.clamp(sign * ankle.x, 0.085, 0.235);
       lift = THREE.MathUtils.lerp(lift, sideLift, lateral);
       pitch *= 1 - lateral;
       const footQ = new THREE.Quaternion().setFromEuler(
-        new THREE.Euler(pitch, direction.x * lateral * 0.42, 0, 'YXZ'),
+        new THREE.Euler(pitch, direction.x * lateral * 0.28, 0, 'YXZ'),
       );
       const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(footQ.clone().invert());
       let low = Infinity;
@@ -208,7 +208,7 @@ export class CharacterLocomotion {
       }
     for (const { side, ankle, q, offset } of targets) {
       const sign = side === 'Left' ? 1 : -1;
-      solveLeg(side, ankle, this.bones, this.rig, direction.x * lateral * 0.42);
+      solveLeg(side, ankle, this.bones, this.rig);
       this.rig.updateMatrixWorld(true);
       const foot = this.bones.get(side + 'Foot')!;
       foot.quaternion
@@ -220,7 +220,7 @@ export class CharacterLocomotion {
         .rotation.set(
           -swing * (0.18 + run * 0.28 + sprint * 0.1) * (1 - lateral) ** 2,
           0,
-          sign * 0.1 + lateral * Math.sin(cycle) * (0.035 + run * 0.015),
+          -sign * 0.045 + lateral * Math.sin(cycle) * 0.015,
         );
       this.bones
         .get(side + 'ForeArm')!

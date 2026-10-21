@@ -858,7 +858,9 @@ export class Game {
     this.pull.set(0, 0, 0);
     this.vortexCoreHits = this.vortexDetonations = this.splashHits = this.perfectDodges = 0;
     this.dashBuffer = 0;
-    this.lockedOn = this.controls.touch;
+    // Touch input must not silently opt into camera-facing movement.
+    // Lock is enabled only by the player's explicit lock control.
+    this.lockedOn = false;
     this.avatar.visible = true;
     this.avatar.rotation.set(0, 0, 0);
     this.characterFacing.reset(this.yaw);

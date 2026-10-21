@@ -1403,8 +1403,8 @@ describe('portable 101172 rig and Walking asset', () => {
           const foot = gltf.scene.getObjectByName(side + 'Foot')!;
           const q = foot.getWorldQuaternion(new THREE.Quaternion());
           const yaw = new THREE.Euler().setFromQuaternion(q, 'YXZ').y;
-          expect(x * yaw).toBeGreaterThan(0.3);
-          expect(x * yaw).toBeLessThan(0.55);
+          expect(x * yaw).toBeGreaterThan(0.2);
+          expect(x * yaw).toBeLessThan(0.36);
         }
       }
       player.dispose();
@@ -1436,12 +1436,14 @@ describe('portable 101172 rig and Walking asset', () => {
         ] as const) {
           const upper = gltf.scene.getObjectByName(side + 'UpperArm')!;
           const hand = gltf.scene.getObjectByName(side + 'Hand')!;
-          expect(sign * upper.rotation.z).toBeGreaterThanOrEqual(0.0999);
+          expect(sign * upper.rotation.z).toBeGreaterThanOrEqual(-0.0701);
           const gap =
             sign *
             (hand.getWorldPosition(new THREE.Vector3()).x -
               upper.getWorldPosition(new THREE.Vector3()).x);
-          expect(gap).toBeGreaterThan(0.08);
+          expect(gap).toBeGreaterThan(0.025);
+          expect(gap).toBeLessThan(0.18);
+          expect(sign * upper.rotation.z).toBeLessThanOrEqual(0.0151);
           const q = upper.quaternion.clone();
           for (let n = 0; n < 5; n++) arms.apply();
           expect(upper.quaternion.angleTo(q)).toBeLessThan(0.00001);

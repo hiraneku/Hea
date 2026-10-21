@@ -7,6 +7,17 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Koreksi GERAK 6 setelah penolakan GERAK 5
+
+- Hapus auto-lock saat game dimulai pada perangkat touch. Lock harus diminta
+  pemain; tes HP baru memakai start normal dan analog touch asli tanpa face/scenario
+  yang sebelumnya menonaktifkan lock dan menutupi bug ini.
+- Rapikan lengan ke envelope dekat bind −0,07..0,015 rad, bukan memaksa membuka
+  minimal +0,10 rad. Tambahkan batas maksimum ruang tangan pada pengujian.
+- Sederhanakan lateral: fase berjalan sama dengan ayunan reguler, lift lebih rendah,
+  tanpa depth excursion buatan dan tanpa memutar knee-pole ke samping. Sole yaw
+  dikurangi ke 0,28 rad relatif badan. Tetap compact/non-crossing.
+
 ### Diperbaiki — GERAK 5: duel walk, arm clearance, heading setelah berhenti
 
 - Lateral lock memakai ritme stance/swing berjalan dengan kaki/knee-pole menyerong

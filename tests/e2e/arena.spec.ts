@@ -2298,3 +2298,43 @@ test('unlocked backward walking holds its final heading and neutral head after i
   expect(after.bodyYaw).toBeCloseTo(before.bodyYaw, 4);
   expect(Math.abs(after.headYaw)).toBeLessThan(0.02);
 });
+
+test('a normal game starts unlocked and backward input turns the real body on desktop and touch', async ({
+  page,
+  context,
+}, info) => {
+  await load(page);
+  await page.locator('#start-button').click();
+  expect((await state(page)).lockedOn).toBe(false);
+  // Do not use scenario()/face(): those helpers previously forced lock OFF,
+  // masking the touch-only auto-lock in an actual newly started game.
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.freeze(true));
+  await page.locator('#flight-toggle').click();
+  await step(page, 2);
+  const cdp = info.project.name === 'mobile' ? await context.newCDPSession(page) : undefined;
+  if (cdp) {
+    const b = (await page.locator('#joystick').boundingBox())!;
+    const x = b.x + b.width / 2,
+      y = b.y + b.height / 2;
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ id: 1, x, y }],
+    });
+    await cdp.send('Input.dispatchTouchEvent', {
+      type: 'touchMove',
+      touchPoints: [{ id: 1, x, y: y + 36 }],
+    });
+  } else await page.keyboard.down('s');
+  await step(page, 2);
+  const held = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  const diff = held.avatarModel.bodyYaw - held.camera.yaw;
+  expect(Math.abs(Math.atan2(Math.sin(diff), Math.cos(diff)))).toBeGreaterThan(2.9);
+  if (cdp) await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  else await page.keyboard.up('s');
+  await step(page, 0.8);
+  const stopped = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
+  await step(page, 2);
+  const after = (await page.evaluate(() => window.__HEA_DEBUG__.diagnostics())).avatarModel;
+  expect(after.bodyYaw).toBeCloseTo(stopped.bodyYaw, 4);
+  expect(Math.abs(after.headYaw)).toBeLessThan(0.02);
+});

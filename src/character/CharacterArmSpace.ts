@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 
 /** Final pose constraint shared by gameplay, the motor and clip inspection.
- * Clamp, never add: repeated/paused frames cannot accumulate an outward offset.
- * Preserve the authored swing and larger abduction, including flight poses.
+ * A narrow near-bind envelope, not a mandatory outward abduction. Clamp, never
+ * add: repeated/paused frames cannot accumulate an outward offset. Preserve swing.
  */
 export class CharacterArmSpace {
   private readonly arms: { upper: THREE.Object3D; elbow: THREE.Object3D; sign: number }[];
@@ -15,8 +15,8 @@ export class CharacterArmSpace {
   }
   apply() {
     for (const { upper, elbow, sign } of this.arms) {
-      upper.rotation.z = sign * Math.max(0.1, sign * upper.rotation.z);
-      elbow.rotation.x = Math.min(elbow.rotation.x, -0.12);
+      upper.rotation.z = sign * THREE.MathUtils.clamp(sign * upper.rotation.z, -0.07, 0.015);
+      elbow.rotation.x = Math.min(elbow.rotation.x, -0.1);
     }
   }
 }

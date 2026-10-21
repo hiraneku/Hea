@@ -609,3 +609,20 @@ di seam belakang bobot nol sehingga tidak memutar leher berganti ±60 derajat.
 Batas leher/pitch dan smoothing tetap berlaku. Pengujian meliputi release saat
 arah balik dan saat belok belum selesai, kamera baru, serta posisi kamera di
 kedua sisi seam. Tidak mengubah GLB asli maupun derivative.
+
+## GERAK 6 — koreksi review yang ditolak
+
+GERAK 5 bukan acceptance visual. Envelope lengan kini dekat bind, bukan minimum
+abduction keluar: −0,07 sampai +0,015 rad menurut sisi. Gait lateral menggunakan
+fase walking biasa, lift 26 mm untuk walk, tanpa depth excursion tambahan dan
+tanpa knee-pole yaw; toe yaw maksimum 0,28 rad relatif badan. Body allowance
+17 derajat dan gaze kamera tetap dipakai saat lock.
+
+Penyebab penting pada game HP: `start()` mengaktifkan lock berdasarkan touch,
+walaupun pemain belum menekan lock. Sekarang default OFF pada semua perangkat.
+Test lama memanggil `h.face()`/scenario orient, yang selalu mematikan lock sehingga
+tidak menguji keadaan yang dialami pengguna. Regresi baru memulai game normal,
+menonaktifkan flight, mengirim backward melalui CDP analog HP/keyboard desktop,
+memeriksa selisih yaw badan/kamera mendekati PI dan hold setelah release. Tidak
+memanggil face/scenario. Model/kecepatan tidak berubah. Tetap perlu review pengguna
+atas rasa gerak; angka lulus bukan jaminan natural-motion acceptance.
