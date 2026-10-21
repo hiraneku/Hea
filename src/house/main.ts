@@ -3,6 +3,8 @@ import '@fontsource/inter/latin-500.css';
 import '@fontsource/inter/latin-600.css';
 import './style.css';
 import * as T from 'three';
+import { HouseCharacter } from './HouseCharacter';
+import { HouseFollowCamera } from './followCamera';
 import { buildHouse } from './scene';
 import { HOUSE, ROOMS, moveInside, type RoomId } from './layout';
 
@@ -25,16 +27,16 @@ app.innerHTML = `
     <div class="spec"><span>02 <small>LANTAI</small></span><b>·</b><span>05 <small>RUANG</small></span><b>·</b><span>01 <small>KELUARGA</small></span></div>
   </section>
   <div id="loading" class="loading" role="status"><span></span>Menyalakan perapian…</div>
-  <div class="scene-tools"><button id="plan-toggle" class="tool" aria-haspopup="dialog"><span>▦</span> Denah rumah</button><button id="help-toggle" class="tool" aria-haspopup="dialog" aria-label="Petunjuk kontrol">?</button></div>
+  <div class="scene-tools"><button id="camera-toggle" class="tool" aria-pressed="true" aria-label="Kamera mengikuti karakter">Kamera: Ikuti</button><button id="plan-toggle" class="tool" aria-haspopup="dialog"><span>▦</span> Denah rumah</button><button id="help-toggle" class="tool" aria-haspopup="dialog" aria-label="Petunjuk kontrol">?</button></div>
   <section class="room-caption" aria-live="polite"><p id="floor-label" class="eyebrow">LANTAI 01 <span>/</span> RUANG KELUARGA</p><h2 id="room-title">Tempat cerita pulang</h2><p id="room-description">Perapian batu, bangku berlapis linen, dan secangkir teh.</p><span class="material-note"><i></i> KAYU · BATU · LINEN · CAHAYA SORE</span></section>
   <div class="look-hint" aria-hidden="true"><span>↔</span> Seret untuk melihat sekeliling</div>
   <nav class="room-nav" aria-label="Pindah ruangan"><span class="nav-label">JELAJAHI RUMAH <span>↗</span></span>${ROOMS.map((r) => `<button data-room="${r.id}" aria-pressed="${r.id === 'living'}"><small>${r.icon}</small><span>${r.name}</span><b>↗</b></button>`).join('')}</nav>
   <button id="mobile-rooms" class="mobile-rooms" aria-expanded="false">Pilih ruangan <span>⌃</span></button>
   <div id="walk-pad" class="walk-pad" role="group" aria-label="Joystick berjalan"><span class="pad-label">GERAK</span><div id="walk-stick"></div><i class="pad-cross-x"></i><i class="pad-cross-y"></i></div>
   <div class="walk-hint"><kbd>W</kbd><span><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><small>BERJALAN</small></div>
-  <footer class="house-footer"><span>HEA / ENVIRONMENT STUDY <b>01</b></span><span id="visit-status">RUMAH SENJA · INTERIOR 1</span></footer>
+  <footer class="house-footer"><span>HEA / ENVIRONMENT STUDY <b>01</b></span><span id="visit-status">RUMAH SENJA · STICKMAN 1</span></footer>
   <dialog id="plan-dialog"><div class="dialog-head"><div><p class="eyebrow">RUMAH SENJA</p><h2>Ruang untuk hidup.</h2></div><button data-close aria-label="Tutup denah">✕</button></div><div class="plan-tabs"><button data-floor="0" aria-pressed="true">01 · Lantai bawah</button><button data-floor="1" aria-pressed="false">02 · Lantai atas</button></div><p class="dialog-copy">Pilih ruangan pada denah untuk masuk ke dalamnya.</p><div id="floor-plan"></div><div class="plan-legend"><span><i></i> Ruang keluarga</span><span>10 × 8 m · dua lantai</span></div></dialog>
-  <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse.</span></li><li><strong>Berjalan</strong><span>Gunakan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Naik ke lantai dua</strong><span>Tangga berada di sebelah kanan pintu masuk. Dekati anak tangga dari ujung bawah dan berjalan naik.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
+  <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse. Kamera mengikuti stickman; tombol Kamera mengganti ke sudut mata.</span></li><li><strong>Berjalan</strong><span>Gerakkan stickman dengan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Naik ke lantai dua</strong><span>Tangga berada di sebelah kanan pintu masuk. Dekati anak tangga dari ujung bawah dan berjalan naik.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
   <div id="transition" aria-hidden="true"></div>`;
 
 const view = document.querySelector<HTMLDivElement>('#view')!;
@@ -45,6 +47,7 @@ scene.background = new T.Color('#c9d5ca');
 scene.fog = new T.Fog('#c9d5ca', 25, 85);
 const camera = new T.PerspectiveCamera(67, 1, 0.07, 100);
 camera.rotation.order = 'YXZ';
+let baseFov = 67;
 let renderer: T.WebGLRenderer;
 try {
   renderer = new T.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -101,6 +104,10 @@ let x = 0,
   planFloor = 0;
 let moving = false,
   tourTimer: ReturnType<typeof setTimeout> | undefined;
+let character: HouseCharacter | undefined;
+let characterError = false;
+let following = true;
+const followCamera = new HouseFollowCamera();
 const keys = new Set<string>();
 const stick = { x: 0, y: 0 };
 const dialogs = [...document.querySelectorAll<HTMLDialogElement>('dialog')];
@@ -135,6 +142,9 @@ function putInRoom(id: RoomId, immediate = false) {
     camera.lookAt(new T.Vector3(...r.target));
     yaw = camera.rotation.y;
     pitch = camera.rotation.x;
+    character?.reset(x, height, z, yaw);
+    followCamera.reset();
+    moving = false;
     updateCaption(id);
     view.focus({ preventScroll: true });
     curtain.classList.remove('fade');
@@ -158,6 +168,14 @@ function openDialog(id: string) {
   closeRooms();
   document.querySelector<HTMLDialogElement>(id)!.showModal();
 }
+document.querySelector<HTMLButtonElement>('#camera-toggle')!.onclick = () => {
+  following = !following;
+  const b = document.querySelector<HTMLButtonElement>('#camera-toggle')!;
+  b.textContent = following ? 'Kamera: Ikuti' : 'Kamera: Mata';
+  b.setAttribute('aria-pressed', String(following));
+  followCamera.reset();
+  view.focus({ preventScroll: true });
+};
 document.querySelector<HTMLButtonElement>('#help-toggle')!.onclick = () =>
   openDialog('#help-dialog');
 document.querySelector<HTMLButtonElement>('#plan-toggle')!.onclick = () => {
@@ -292,12 +310,28 @@ function resize() {
     h = view.clientHeight;
   renderer.setSize(w, h);
   camera.aspect = w / h;
-  camera.fov = w < 650 ? 76 : 67;
+  baseFov = w < 650 ? 76 : 67;
+  camera.fov = baseFov;
   camera.updateProjectionMatrix();
 }
 window.addEventListener('resize', resize);
 resize();
 putInRoom('living', true);
+loading.innerHTML = '<span></span>Memunculkan stickman…';
+HouseCharacter.load(new URL('models/101172-rigged.glb', rootURL).href)
+  .then((hero) => {
+    character = hero;
+    scene.add(hero.root);
+    hero.reset(x, height, z, yaw);
+    document.body.classList.add('with-character', 'experienced');
+  })
+  .catch((error) => {
+    characterError = true;
+    loading.innerHTML = 'Stickman gagal dimuat. <button id="retry-character">Coba lagi</button>';
+    document.querySelector<HTMLButtonElement>('#retry-character')!.onclick = () =>
+      location.reload();
+    console.error('House character required:', error);
+  });
 let last = performance.now();
 let frames = 0;
 let disposed = false;
@@ -310,7 +344,9 @@ function frame(now: number) {
   }
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
-  if (!dialogs.some((d) => d.open)) {
+  const beforeX = x,
+    beforeZ = z;
+  if (character && !dialogs.some((d) => d.open)) {
     let forward =
       stick.y +
       Number(keys.has('KeyW') || keys.has('ArrowUp')) -
@@ -353,15 +389,34 @@ function frame(now: number) {
       }
     }
   }
-  camera.position.set(x, height + HOUSE.eye, z);
-  camera.rotation.set(pitch, yaw, 0);
+  character?.update(
+    dt,
+    x,
+    height,
+    z,
+    (x - beforeX) / Math.max(dt, 0.0001),
+    (z - beforeZ) / Math.max(dt, 0.0001),
+    yaw,
+    pitch,
+  );
+  if (character && following) {
+    character.setVisible(
+      followCamera.update(camera, dt, x, height, z, yaw, pitch, house.cameraGeometry, baseFov),
+    );
+  } else {
+    camera.fov = baseFov;
+    camera.updateProjectionMatrix();
+    camera.position.set(x, height + HOUSE.eye, z);
+    camera.rotation.set(pitch, yaw, 0);
+    character?.setVisible(false);
+  }
   if (!reduced) {
     house.fire.intensity = 3.2 + Math.sin(now * 0.004) * 0.18 + Math.sin(now * 0.013) * 0.1;
     house.ember.scale.y = 1 + Math.sin(now * 0.008) * 0.08;
   }
   renderer.render(scene, camera);
   frames++;
-  if (frames === 2) loading.hidden = true;
+  if (frames >= 2 && character && !characterError) loading.hidden = true;
 }
 requestAnimationFrame(frame);
 // Read-only diagnostics: room controls remain the only application-facing API.
@@ -381,6 +436,9 @@ if (new URLSearchParams(location.search).has('test')) {
         frames,
         drawCalls: renderer.info.render.calls,
         staticBatches: house.meshCount,
+        character: character?.snapshot() ?? { loaded: false, visible: false },
+        cameraMode: following ? 'follow' : 'eyes',
+        cameraDistance: followCamera.distance,
       }),
     },
   });
@@ -393,6 +451,7 @@ window.addEventListener(
   'beforeunload',
   () => {
     disposed = true;
+    character?.dispose();
     house.dispose();
     renderer.dispose();
   },

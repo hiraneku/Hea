@@ -15,6 +15,16 @@ declare global {
         frames: number;
         drawCalls: number;
         staticBatches: number;
+        character: {
+          loaded: boolean;
+          visible: boolean;
+          bodyYaw?: number;
+          walkPhase?: number;
+          stature?: number;
+          position?: { x: number; y: number; z: number };
+        };
+        cameraMode: string;
+        cameraDistance: number;
       };
     };
   }
@@ -95,6 +105,10 @@ test('interior supports drag look, physical movement and input release on deskto
   const stopped = await page.evaluate(() => window.__HEA_HOUSE__.snapshot());
   await page.waitForTimeout(250);
   const after = await page.evaluate(() => window.__HEA_HOUSE__.snapshot());
+  expect(after.character.position?.x).toBeCloseTo(after.x, 5);
+  expect(after.character.position?.z).toBeCloseTo(after.z, 5);
+  expect(after.character.position?.y).toBeCloseTo(after.height, 5);
+  expect(after.character.bodyYaw).not.toBe(initial.character.bodyYaw);
   expect(after.x).toBeCloseTo(stopped.x, 5);
   expect(after.z).toBeCloseTo(stopped.z, 5);
   await page.locator('#help-toggle').click();
@@ -107,7 +121,7 @@ test('the actual camera can walk down and back up the seventeen-tread staircase'
   page,
 }, info) => {
   // Two complete real-time flights on software WebGL need more than the default 60 s.
-  test.setTimeout(90_000);
+  test.setTimeout(120_000);
   // Navigation, not a golden-frame check: keep software rasterisation affordable.
   // Full desktop/mobile layouts are exercised by the tests above.
   if (info.project.name === 'desktop') await page.setViewportSize({ width: 800, height: 450 });
@@ -142,13 +156,13 @@ test('the actual camera can walk down and back up the seventeen-tread staircase'
   await page.keyboard.down('s');
   await expect
     .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().height), {
-      timeout: 20000,
+      timeout: 35000,
       intervals: [100],
     })
     .toBeLessThan(1.7);
   await expect
     .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().height), {
-      timeout: 20000,
+      timeout: 35000,
       intervals: [100],
     })
     .toBeLessThan(0.1);
@@ -156,7 +170,7 @@ test('the actual camera can walk down and back up the seventeen-tread staircase'
   await page.keyboard.down('w');
   await expect
     .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().height), {
-      timeout: 20000,
+      timeout: 35000,
       intervals: [100],
     })
     .toBeGreaterThan(3.35);
@@ -170,4 +184,38 @@ test.afterEach(async ({ page }, info) => {
       'House navigation at failure',
       await page.evaluate(() => window.__HEA_HOUSE__?.snapshot()),
     );
+});
+
+test('white stickman spawns on both floors and camera modes work without a box fallback', async ({
+  page,
+}, info) => {
+  await page.goto('/house/?test');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 45000 });
+  await expect
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().character.loaded))
+    .toBe(true);
+  expect((await page.evaluate(() => window.__HEA_HOUSE__.snapshot())).character.visible).toBe(true);
+  await page.locator('#camera-toggle').click();
+  await expect
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().cameraMode))
+    .toBe('eyes');
+  await expect
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().character.visible))
+    .toBe(false);
+  await page.locator('#camera-toggle').click();
+  if (info.project.name === 'mobile') await page.locator('#mobile-rooms').click();
+  await page.locator('[data-room="children"]').click();
+  await expect.poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().height)).toBe(3.4);
+  const s = await page.evaluate(() => window.__HEA_HOUSE__.snapshot());
+  expect(s.character.loaded).toBe(true);
+  expect(s.character.position?.y).toBe(3.4);
+  expect(s.cameraMode).toBe('follow');
+});
+
+test('required house stickman load failure stays explicit and offers retry', async ({ page }) => {
+  await page.route('**/models/101172-rigged.glb', (route) => route.abort());
+  await page.goto('/house/?test');
+  await expect(page.locator('#loading')).toContainText('Stickman gagal dimuat', { timeout: 30000 });
+  await expect(page.locator('#retry-character')).toBeVisible();
+  expect((await page.evaluate(() => window.__HEA_HOUSE__.snapshot())).character.loaded).toBe(false);
 });

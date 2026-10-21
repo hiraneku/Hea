@@ -7,6 +7,15 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Rumah Senja — stickman yang bisa dimainkan
+
+- Spawn rig stickman putih lokal; joystick HP/WASD menggerakkan karakter melalui
+  collision rumah dan tangga. Badan mengikuti arah gerak, animasi mengikuti
+  kecepatan aktual; rig/animasi arena dan GLB tidak diubah.
+- Kamera orang ketiga dengan collision, FOV adaptif di ruang sempit, dan tombol
+  pandangan mata. Pindah ruangan ikut memindahkan karakter.
+- Model wajib dimuat dengan pesan gagal/coba lagi, tanpa box fallback.
+
 ### Rumah Senja — interior keluarga dua lantai
 
 - Area `/house/` tersendiri: timber-frame, perapian batu, dapur dan meja makan

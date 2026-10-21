@@ -1034,3 +1034,35 @@ dialog::backdrop {
     max-width: 260px;
   }
 }
+
+/* Keep the controllable avatar unobstructed by the introductory typography. */
+.with-character .intro {
+  display: none;
+}
+.with-character .material-note,
+.with-character .room-caption > p:not(.eyebrow) {
+  display: none;
+}
+.with-character .room-caption h2 {
+  font-size: 22px;
+}
+#camera-toggle[aria-pressed='true'] {
+  background: #eee7d8;
+  color: #354035;
+}
+#retry-character {
+  padding: 12px 18px;
+  border: 1px solid #88967a;
+  background: #f7f0dd;
+  color: #354035;
+}
+@media (max-width: 700px) {
+  .scene-tools {
+    gap: 5px;
+    right: 16px;
+    max-width: calc(100% - 32px);
+  }
+  .with-character .room-caption h2 {
+    font-size: 18px;
+  }
+}

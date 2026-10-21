@@ -677,11 +677,43 @@ export function buildHouse(scene: T.Scene) {
   ember.position.set(-3.05, 0.31, -3.12);
   ember.scale.set(0.5, 1, 1);
   scene.add(ember);
+  // Coarse camera-only solids keep five-ray collision cheap on phones.
+  // Never raycast the complete batched decorative/foliage triangle soup per frame.
+  const cameraGeometry = new T.Group();
+  const cameraMaterial = new T.MeshBasicMaterial({ side: T.DoubleSide });
+  function occluder(x: number, y: number, z: number, w: number, h: number, d: number) {
+    const o = new T.Mesh(unitBox, cameraMaterial);
+    o.position.set(x, y, z);
+    o.scale.set(w, h, d);
+    cameraGeometry.add(o);
+  }
+  for (const b of obstacles) {
+    const thin = b.w < 0.23 || b.d < 0.23;
+    const railing = b.floor === 1 && b.x === 2.85;
+    const tall = (b.z < -3.3 && b.d < 0.6) || (b.floor === 1 && b.z > 3.2);
+    const h = railing ? 1.1 : thin ? 2.94 : tall ? 1.9 : 1.3;
+    occluder(b.x, b.floor * 3.4 + h / 2, b.z, b.w, h, b.d);
+  }
+  for (const side of [-1, 1]) {
+    occluder(side * 4.97, 3.4, 0, 0.18, 6.8, 8);
+    occluder(0, 3.4, side * 3.97, 10, 6.8, 0.18);
+  }
+  occluder(0, -0.1, 0, 10, 0.2, 8);
+  occluder(-1.1, 3.31, 0, 7.8, 0.18, 8);
+  occluder(4.75, 3.31, 0, 0.5, 0.18, 8);
+  occluder(3.65, 3.31, -2.56, 1.7, 0.18, 2.88);
+  occluder(3.65, 3.31, 3.75, 1.7, 0.18, 0.5);
+  occluder(0, 7.8, 0, 10, 0.18, 8);
+  for (let i = 0; i < 17; i++)
+    occluder(3.65, (i + 1) * 0.1, 3.3 - (i + 0.5) * 0.26, 1.3, (i + 1) * 0.2, 0.26);
+  cameraGeometry.updateMatrixWorld(true);
   return {
     fire,
     ember,
     meshCount: staticHouse.children.length,
+    cameraGeometry,
     dispose: () => {
+      cameraMaterial.dispose();
       staticHouse.traverse((o) => {
         if (o instanceof T.Mesh) o.geometry.dispose();
       });

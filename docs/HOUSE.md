@@ -1,4 +1,4 @@
-# Rumah Senja — Interior 1
+# Rumah Senja — Stickman 1
 
 Area eksplorasi tersendiri di `/Hea/house/`, sesuai pilihan pengguna: **rumah
 keluarga di desa isekai**, bukan rumah penyihir, bukan penggantian arena.
@@ -30,8 +30,12 @@ lengkap dengan sanitasi, instalasi utilitas, pintu/lemari interaktif, atau NPC.
 
 - Seret layar/mouse untuk melihat, tanpa memerlukan pointer lock.
 - WASD/panah atau joystick untuk berjalan; arah diagonal dinormalisasi.
-- Posisi kamera setinggi mata, tanpa avatar baru. Animasi karakter yang sudah
-  ada tidak diubah.
+- Stickman putih yang sudah ada otomatis spawn. Kamera mengikuti dari belakang;
+  tombol **Kamera: Ikuti / Mata** beralih ke pandangan mata.
+- Badan menghadap arah berjalan dan mempertahankan arah terakhir saat berhenti.
+  Animasi memakai kecepatan setelah collision, bukan sekadar input joystick.
+- Kamera mengikuti dengan collision lima ray pada proxy arsitektur; di ruang
+  sempit jarak/FOV menyesuaikan, dan avatar disembunyikan jika terlalu dekat.
 - Furnitur besar, dinding, dan railing membatasi gerak. Motor menggunakan
   substep 7 cm dan resolusi per sumbu untuk menghindari tunnelling dan membantu
   bergerak menyusuri sisi furnitur.
@@ -45,7 +49,7 @@ lengkap dengan sanitasi, instalasi utilitas, pintu/lemari interaktif, atau NPC.
 
 ## Teknis
 
-Entry Vite `house/index.html`, terpisah dari boot arena/rig karakter. Geometri
+Entry Vite `house/index.html`, terpisah dari boot arena, memakai ulang rig putih lokal. Geometri
 rumah, furnitur, api, pemandangan kebun dan tekstur kanvas dibuat lokal; tidak
 menggunakan model unduhan, CDN, backend, atau gambar generatif eksternal.
 
@@ -54,7 +58,28 @@ bukan satu draw call per papan/perabot). Bayangan matahari statis dicache setela
 render pertama, pixel ratio dibatasi 1,5. Ini optimisasi, bukan janji 60 fps pada
 semua HP. Angka FPS WebGL software di sandbox tidak mewakili GPU HP pengguna.
 
-## Pemeriksaan
+## Pembaruan stickman
+
+`HouseCharacter` memakai rig lokal `101172-rigged.glb` tanpa mengubah GLB atau
+controller karakter bersama. Tinggi avatar 1,64 m, posisi mengikuti motor collision
+rumah; root motion animasi tidak menggerakkan posisi untuk kedua kalinya. Model
+wajib dimuat: kegagalan menampilkan pesan dan tombol coba lagi, bukan kotak fallback.
+Bayangan arsitektur tetap dicache; avatar memakai contact decal bergerak. Tangga
+masih ramp kontinu dengan animasi jalan biasa, **belum foot IK khusus anak tangga**.
+
+Pemeriksaan pembaruan: 321 unit test / 29 file, TypeScript, lint dan build Pages
+lulus. Screenshot spawn dan kamar anak diperiksa pada desktop/HP, termasuk
+framing kamera sempit. Sepuluh kasus browser desktop/HP tercakup: tur/denah, drag dan gerak, pelepasan
+input, posisi avatar terhadap motor, naik-turun tangga, kamera Ikuti/Mata dan
+kegagalan model. Putaran pertama: tujuh lulus, dua assertion visibilitas terlalu
+dini (sebelum render berikutnya), dan satu timeout tangga HP saat tinggi 2,96 m.
+Assertion kini menunggu frame, budget tangga software diperpanjang tanpa mengubah
+kecepatan game. Pemeriksaan ulang empat kasus kamera/tangga lulus pada desktop/HP.
+Build produksi `/Hea/house/` juga direview ulang: spawn dan kamar anak pada kedua
+viewport, model terlihat dan tidak ada page error. Ini bukan jaminan bebas bug
+atau penerimaan estetika pengguna.
+
+## Pemeriksaan interior awal (sebelum stickman)
 
 - Unit suite: 318 tes / 28 file lulus, termasuk lima tes layout baru untuk dua
   lantai, seluruh jalur naik/turun tangga, void/outer shell, collision per lantai,
