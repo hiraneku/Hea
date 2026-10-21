@@ -116,7 +116,7 @@ export class CharacterLocomotion {
     );
     hips.rotation.set(
       0.012 + run * 0.045 + sprint * 0.025,
-      Math.sin(cycle) * (0.035 + run * 0.035),
+      Math.sin(cycle) * (0.035 + run * 0.035) * (1 - lateral),
       -Math.sin(cycle) * 0.018,
     );
     const targets: {
@@ -146,16 +146,33 @@ export class CharacterLocomotion {
         lift = Math.sin(Math.PI * u) ** 1.5 * (0.055 + run * 0.105 + sprint * 0.035);
         pitch = Math.sin(Math.PI * u) * (0.06 + run * 0.1);
       }
-      const ankle = new THREE.Vector3(
-        sign * THREE.MathUtils.lerp(0.14, 0.055, lateral),
-        0.194 + lift,
-        -0.035,
-      ).addScaledVector(direction, travel);
-      // A short grapevine/crossover: do not clamp each foot to its own X lane.
-      // The trailing foot crosses in FRONT, the leading foot passes behind it.
-      // Separate their depth planes so calves/feet do not intersect at crossing.
+      const ankle = new THREE.Vector3(sign * 0.14, 0.194 + lift, -0.035).addScaledVector(
+        direction,
+        travel,
+      );
+      // Step-together, not grapevine: the destination-side foot lifts first,
+      // then the other follows. Both feet keep their own anatomical lanes.
       const leading = Math.sign(direction.x) === sign;
-      ankle.z += lateral * (leading ? -0.065 : 0.105);
+      const sidePhase = (this.phase + (leading ? 0 : 0.5)) % 1;
+      let sideTravel: number, sideLift: number;
+      const reach = 0.05 + run * 0.012;
+      if (sidePhase < 0.5) {
+        const u = sidePhase * 2;
+        sideTravel = THREE.MathUtils.lerp(-reach, reach, THREE.MathUtils.smootherstep(u, 0, 1));
+        sideLift = Math.sin(Math.PI * u) ** 2 * (0.04 + run * 0.025 + sprint * 0.012);
+      } else {
+        sideTravel = THREE.MathUtils.lerp(reach, -reach, (sidePhase - 0.5) * 2);
+        sideLift = 0;
+      }
+      const sideAnkle = new THREE.Vector3(
+        sign * 0.13 + Math.sign(direction.x) * sideTravel,
+        0.194,
+        -0.035 + direction.z * travel,
+      );
+      ankle.lerp(sideAnkle, lateral);
+      ankle.x = sign * THREE.MathUtils.clamp(sign * ankle.x, 0.085, 0.235);
+      lift = THREE.MathUtils.lerp(lift, sideLift, lateral);
+      pitch *= 1 - lateral;
       const footQ = new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch, 0, 0));
       const normal = new THREE.Vector3(0, 1, 0).applyQuaternion(footQ.clone().invert());
       let low = Infinity;
@@ -192,14 +209,22 @@ export class CharacterLocomotion {
       const swing = Math.sin(cycle + offset * Math.PI * 2);
       this.bones
         .get(side + 'UpperArm')!
-        .rotation.set(-swing * (0.18 + run * 0.28 + sprint * 0.1), 0, -sign * 0.13);
+        .rotation.set(
+          -swing * (0.18 + run * 0.28 + sprint * 0.1) * (1 - lateral) ** 2,
+          0,
+          -sign * 0.13 + lateral * Math.sin(cycle) * (0.035 + run * 0.015),
+        );
       this.bones
         .get(side + 'ForeArm')!
-        .rotation.set(-0.18 - run * 0.9 - sprint * 0.12 - swing * 0.1, 0, 0);
+        .rotation.set(-0.18 - (run * 0.9 + sprint * 0.12 + swing * 0.1) * (1 - lateral), 0, 0);
     }
     this.bones
       .get('Spine')!
-      .rotation.set(0.015 + run * 0.045, -Math.sin(cycle) * (0.025 + run * 0.035), 0);
+      .rotation.set(
+        0.015 + run * 0.045 * (1 - lateral),
+        -Math.sin(cycle) * (0.025 + run * 0.035) * (1 - lateral),
+        lateral * Math.sin(cycle) * 0.012,
+      );
     for (const [name, bone] of this.actual) {
       if (/Root|Neck|Head|End/.test(name)) continue;
       const desired = this.bones.get(name)!.quaternion;

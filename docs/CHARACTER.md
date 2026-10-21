@@ -537,3 +537,28 @@ stride. Knee flex mengikuti foot swing dan dukungan, bukan tekukan menetap di
 kedua kaki. Tetap gait procedural, bukan motion capture; belum terrain IK per sole.
 Regresi menilai actual bone/mesh, support knee, root dan crossover depth. Review
 renderer menambah stationary pivot dan idle di samping run/sprint/strafe/back.
+
+## GERAK 3 — koreksi support pivot dan lateral balance
+
+Menggantikan crossover GERAK 2 sesuai review terbaru. `CharacterPivot` sebelumnya
+hanya menginisiasi langkah ketika bobot hampir nol. Jika yaw dimulai lagi saat
+blend-out, kedua anchor bisa berputar tanpa kaki swing aktif. Inisiasi sekarang
+berjalan juga saat blend-out. Prediksi 2-frame memeriksa twist/lane support;
+pertukaran kaki dipercepat jika support hampir melewati batas. Durasi pivot
+adaptif 0,10–0,30 s, yaw sole relatif badan maksimal 0,55 rad, ankle tetap pada
+lane sisi panggul (minimal ±0,085 m). Saat batas tercapai support dilepas/roll
+singkat sambil kaki lain selesai mendarat, bukan mempertahankan world pin yang
+memuntir kaki. Pose tanpa yaw/step tidak masuk controller dan tetap netral.
+
+Lateral kembali ke step-together. Kaki sisi tujuan swing pada setengah siklus
+pertama; kaki pengikut pada setengah kedua. Ankle bergerak pendek di sekitar
+±0,13 m tanpa jalur silang atau depth offset grapevine. Side lift 0,04–0,077 m
+normalized dan pitch sole berkurang sesuai komponen lateral. Kecepatan world tetap
+GERAK 2; tidak ada tambahan root motion.
+
+Ayunan maju-mundur UpperArm/ForeArm dan torso twist dilemahkan berdasarkan
+komponen lateral. Pure strafe memakai sway kecil ke samping dengan siku rileks;
+diagonal membaurkan keduanya. Ini dipakai game dan preview melalui overlay sama.
+Test baru sengaja gagal pada GERAK 2 (ankle crossover/twist) sebelum perbaikan;
+memeriksa lane, twist, pause/restart/reversal dan rentang hand Z untuk lateral.
+Review renderer menambah kasus pivot-stress selain pivot normal dan gait lain.

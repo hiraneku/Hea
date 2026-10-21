@@ -1319,27 +1319,72 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(body.position.length()).toBe(0);
     player.dispose();
   });
-  it('uses compact crossover steps with front/back clearance rather than a wide side shuffle', () => {
+  it.each([
+    [-1, 0],
+    [1, 0],
+    [-1, 1],
+    [1, 1],
+    [-1, 2],
+    [1, 2],
+  ] as const)(
+    'keeps side steps in separate lanes and lateral arm balance (direction %s, pace %s)',
+    (x, pace) => {
+      const player = new CharacterPlayback(gltf.scene, gltf.animations);
+      player.setMode('bind', true);
+      const gait = new CharacterLocomotion(gltf.scene);
+      let minGap = Infinity,
+        maxGap = -Infinity,
+        minHandZ = Infinity,
+        maxHandZ = -Infinity;
+      for (let i = 0; i < 480; i++) {
+        player.update(1 / 120);
+        gait.apply(1 / 120, { x, forward: 0, pace, airborne: false, turnRate: 0 });
+        gltf.scene.updateMatrixWorld(true);
+        if (i < 80) continue;
+        const l = gltf.scene.getObjectByName('LeftFoot')!.getWorldPosition(new THREE.Vector3());
+        const r = gltf.scene.getObjectByName('RightFoot')!.getWorldPosition(new THREE.Vector3());
+        const hand = gltf.scene.getObjectByName('LeftHand')!.getWorldPosition(new THREE.Vector3());
+        minGap = Math.min(minGap, l.x - r.x);
+        maxGap = Math.max(maxGap, l.x - r.x);
+        minHandZ = Math.min(minHandZ, hand.z);
+        maxHandZ = Math.max(maxHandZ, hand.z);
+      }
+      expect(minGap).toBeGreaterThan(0.14);
+      expect(maxGap).toBeLessThan(0.4);
+      expect(maxHandZ - minHandZ).toBeLessThan(0.065);
+      player.dispose();
+    },
+  );
+  it('releases planted feet before fast repeated turns or reversals can fold the legs', () => {
+    const body = new THREE.Group();
+    body.add(gltf.scene);
     const player = new CharacterPlayback(gltf.scene, gltf.animations);
     player.setMode('bind', true);
     const gait = new CharacterLocomotion(gltf.scene);
-    let minGap = Infinity,
-      maxGap = -Infinity,
-      minCrossDepth = Infinity;
-    for (let i = 0; i < 480; i++) {
-      player.update(1 / 120);
-      gait.apply(1 / 120, { x: 1, forward: 0, pace: 0, airborne: false, turnRate: 0 });
-      gltf.scene.updateMatrixWorld(true);
-      if (i < 80) continue;
-      const l = gltf.scene.getObjectByName('LeftFoot')!.getWorldPosition(new THREE.Vector3());
-      const r = gltf.scene.getObjectByName('RightFoot')!.getWorldPosition(new THREE.Vector3());
-      minGap = Math.min(minGap, l.x - r.x);
-      maxGap = Math.max(maxGap, l.x - r.x);
-      if (l.x < r.x) minCrossDepth = Math.min(minCrossDepth, Math.abs(l.z - r.z));
-    }
-    expect(minGap).toBeLessThan(-0.025);
-    expect(maxGap).toBeLessThan(0.4);
-    expect(minCrossDepth).toBeGreaterThan(0.12);
+    let smallestLane = Infinity,
+      largestTwist = 0;
+    for (const rate of [4.5, 0, 4.5, -4.5, 0, -4.5, 3, -3, 0, 4.5, 0])
+      for (let i = 0; i < (rate === 0 ? 7 : 25); i++) {
+        const dt = 1 / 25;
+        player.update(dt);
+        body.rotation.y += rate * dt;
+        gait.apply(dt, { x: 0, forward: 0, pace: 0, airborne: false, turnRate: rate });
+        body.updateMatrixWorld(true);
+        const inv = body.getWorldQuaternion(new THREE.Quaternion()).invert();
+        for (const side of ['Left', 'Right']) {
+          const foot = gltf.scene.getObjectByName(side + 'Foot')!;
+          const p = body.worldToLocal(foot.getWorldPosition(new THREE.Vector3()));
+          smallestLane = Math.min(smallestLane, (side === 'Left' ? 1 : -1) * p.x);
+          const q = foot.getWorldQuaternion(new THREE.Quaternion()).premultiply(inv);
+          largestTwist = Math.max(
+            largestTwist,
+            Math.abs(new THREE.Euler().setFromQuaternion(q, 'YXZ').y),
+          );
+        }
+      }
+    expect(smallestLane).toBeGreaterThan(0.04);
+    expect(largestTwist).toBeLessThan(0.75);
+    expect(body.position.length()).toBe(0);
     player.dispose();
   });
   it('keeps preview world speed camera-relative and never adds lateral root speed', () => {

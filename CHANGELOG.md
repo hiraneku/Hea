@@ -7,6 +7,19 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Diperbaiki — GERAK 3: pivot aman dan step-together
+
+- Perbaiki pivot yang tidak memulai langkah kembali saat input yaw datang saat
+  blend-out. Restart kini tetap aktif tanpa menunggu bobot habis.
+- Prediksi batas tumpuan, percepat pertukaran support ketika perlu, dan lepas/roll
+  sole sebelum ankle melewati lane panggul atau twist melebihi batas aman.
+  Uji putaran cepat berulang, reversal dan jeda pendek di 25 FPS.
+- Batalkan crossover/grapevine GERAK 2: lateral memakai step-together, kaki sisi
+  tujuan mengangkat lebih dulu lalu kaki lain mengikuti, dengan langkah pendek.
+- Lengan/torso menyamping memakai balance lateral kecil dan siku rileks, bukan
+  ayunan sagittal Walking. Diagonal mencampur balance dan forward swing kontinu.
+- Pace GERAK 2, materi putih, rig v9 dan fisika tetap dipertahankan.
+
 ### Diperbaiki — GERAK 2: pivot netral, crossover dan pace
 
 - Pisahkan stationary pivot dari gait jalan/lari. Kaki penopang mengimbangi yaw

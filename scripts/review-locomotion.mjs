@@ -60,8 +60,10 @@ try {
       player.setMode('bind', true);
       for (let i = 0; i < Math.ceil(seconds * 120); i++) {
         player.update(1/120);
-        holder.rotation.y += turnRate / 120;
-        gait.apply(1/120, {pace, x, forward, airborne:false, turnRate});
+        const t = i / 120;
+        const rate = turnRate === 99 ? (t < 0.6 ? 4.5 : t < 0.85 ? 0 : t < 1.45 ? -4.5 : t < 1.7 ? 0 : 4.5) : turnRate;
+        holder.rotation.y += rate / 120;
+        gait.apply(1/120, {pace, x, forward, airborne:false, turnRate:rate});
       }
       camera.position.set(Math.sin(angle)*5, 1.1, Math.cos(angle)*5);
       camera.lookAt(0, 1.1, 0);
@@ -70,9 +72,9 @@ try {
     };
   });
   await mkdir('.cache/motion-review', {recursive:true});
-  for (const [name, pace, x, z, rate] of [['run',1,0,3.7,0],['sprint',2,0,5.8,0],['strafe',0,1,0,0],['back',0,0,-1,0],['pivot',0,0,0,1.2],['look-idle',0,0,0,0]])
+  for (const [name, pace, x, z, rate] of [['run',1,0,3.7,0],['sprint',2,0,5.8,0],['strafe',0,1,0,0],['back',0,0,-1,0],['pivot',0,0,0,1.2],['pivot-stress',0,0,0,99],['look-idle',0,0,0,0]])
     for (const [view, angle] of [['front',0],['side',Math.PI/2]]) {
-      await page.evaluate(([pace,x,z,angle,rate]) => window.reviewMotion(pace,x,z,angle,rate), [pace,x,z,angle,rate]);
+      await page.evaluate(([pace,x,z,angle,rate]) => window.reviewMotion(pace,x,z,angle,rate,rate===99?2.2:0.8), [pace,x,z,angle,rate]);
       await page.screenshot({path:`.cache/motion-review/${name}-${view}.png`});
     }
 } finally {

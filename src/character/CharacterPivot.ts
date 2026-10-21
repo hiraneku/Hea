@@ -17,6 +17,7 @@ export class CharacterPivot {
   private feet = { Left: new THREE.Vector3(), Right: new THREE.Vector3() };
   private yaw = { Left: 0, Right: 0 };
   private side?: Side;
+  private pending?: Side;
   private from = new THREE.Vector3();
   private fromYaw = 0;
   private progress = 0;
@@ -51,7 +52,7 @@ export class CharacterPivot {
     });
   }
   reset() {
-    this.side = undefined;
+    this.side = this.pending = undefined;
     this.progress = this.weight = 0;
   }
   private neutral(side: Side) {
@@ -62,39 +63,62 @@ export class CharacterPivot {
     this.from.copy(this.feet[side]);
     this.fromYaw = this.yaw[side];
     this.progress = 0;
-    this.duration = THREE.MathUtils.clamp(0.32 - Math.abs(rate) * 0.018, 0.18, 0.32);
+    this.duration = THREE.MathUtils.clamp(0.3 / (1 + Math.abs(rate) * 0.65), 0.1, 0.3);
   }
   apply(dt: number, rate: number) {
     if (dt <= 0) return this.weight > 0.001;
     const turning = Math.abs(rate) > 0.12;
-    if (!this.side && turning && this.weight < 0.001) {
-      this.model.updateMatrixWorld(true);
-      const inverse = this.model.getWorldQuaternion(new THREE.Quaternion()).invert();
-      for (const s of sides) {
-        const foot = this.actual.get(s + 'Foot')!;
-        this.feet[s].copy(this.model.worldToLocal(foot.getWorldPosition(new THREE.Vector3())));
-        this.feet[s].y = this.floor[s];
-        const q = foot.getWorldQuaternion(new THREE.Quaternion()).premultiply(inverse);
-        this.yaw[s] = new THREE.Euler().setFromQuaternion(q, 'YXZ').y;
+    if (!turning && !this.side && this.weight < 0.001) {
+      this.pending = undefined;
+      return false;
+    }
+    if (!this.side && turning) {
+      if (this.weight < 0.001) {
+        this.model.updateMatrixWorld(true);
+        const inverse = this.model.getWorldQuaternion(new THREE.Quaternion()).invert();
+        for (const s of sides) {
+          const foot = this.actual.get(s + 'Foot')!;
+          this.feet[s].copy(this.model.worldToLocal(foot.getWorldPosition(new THREE.Vector3())));
+          this.feet[s].y = this.floor[s];
+          const q = foot.getWorldQuaternion(new THREE.Quaternion()).premultiply(inverse);
+          this.yaw[s] = new THREE.Euler().setFromQuaternion(q, 'YXZ').y;
+        }
       }
-      this.begin(rate > 0 ? 'Left' : 'Right', rate);
+      // Restart even during blend-out. Previously a quick stop/restart could
+      // leave both feet anchored with no active step until the legs crossed.
+      this.begin(this.pending ?? (rate > 0 ? 'Left' : 'Right'), rate);
+      this.pending = undefined;
     }
     const delta = rate * dt;
     for (const s of sides) {
       this.feet[s].applyAxisAngle(up, -delta);
       this.yaw[s] -= delta;
+      if (s !== this.side) this.feet[s].y = this.floor[s];
+      const sign = s === 'Left' ? 1 : -1;
+      // Predict the next support failure, not just the current ankle position.
+      // A support may pivot on its forefoot, but may never stay pinned through
+      // a 90-degree+ body turn or travel across the other hip's lane.
+      const next = this.feet[s].clone().applyAxisAngle(up, -delta * 2);
+      if (s !== this.side && (Math.abs(this.yaw[s] - delta * 2) > 0.42 || sign * next.x < 0.1))
+        this.pending = s;
     }
     if (this.side) {
       this.from.applyAxisAngle(up, -delta);
       this.fromYaw -= delta;
-      this.progress = Math.min(1, this.progress + dt / this.duration);
+      this.duration = Math.min(
+        this.duration,
+        THREE.MathUtils.clamp(0.3 / (1 + Math.abs(rate) * 0.65), 0.1, 0.3),
+      );
+      const exchange = this.pending && this.pending !== this.side ? 2.5 : 1;
+      this.progress = Math.min(1, this.progress + (dt * exchange) / this.duration);
       const blend = THREE.MathUtils.smootherstep(this.progress, 0, 1);
       const s = this.side;
       this.feet[s].copy(this.from).lerp(this.neutral(s), blend);
       this.feet[s].y += Math.sin(Math.PI * this.progress) ** 2 * 0.032;
       this.yaw[s] = THREE.MathUtils.lerp(this.fromYaw, 0, blend);
       if (this.progress >= 1) {
-        const next = s === 'Left' ? 'Right' : 'Left';
+        const next = this.pending ?? (s === 'Left' ? 'Right' : 'Left');
+        this.pending = undefined;
         this.side = undefined;
         if (
           turning ||
@@ -103,6 +127,31 @@ export class CharacterPivot {
         )
           this.begin(next, rate);
       }
+    }
+    for (const s of sides) {
+      const sign = s === 'Left' ? 1 : -1;
+      const foot = this.feet[s];
+      const x = sign * THREE.MathUtils.clamp(sign * foot.x, 0.085, 0.24);
+      const z = THREE.MathUtils.clamp(foot.z, -0.15, 0.15);
+      const yaw = THREE.MathUtils.clamp(this.yaw[s], -0.55, 0.55);
+      if (
+        s !== this.side &&
+        (Math.abs(x - foot.x) > 1e-5 ||
+          Math.abs(z - foot.z) > 1e-5 ||
+          Math.abs(yaw - this.yaw[s]) > 1e-5)
+      ) {
+        // Release the sole and roll/reorient briefly while the other step lands.
+        // Holding the old world anchor here was the source of the folded-leg pose.
+        foot.y = this.floor[s] + 0.012;
+        this.pending = s;
+      }
+      foot.x = x;
+      foot.z = z;
+      this.yaw[s] = yaw;
+    }
+    if (!this.side && this.pending) {
+      this.begin(this.pending, rate);
+      this.pending = undefined;
     }
     this.weight += ((this.side || turning ? 1 : 0) - this.weight) * (1 - Math.exp(-14 * dt));
     if (this.weight < 0.001) return false;
