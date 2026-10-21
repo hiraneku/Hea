@@ -78,6 +78,27 @@ try {
     }
     const positions = (name) => model.getObjectByName(name).getWorldPosition(new T.Vector3());
     const stance = model.getObjectByName('HEA_101172')?.userData.heaCharacter.walkStance ?? 0.62;
+    const skin = model.getObjectByName('CharacterSkin');
+    const anatomy = model.getObjectByName('HEA_101172')?.userData.heaCharacter.anatomy;
+    const vertices = skin?.geometry.getAttribute('position');
+    const contactVertex = {};
+    for (const side of ['Left', 'Right']) {
+      if (!vertices || !anatomy) continue;
+      const ball = anatomy[side.toLowerCase()].ball;
+      let best = Infinity;
+      for (let i = 0; i < vertices.count; i++) {
+        if (vertices.getY(i) > 0.04 || vertices.getX(i) > 0 !== (side === 'Left')) continue;
+        const cost =
+          (vertices.getX(i) - ball[0]) ** 2 +
+          (vertices.getZ(i) - ball[2]) ** 2 +
+          4 * vertices.getY(i) ** 2;
+        if (cost < best) {
+          best = cost;
+          contactVertex[side] = i;
+        }
+      }
+    }
+    const contacts = { Left: [], Right: [] };
     const data = {
       stanceKneeMin: 180,
       stanceKneeMax: 0,
@@ -86,8 +107,8 @@ try {
       hipHeightMin: Infinity,
       hipHeightMax: -Infinity,
     };
-    for (let frame = 0; frame < (hasWalk ? 120 : 0); frame++) {
-      const phase = frame / 120;
+    for (let frame = 0; frame < (hasWalk ? 240 : 0); frame++) {
+      const phase = frame / 240;
       sample(phase);
       const y = positions('Hips').y;
       data.hipHeightMin = Math.min(data.hipHeightMin, y);
@@ -104,11 +125,37 @@ try {
           b = positions(side + 'Shin'),
           c = positions(side + 'Foot');
         const flex = T.MathUtils.radToDeg(Math.PI - a.sub(b).angleTo(c.sub(b)));
+        const p = (phase + offset) % 1;
+        if (p < stance && contactVertex[side] !== undefined) {
+          const v = new T.Vector3().fromBufferAttribute(vertices, contactVertex[side]);
+          skin.applyBoneTransform(contactVertex[side], v);
+          skin.localToWorld(v);
+          v.z +=
+            model.getObjectByName('HEA_101172').userData.heaCharacter.walkSpeed * p * clip.duration;
+          contacts[side].push({ p, v });
+        }
         if ((phase + offset) % 1 < stance) {
           data.stanceKneeMin = Math.min(data.stanceKneeMin, flex);
           data.stanceKneeMax = Math.max(data.stanceKneeMax, flex);
         } else data.swingKneeMax = Math.max(data.swingKneeMax, flex);
       }
+    }
+    data.stanceMaterialPointDrift = 0;
+    data.flatStanceMaterialPointDrift = 0;
+    for (const side of ['Left', 'Right']) {
+      const samples = contacts[side].sort((a, b) => a.p - b.p);
+      if (!samples.length) continue;
+      for (const point of samples)
+        data.stanceMaterialPointDrift = Math.max(
+          data.stanceMaterialPointDrift,
+          point.v.distanceTo(samples[0].v),
+        );
+      const flat = samples.filter((s) => s.p >= 0.1 && s.p <= 0.43);
+      for (const point of flat)
+        data.flatStanceMaterialPointDrift = Math.max(
+          data.flatStanceMaterialPointDrift,
+          point.v.distanceTo(flat[0].v),
+        );
     }
     window.review = (phase, angle) => {
       sample(phase);
@@ -134,6 +181,27 @@ try {
         angle,
       });
       await page.screenshot({ path: `${destination}/${view}-${frame}.png` });
+    }
+  }
+  // Event-aligned comparisons, independent of the legacy eight evenly spaced views.
+  for (const [view, angle] of [
+    ['front', 0],
+    ['side', Math.PI / 2],
+    ['three-quarter', Math.PI / 6],
+  ]) {
+    for (const [event, phase] of [
+      ['contact', 0],
+      ['acceptance', 0.045],
+      ['mid-stance', 0.25],
+      ['opposite-contact', 0.5],
+      ['toe-off', 0.575],
+      ['mid-swing', 0.79],
+      ['late-swing', 0.96],
+      ['loop-end', 0.99999],
+    ]) {
+      if (!metrics.hasWalk) continue;
+      await page.evaluate(({ phase, angle }) => window.review(phase, angle), { phase, angle });
+      await page.screenshot({ path: `${destination}/${view}-${event}.png` });
     }
   }
   console.log(destination, metrics);

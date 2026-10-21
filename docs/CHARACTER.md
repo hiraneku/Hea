@@ -8,7 +8,12 @@
 - Preview di `/Hea/preview/` memakai `GLTFLoader` + `AnimationMixer` untuk memutar
   **clip dari GLB itu sendiri**. Tidak ada deformer/IK runtime yang hanya hidup di viewer.
 - Tombol unduh di preview memberikan aset yang sama, bisa dibuka di editor glTF
-  atau dimuat game. Karakter aktif belum dialihkan ke aset ini.
+  atau dimuat game. Game aktif dan preview sudah memakai aset rigged yang sama.
+
+Walking terbaru: **revision 2** (rig tetap v9). Lihat
+[laporan perubahan, perbandingan visual dan hasil pemeriksaan](WALKING_REVIEW.md).
+Peningkatan ini hanya memperbaiki bake Walking dan pembacaan kontak saat load;
+controller gameplay serta perilaku GERAK 8 tidak didesain ulang.
 
 ## Konvensi dan rig
 

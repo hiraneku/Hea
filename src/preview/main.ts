@@ -10,7 +10,7 @@ import { CharacterArenaDrive } from '../character/CharacterArenaDrive';
 import { PACE_LABELS } from '../character/CharacterFacing';
 import { CharacterPlayback } from '../character/CharacterPlayback';
 import type { CharacterAnatomy } from '../character/anatomy101172';
-import { RIGGED_CHARACTER, RIG_REVISION } from '../character/rig101172';
+import { RIGGED_CHARACTER, RIG_REVISION, WALKING_REVISION } from '../character/rig101172';
 import './preview.css';
 
 // This is a separate build entry inside HEA, deliberately independent of Game.
@@ -23,7 +23,7 @@ if (!previewURL.pathname.endsWith('/') && !previewURL.pathname.endsWith('.html')
 const siteRoot = new URL('../', previewURL);
 const modelURL = new URL(RIGGED_CHARACTER, siteRoot);
 modelURL.searchParams.set('revision', String(RIG_REVISION));
-modelURL.searchParams.set('gait', '1');
+modelURL.searchParams.set('gait', String(WALKING_REVISION));
 const app = document.querySelector<HTMLDivElement>('#preview-app')!;
 app.innerHTML = `
   <header><a class="wordmark" href="${siteRoot.href}">HEA<span>.</span></a><span class="breadcrumb">LAB / KARAKTER</span><a class="back" href="${siteRoot.href}">← Kembali ke game</a></header>

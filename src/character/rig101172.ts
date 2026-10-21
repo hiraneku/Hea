@@ -17,9 +17,10 @@ export const WALK = {
   samples: 120,
   stance: 0.58,
   contactAdvance: 0.25,
-  clearance: 0.12,
+  clearance: 0.065,
 } as const;
 export const RIG_REVISION = 9;
+export const WALKING_REVISION = 2;
 export const RIGGED_CHARACTER = 'models/101172-rigged.glb';
 export interface RiggedCharacter {
   scene: THREE.Group;
@@ -132,6 +133,7 @@ export function rig101172(source: THREE.Object3D): RiggedCharacter {
       walkSpeed: WALK.stride / WALK.duration,
       walkDuration: WALK.duration,
       walkStance: WALK.stance,
+      walkingRevision: WALKING_REVISION,
       source: '101172.glb',
       rig: 'HEA humanoid 28',
       shape: { forearmRadialReduction: 0.12, elbowLowering: 0.04 },
@@ -333,15 +335,21 @@ function makeWalk(
     // Double support at contacts, body highest over the planted foot. Small lateral
     // transfer, pelvis yaw and counter-rotating chest make the gait read as weight.
     // Reach is derived from this mesh's measured leg lengths and sole height.
-    hips.position.y = standingHeight - 0.025 - 0.018 * Math.cos(2 * t);
-    hips.position.x = 0.008 * Math.sin(t);
-    hips.rotation.set(0.018, 0.045 * Math.cos(t), -0.018 * Math.sin(t));
-    bones.get('Spine')!.rotation.set(0.012, -0.018 * Math.cos(t), 0.012 * Math.sin(t));
-    bones.get('SpineUpper')!.rotation.set(-0.008, -0.03 * Math.cos(t), 0.009 * Math.sin(t));
-    bones.get('Chest')!.rotation.set(0.008, -0.018 * Math.cos(t), 0.006 * Math.sin(t));
-    bones.get('Neck')!.rotation.set(-0.008, 0.008 * Math.cos(t), -0.006 * Math.sin(t));
-    bones.get('Head')!.rotation.set(-0.016, 0.01 * Math.cos(t), 0.003 * Math.sin(t));
+    hips.position.y = standingHeight - 0.021 - 0.009 * Math.cos(2 * t);
+    hips.position.x = 0.012 * Math.sin(t);
+    hips.rotation.set(0.014, -0.035 * Math.cos(t), -0.012 * Math.sin(t));
+    bones.get('Spine')!.rotation.set(0.008, 0.018 * Math.cos(t), 0.006 * Math.sin(t));
+    bones.get('SpineUpper')!.rotation.set(-0.006, 0.01 * Math.cos(t), 0.004 * Math.sin(t));
+    bones.get('Chest')!.rotation.set(0.006, 0.012 * Math.cos(t), 0.002 * Math.sin(t));
     scene.updateMatrixWorld(true);
+    const targets: {
+      side: 'Left' | 'Right';
+      sign: number;
+      offset: number;
+      ankle: THREE.Vector3;
+      roll: number;
+      lift: number;
+    }[] = [];
     for (const [side, sign, offset] of [
       ['Left', 1, 0],
       ['Right', -1, 0.5],
@@ -354,29 +362,80 @@ function makeWalk(
       const back = WALK.stride * (WALK.contactAdvance - stance);
       let z: number, lift: number, roll: number;
       if (p < stance) {
-        const u = p / stance;
         z = front - WALK.stride * p;
         lift = 0;
-        // Small ankle roll only: this source has a rounded foot, not a flat human sole.
-        roll = -0.1 * (1 - smooth(0, 0.18, u)) + 0.3 * smooth(0.72, 1, u);
+        // Keep the loaded sole flat for most of stance. Unload onto the
+        // rounded forefoot only during the final transfer to the other leg.
+        roll = 0.24 * THREE.MathUtils.smootherstep(p, stance - 0.14, stance);
       } else {
         const u = (p - stance) / (1 - stance);
-        // Cubic Hermite keeps fore/aft velocity continuous at toe-off and contact.
+        // Quintic Hermite matches stance velocity AND zero acceleration at
+        // both joins. The tiny rearward overshoot is continuation of toe-off,
+        // not a stop/reverse discontinuity or an eased foot skating at landing.
         const m = -WALK.stride * (1 - stance);
-        z =
-          (2 * u * u * u - 3 * u * u + 1) * back +
-          (u * u * u - 2 * u * u + u) * m +
-          (-2 * u * u * u + 3 * u * u) * front +
-          (u * u * u - u * u) * m;
-        lift = WALK.clearance * Math.sin(Math.PI * u) ** 2;
-        roll = THREE.MathUtils.lerp(0.3, -0.1, smooth(0, 1, u)) + 0.12 * Math.sin(Math.PI * u);
+        z = back + m * u + (front - back - m) * THREE.MathUtils.smootherstep(u, 0, 1);
+        // Lift earlier and retain clearance through late swing, without raising
+        // the apex or losing zero vertical velocity/acceleration at either join.
+        const liftPhase = u + 0.12 * Math.sin(2 * Math.PI * u);
+        lift = WALK.clearance * Math.sin(Math.PI * liftPhase) ** 3;
+        roll =
+          0.24 * (1 - THREE.MathUtils.smootherstep(u, 0, 0.55)) - 0.04 * Math.sin(Math.PI * u) ** 3;
       }
       const leg = side === 'Left' ? anatomy.left : anatomy.right;
       const ankle = new THREE.Vector3(
-        leg.hip[0] + sign * (0.07 + 0.006 * Math.sin(Math.PI * p) ** 2),
-        leg.ankle[1] + lift + Math.abs(Math.sin(roll)) * 0.1,
+        leg.hip[0] + sign * 0.07,
+        leg.ankle[1] + lift,
         z + anatomy.pelvis[2],
       );
+      const orientation = new THREE.Quaternion().setFromEuler(
+        new THREE.Euler(roll, sign * -0.04, 0),
+      );
+      const flat = new THREE.Quaternion().setFromEuler(new THREE.Euler(0, sign * -0.04, 0));
+      // Rotate about the forefoot, not the ankle. Its material point continues
+      // along the reference-speed stance line while the heel rises naturally.
+      const pivot = new THREE.Vector3(
+        leg.ball[0] - leg.ankle[0],
+        -leg.ankle[1],
+        leg.ball[2] - leg.ankle[2],
+      );
+      const pivotDelta = pivot
+        .clone()
+        .applyQuaternion(orientation)
+        .sub(pivot.applyQuaternion(flat));
+      ankle.x -= pivotDelta.x;
+      ankle.z -= pivotDelta.z;
+      let low = Infinity;
+      for (const vertex of soles[side]) {
+        solePoint
+          .fromBufferAttribute(positions, vertex)
+          .sub(new THREE.Vector3(...leg.ankle))
+          .applyQuaternion(orientation);
+        low = Math.min(low, solePoint.y);
+      }
+      ankle.y = lift + 0.002 - low;
+      targets.push({ side, sign, offset, ankle, roll, lift });
+    }
+    // Smooth conservative reach cap for both measured chains. Including the
+    // swing chain avoids switching constraints at contact; a soft minimum
+    // removes the velocity kink of a hard min at the desired-height crossing.
+    for (const { side, ankle } of targets) {
+      const socket = bones
+        .get(side + 'Thigh')!
+        .position.clone()
+        .applyQuaternion(hips.quaternion);
+      const reach =
+        bones.get(side + 'Shin')!.position.length() +
+        bones.get(side + 'Foot')!.position.length() -
+        0.004;
+      const dx = ankle.x - hips.position.x - socket.x;
+      const dz = ankle.z - hips.position.z - socket.z;
+      const cap = ankle.y + Math.sqrt(Math.max(0, reach * reach - dx * dx - dz * dz)) - socket.y;
+      const difference = hips.position.y - cap;
+      hips.position.y =
+        (hips.position.y + cap - Math.sqrt(difference * difference + 0.002 ** 2)) / 2;
+    }
+    scene.updateMatrixWorld(true);
+    for (const { side, sign, offset, ankle, roll, lift } of targets) {
       // Bake flat-floor IK and sole contact into ordinary quaternion tracks. The
       // gameplay runtime does not need this authoring solver or the source mesh.
       for (let correction = 0; correction < 5; correction++) {
@@ -401,13 +460,32 @@ function makeWalk(
       }
       // Swing the opposite arm, with relaxed elbow flexion and a delayed wrist.
       const swing = Math.cos(t + offset * Math.PI * 2);
-      bones.get(side + 'Clavicle')!.rotation.set(0, 0.025 * swing, sign * 0.025);
-      bones.get(side + 'UpperArm')!.rotation.set(0.25 * swing - 0.03, sign * 0.015, sign * -0.04);
-      bones.get(side + 'ForeArm')!.rotation.set(-0.16 - 0.09 * (1 - swing), 0, sign * 0.02);
+      bones.get(side + 'Clavicle')!.rotation.set(0, 0.012 * swing, sign * 0.012);
+      bones.get(side + 'UpperArm')!.rotation.set(0.21 * swing - 0.02, sign * 0.01, sign * -0.04);
+      bones
+        .get(side + 'ForeArm')!
+        .rotation.set(
+          -0.19 - 0.055 * (1 - Math.cos(t + offset * Math.PI * 2 - 0.15)),
+          0,
+          sign * 0.02,
+        );
       bones
         .get(side + 'Hand')!
-        .rotation.set(0.035 * Math.sin(t + offset * Math.PI * 2 - 0.4), 0, sign * 0.025);
+        .rotation.set(0.015 * Math.sin(t + offset * Math.PI * 2 - 0.3), 0, sign * 0.025);
     }
+    // Share the small axial compensation across the neck and head instead of
+    // summing unrelated oscillations; keep a stable world gaze and relaxed chin.
+    scene.updateMatrixWorld(true);
+    const gaze = new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.012, 0, 0));
+    const neck = bones.get('Neck')!,
+      head = bones.get('Head')!;
+    const correction = neck
+      .parent!.getWorldQuaternion(new THREE.Quaternion())
+      .invert()
+      .multiply(gaze);
+    neck.quaternion.identity().slerp(correction, 0.65);
+    scene.updateMatrixWorld(true);
+    head.quaternion.copy(neck.getWorldQuaternion(new THREE.Quaternion()).invert()).multiply(gaze);
     times.push((frame / frames) * WALK.duration);
     for (const [name, bone] of bones) {
       const key = name + '.quaternion';

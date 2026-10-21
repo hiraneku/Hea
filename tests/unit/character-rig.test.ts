@@ -397,9 +397,23 @@ describe('portable 101172 rig and Walking asset', () => {
       for (let i = 4; i < track.values.length; i += 4) {
         a.fromArray(track.values, i - 4);
         b.fromArray(track.values, i);
+        expect(Math.abs(a.length() - 1), track.name).toBeLessThan(1e-6);
+        expect(Math.abs(b.length() - 1), track.name).toBeLessThan(1e-6);
+        expect(a.dot(b), track.name).toBeGreaterThan(0);
         largest = Math.max(largest, a.angleTo(b));
       }
       expect(largest, track.name).toBeLessThan(0.14);
+      const velocity = (from: number, to: number) => {
+        a.fromArray(track.values, from).normalize().invert();
+        b.fromArray(track.values, to).normalize();
+        const delta = a.multiply(b).normalize();
+        const angle = 2 * Math.acos(THREE.MathUtils.clamp(delta.w, -1, 1));
+        const axis = new THREE.Vector3(delta.x, delta.y, delta.z).normalize();
+        return axis.multiplyScalar(angle / (track.times[1] - track.times[0]));
+      };
+      const outgoing = velocity(0, 4);
+      const incoming = velocity(track.values.length - 8, track.values.length - 4);
+      expect(outgoing.distanceTo(incoming), track.name + ' seam velocity').toBeLessThan(0.35);
     }
   });
 
@@ -436,10 +450,14 @@ describe('portable 101172 rig and Walking asset', () => {
           const ankle = gltf.scene.getObjectByName(side + 'Foot')!.getWorldPosition(point);
           const expectedZ =
             WALK.stride * WALK.contactAdvance - WALK.stride * phase + measured.pelvis[2];
-          maxAnklePathError = Math.max(maxAnklePathError, Math.abs(ankle.z - expectedZ));
+          // Flat support follows the exact in-place reference-speed path.
+          // Late stance pivots about a forefoot material point, NOT the ankle.
+          if (phase < WALK.stance - 0.14)
+            maxAnklePathError = Math.max(maxAnklePathError, Math.abs(ankle.z - expectedZ));
         } else {
           const u = (phase - WALK.stance) / (1 - WALK.stance);
-          const expectedClearance = WALK.clearance * Math.sin(Math.PI * u) ** 2;
+          const expectedClearance =
+            WALK.clearance * Math.sin(Math.PI * (u + 0.12 * Math.sin(2 * Math.PI * u))) ** 3;
           maxSwingError = Math.max(maxSwingError, Math.abs(bottom - 0.002 - expectedClearance));
         }
       }
@@ -449,6 +467,75 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(maxContactError).toBeLessThan(0.004);
     expect(maxAnklePathError).toBeLessThan(0.001);
     player.dispose();
+  });
+
+  it('locks actual sole material points, including a rolling forefoot, at sub-keyframe times', () => {
+    const player = new CharacterPlayback(gltf.scene, gltf.animations);
+    const vertices = mesh.geometry.getAttribute('position');
+    let worst = 0,
+      flatWorst = 0;
+    for (const [side, offset] of [
+      ['Left', 0],
+      ['Right', 0.5],
+    ] as const) {
+      const ball = (side === 'Left' ? measured.left : measured.right).ball;
+      let vertex = -1,
+        best = Infinity;
+      for (let i = 0; i < vertices.count; i++) {
+        if (vertices.getY(i) > 0.04 || vertices.getX(i) > 0 !== (side === 'Left')) continue;
+        const cost =
+          (vertices.getX(i) - ball[0]) ** 2 +
+          (vertices.getZ(i) - ball[2]) ** 2 +
+          4 * vertices.getY(i) ** 2;
+        if (cost < best) {
+          best = cost;
+          vertex = i;
+        }
+      }
+      expect(vertex).toBeGreaterThanOrEqual(0);
+      let anchor: THREE.Vector3 | undefined, flatAnchor: THREE.Vector3 | undefined;
+      for (let i = 0; i < 480 * WALK.stance; i++) {
+        const footPhase = i / 480;
+        player.seek((footPhase - offset + 1) % 1);
+        const point = mesh.applyBoneTransform(
+          vertex,
+          new THREE.Vector3().fromBufferAttribute(vertices, vertex),
+        );
+        // Translate the in-place asset by its reference travel speed.
+        point.z += WALK.stride * footPhase;
+        anchor ??= point.clone();
+        worst = Math.max(worst, point.distanceTo(anchor));
+        if (footPhase >= 0.1 && footPhase <= 0.43) {
+          flatAnchor ??= point.clone();
+          flatWorst = Math.max(flatWorst, point.distanceTo(flatAnchor));
+        }
+        expect(gltf.scene.getObjectByName('Root')!.position.length()).toBeLessThan(1e-7);
+      }
+    }
+    expect(worst).toBeLessThan(0.004);
+    expect(flatWorst).toBeLessThan(0.0002);
+    player.dispose();
+  });
+
+  it('repeats Walking through AnimationMixer without accumulated root motion', () => {
+    const mixer = new THREE.AnimationMixer(gltf.scene);
+    const clip = gltf.animations[0];
+    mixer.clipAction(clip).play();
+    mixer.update(0.37 * clip.duration);
+    const before = mesh.skeleton.bones.map((bone) => ({
+      p: bone.position.clone(),
+      q: bone.quaternion.clone(),
+    }));
+    mixer.update(7 * clip.duration);
+    mesh.skeleton.bones.forEach((bone, i) => {
+      expect(bone.position.distanceTo(before[i].p)).toBeLessThan(1e-5);
+      expect(
+        bone.quaternion.clone().normalize().angleTo(before[i].q.clone().normalize()),
+      ).toBeLessThan(1e-5);
+    });
+    expect(gltf.scene.getObjectByName('Root')!.position.length()).toBeLessThan(1e-7);
+    mixer.stopAllAction();
+    mixer.uncacheRoot(gltf.scene);
   });
 
   it('keeps the support leg upright and both feet in separate lanes throughout the cycle', () => {
@@ -480,10 +567,10 @@ describe('portable 101172 rig and Walking asset', () => {
         else largestSwingBend = Math.max(largestSwingBend, flex);
       }
     }
-    expect(largestSupportBend).toBeLessThan(28);
-    // Higher clearance is deliberate: v2's restricted swing was rejected.
-    expect(largestSwingBend).toBeGreaterThan(55);
-    expect(largestSwingBend).toBeLessThan(75);
+    expect(largestSupportBend).toBeLessThan(24);
+    // A moderate 65 mm sole clearance replaces the old 120 mm high-step.
+    expect(largestSwingBend).toBeGreaterThan(35);
+    expect(largestSwingBend).toBeLessThan(60);
     expect(smallestSeparation).toBeGreaterThan(0.24);
     player.dispose();
   });
@@ -562,7 +649,7 @@ describe('portable 101172 rig and Walking asset', () => {
     expect(player.isStarting).toBe(false);
     expect(pin).toBeLessThan(0.003);
     expect(floor).toBeGreaterThan(-0.002);
-    expect(lift).toBeGreaterThan(0.07);
+    expect(lift).toBeGreaterThan(WALK.clearance * 0.8);
     expect(worstAngle).toBeLessThan(0.1);
     expect(body.position.z).toBeCloseTo(plan.rootEnd.z, 5);
     const endPose = mesh.skeleton.bones.map((b) => b.quaternion.clone().normalize());
@@ -1186,7 +1273,7 @@ describe('portable 101172 rig and Walking asset', () => {
       expect(player.isStopping).toBe(false);
       expect(foot('Left').z).toBeCloseTo(foot('Right').z, 3);
       expect(foot('Left').x - foot('Right').x).toBeGreaterThan(0.23);
-      expect(followMax).toBeGreaterThan(0.27);
+      expect(followMax).toBeGreaterThan(measured.left.ankle[1] + WALK.clearance * 0.7);
       expect(player.action.getEffectiveWeight()).toBe(0);
       const held = foot('Left');
       player.update(0.5);
@@ -1600,7 +1687,7 @@ describe('portable 101172 rig and Walking asset', () => {
       const playerRoot = new THREE.Group();
       const avatar = new AvatarModel(playerRoot);
       await avatar.load();
-      expect(loader).toHaveBeenCalledWith('models/101172-rigged.glb?revision=9');
+      expect(loader).toHaveBeenCalledWith('models/101172-rigged.glb?revision=9&gait=2');
       expect(avatar.ready).toBe(true);
       expect(avatar.clipNames).toEqual(['walk']);
       expect(gltf.scene.rotation.y).toBeCloseTo(Math.PI, 6);

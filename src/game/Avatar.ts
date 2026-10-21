@@ -13,7 +13,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { CharacterLook } from '../character/CharacterLook';
 import { CharacterLocomotion } from '../character/CharacterLocomotion';
 import { CharacterPlayback } from '../character/CharacterPlayback';
-import { RIG_REVISION, RIGGED_CHARACTER } from '../character/rig101172';
+import { RIG_REVISION, RIGGED_CHARACTER, WALKING_REVISION } from '../character/rig101172';
 
 export type AvatarPose = 'idle' | 'walk' | 'run' | 'air' | 'dead';
 
@@ -76,7 +76,7 @@ export class AvatarModel {
 
   constructor(
     parent: THREE.Object3D,
-    private readonly url = `${RIGGED_CHARACTER}?revision=${RIG_REVISION}`,
+    private readonly url = `${RIGGED_CHARACTER}?revision=${RIG_REVISION}&gait=${WALKING_REVISION}`,
     /** Metres from the soles to the crown the model is scaled to. */
     private readonly height = 1.52,
   ) {

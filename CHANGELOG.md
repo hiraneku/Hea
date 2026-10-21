@@ -7,6 +7,19 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Walking revision 2 — telapak tertanam dan swing lebih terkendali
+
+- Perbaiki bake `Walking` pada rig v9 yang sama: lane kaki tetap, kompensasi pivot
+  forefoot berdasarkan geometri sole, batas reach pelvis halus, swing quintic,
+  clearance 65 mm (sebelumnya 120 mm), torso/lengan/gaze lebih terkendali.
+- Durasi 1,16 s, stride 0,94 m, 28 tulang, geometri/skin/material/tekstur dan sumber
+  asli tetap. Tidak mengubah controller, kecepatan, kamera, flight atau GERAK 8.
+- Analisis kontak saat load mengenali forefoot tertanam ketika ankle bergerak
+  saat heel rise, dengan toleransi lantai/kecepatan yang sama. Cache aset gait=2.
+- Review aktual delapan fase dari tiga sudut, pemeriksaan preservasi byte-exact,
+  titik material telapak dan seam quaternion; rincian dan batas klaim di
+  [Walking review](docs/WALKING_REVIEW.md).
+
 ### GERAK 8 — arah jalan selama bergerak, hold hanya setelah berhenti
 
 - Batalkan backpedal GERAK 7. Tanpa lock, badan selalu menghadap travel, termasuk

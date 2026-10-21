@@ -186,8 +186,8 @@ export function resolveWalkingGait(
     throw new Error('Walking analysis could not locate both sole patches.');
   const samples = 480;
   const frames = {
-    Left: [] as { z: number; y: number }[],
-    Right: [] as { z: number; y: number }[],
+    Left: [] as { z: number; forefootZ: number; y: number }[],
+    Right: [] as { z: number; forefootZ: number; y: number }[],
   };
   const mixer = new THREE.AnimationMixer(scene),
     action = mixer.clipAction(clip).play();
@@ -204,13 +204,33 @@ export function resolveWalkingGait(
         );
         let bottom = Infinity;
         for (const v of soles[side]) bottom = Math.min(bottom, p.y + v.dot(normal));
-        frames[side].push({ z: p.z, y: bottom });
+        const leg = side === 'Left' ? anatomy.left : anatomy.right;
+        // Heel rise moves the ankle even when the forefoot stays planted.
+        // Use the measured ball projected onto the sole plane as a second
+        // rigid-foot reference, not a relaxed ankle-velocity tolerance.
+        const forefoot = new THREE.Vector3(
+          leg.ball[0] - leg.ankle[0],
+          -leg.ankle[1],
+          leg.ball[2] - leg.ankle[2],
+        )
+          .applyQuaternion(foot.getWorldQuaternion(new THREE.Quaternion()))
+          .add(p);
+        frames[side].push({ z: p.z, forefootZ: forefoot.z, y: bottom });
       }
     }
   } finally {
     mixer.stopAllAction();
     mixer.uncacheRoot(scene);
   }
+  const differentiate = (side: FootSide, key: 'z' | 'forefootZ') =>
+    frames[side].map(
+      (_, i) =>
+        (frames[side][(i + 1) % samples][key] - frames[side][(i + samples - 1) % samples][key]) /
+        ((2 * clip.duration) / samples),
+    );
+  const forefootVelocities = Object.fromEntries(
+    sides.map((side) => [side, differentiate(side, 'forefootZ')]),
+  ) as Record<FootSide, number[]>;
   const velocities = Object.fromEntries(
     sides.map((side) => [
       side,
@@ -251,7 +271,13 @@ export function resolveWalkingGait(
       continue;
     }
     const stance = frames[side].map(
-      (p, i) => p.y < 0.008 && Math.abs(velocities[side][i] + speed) < speed * 0.035,
+      (p, i) =>
+        p.y < 0.008 &&
+        Math.min(
+          Math.abs(velocities[side][i] + speed),
+          Math.abs(forefootVelocities[side][i] + speed),
+        ) <
+          speed * 0.035,
     );
     // Longest cyclic planted interval; isolated threshold noise is not a contact.
     let longest = 0,
