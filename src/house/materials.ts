@@ -31,45 +31,85 @@ const timber = paint(512, (c, s) => {
     c.stroke();
   }
 });
-const plaster = paint(256, (c, s) => {
-  c.fillStyle = '#eadfc5';
+const plaster = paint(512, (c, s) => {
+  c.fillStyle = '#cfc6aa';
   c.fillRect(0, 0, s, s);
-  for (let i = 0; i < 12000; i++) {
-    c.fillStyle = random() > 0.5 ? 'rgba(105,83,53,.04)' : 'rgba(255,255,255,.14)';
-    c.fillRect(random() * s, random() * s, 2, 2);
+  for (let i = 0; i < 140; i++) {
+    const x = random() * s,
+      y = random() * s,
+      r = 15 + random() * 100;
+    const g = c.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, i % 3 ? 'rgba(92,77,46,.065)' : 'rgba(255,248,215,.12)');
+    g.addColorStop(1, 'rgba(180,167,134,0)');
+    c.fillStyle = g;
+    c.fillRect(x - r, y - r, r * 2, r * 2);
+  }
+  for (let i = 0; i < 27000; i++) {
+    c.fillStyle = i % 2 ? 'rgba(70,59,39,.055)' : 'rgba(255,250,224,.11)';
+    c.fillRect(random() * s, random() * s, 1 + random() * 3, 1 + random() * 2);
+  }
+  for (let i = 0; i < 14; i++) {
+    let x = random() * s,
+      y = random() * s;
+    c.strokeStyle = 'rgba(81,71,50,.12)';
+    c.lineWidth = 0.6;
+    c.beginPath();
+    c.moveTo(x, y);
+    for (let j = 0; j < 5; j++) {
+      x += random() * 8 - 4;
+      y += random() * 12;
+      c.lineTo(x, y);
+    }
+    c.stroke();
   }
 });
 export const floorMap = paint(1024, (c, s) => {
-  c.fillStyle = '#98714b';
+  c.fillStyle = '#605d50';
   c.fillRect(0, 0, s, s);
-  for (let row = 0; row < 12; row++)
-    for (let col = -1; col < 4; col++) {
-      const w = s / 3,
-        h = s / 12,
-        x = col * w + (row % 2) * w * 0.5,
-        y = row * h;
-      c.fillStyle = `hsl(31, ${25 + random() * 10}%, ${45 + random() * 9}%)`;
-      c.fillRect(x + 1.5, y + 1.5, w - 3, h - 3);
-      for (let grain = 0; grain < 45; grain++) {
-        c.strokeStyle = random() > 0.4 ? 'rgba(70,36,16,.12)' : 'rgba(255,228,178,.15)';
-        const gy = y + random() * h;
-        c.beginPath();
-        c.moveTo(x, gy);
-        c.bezierCurveTo(x + w * 0.3, gy - 4, x + w * 0.7, gy + 3, x + w, gy);
-        c.stroke();
-      }
-      c.fillStyle = 'rgba(61,38,22,.35)';
-      for (const end of [x + 9, x + w - 10]) {
-        c.fillRect(end, y + 9, 2, 2);
-        c.fillRect(end, y + h - 11, 2, 2);
-      }
+  const tile = s / 6;
+  for (let row = 0; row < 6; row++)
+    for (let col = -1; col < 7; col++) {
+      const x = (col + (row % 2) * 0.5) * tile,
+        y = row * tile;
+      c.fillStyle = `hsl(${36 + random() * 7},${9 + random() * 9}%,${43 + random() * 12}%)`;
+      c.beginPath();
+      c.moveTo(x + 9, y + 3);
+      c.lineTo(x + tile - 11, y + 5);
+      c.lineTo(x + tile - 3, y + 15);
+      c.lineTo(x + tile - 5, y + tile - 14);
+      c.lineTo(x + tile - 15, y + tile - 4);
+      c.lineTo(x + 10, y + tile - 5);
+      c.lineTo(x + 4, y + tile - 16);
+      c.lineTo(x + 3, y + 14);
+      c.closePath();
+      c.fill();
+      c.strokeStyle = 'rgba(230,218,186,.18)';
+      c.lineWidth = 2;
+      c.stroke();
     }
+  for (let i = 0; i < 70000; i++) {
+    c.fillStyle = i % 2 ? 'rgba(35,32,24,.065)' : 'rgba(240,228,198,.08)';
+    c.fillRect(random() * s, random() * s, 1 + random() * 3, 1);
+  }
 });
-floorMap.repeat.set(3, 3);
-export const rugMap = paint(512, (c, s) => {
-  c.fillStyle = '#a7583d';
+floorMap.repeat.set(2.2, 2.2);
+const fabric = paint(256, (c, s) => {
+  c.fillStyle = '#ded3b7';
   c.fillRect(0, 0, s, s);
-  c.strokeStyle = '#ddbd7c';
+  for (let i = 0; i < s; i += 2) {
+    c.strokeStyle = i % 4 ? 'rgba(64,52,32,.08)' : 'rgba(255,255,235,.2)';
+    c.beginPath();
+    c.moveTo(i, 0);
+    c.lineTo(i, s);
+    c.moveTo(0, i);
+    c.lineTo(s, i);
+    c.stroke();
+  }
+});
+export const rugMap = paint(512, (c, s) => {
+  c.fillStyle = '#686146';
+  c.fillRect(0, 0, s, s);
+  c.strokeStyle = '#b3a073';
   c.lineWidth = 14;
   c.strokeRect(20, 20, s - 40, s - 40);
   c.lineWidth = 3;
@@ -79,7 +119,7 @@ export const rugMap = paint(512, (c, s) => {
       c.save();
       c.translate(x, y);
       c.rotate(Math.PI / 4);
-      c.fillStyle = (x + y) % 2 ? '#d3a66a' : '#d5b881';
+      c.fillStyle = (x + y) % 2 ? '#b2a077' : '#9a895d';
       c.fillRect(-9, -9, 18, 18);
       c.restore();
     }
@@ -124,15 +164,18 @@ function mat(color: string, map?: T.Texture) {
   return new T.MeshStandardMaterial({ color, map, roughness: 0.89 });
 }
 export const M = {
-  wood: mat('#cba675', timber),
-  dark: mat('#74503b', timber),
+  wood: mat('#a78f68', timber),
+  dark: mat('#63533f', timber),
   edge: mat('#9c704e', timber),
-  oak: mat('#e3bb83', timber),
+  oak: mat('#bca37a', timber),
   floor: mat('#ffffff', floorMap),
-  plaster: mat('#fff8e9', plaster),
-  stone: mat('#aaa28d'),
+  plaster: mat('#eee6d0', plaster),
+  stone: mat('#a49c83', plaster),
+  roof: mat('#b8ad91', timber),
+  stoneLight: mat('#b6ad91', plaster),
+  stoneDark: mat('#8c8775', plaster),
   mortar: mat('#68665c'),
-  linen: mat('#ece2c8'),
+  linen: mat('#e1d9bf', fabric),
   sage: mat('#8f9e79'),
   rust: mat('#b87756'),
   blue: mat('#899eaa'),
@@ -167,3 +210,13 @@ export const M = {
     polygonOffsetFactor: -1,
   }),
 };
+
+// Shallow physical relief; colour maps remain local, deterministic and reusable.
+M.plaster.bumpMap = plaster;
+M.plaster.bumpScale = 0.025;
+M.floor.bumpMap = floorMap;
+M.floor.bumpScale = 0.022;
+M.linen.bumpMap = fabric;
+M.linen.bumpScale = 0.009;
+M.stone.bumpMap = plaster;
+M.stone.bumpScale = 0.035;

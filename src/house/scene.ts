@@ -2,6 +2,8 @@ import * as T from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { M } from './materials';
+import { windowAtmosphere } from './windowAtmosphere';
+import { buildVault } from './vault';
 import { hearthFire } from './hearthFire';
 import { HOUSE, LIVING, RUG, obstacles } from './layout';
 
@@ -99,8 +101,7 @@ export function buildHouse(scene: T.Scene) {
   // Finished internal dimensions, outside faces of shell are beyond the playable bounds.
   box(0, -0.09, 0, HOUSE.width + 0.3, 0.18, HOUSE.depth + 0.3, M.floor);
   proxy(0, -0.1, 0, HOUSE.width, 0.2, HOUSE.depth);
-  box(0, 3.34, 0, HOUSE.width + 0.3, 0.16, HOUSE.depth + 0.3, M.plaster);
-  proxy(0, 3.34, 0, HOUSE.width, 0.16, HOUSE.depth);
+  const vault = buildVault(world, cameraGeometry, cameraMaterial);
   // Real arched opening: side piers and the curved spandrel, not a door on a solid wall.
   wall((-W - 3.5) / 2, -D - 0.09, W - 3.5, 0.18);
   wall((-2.2 + W) / 2, -D - 0.09, W + 2.2, 0.18);
@@ -185,7 +186,7 @@ export function buildHouse(scene: T.Scene) {
   // Village timber details, restrained to preserve the reference's open white walls.
   for (const x of [-W + 0.05, W - 0.05])
     for (const z of [-D + 0.05, D - 0.05]) box(x, 1.63, z, 0.14, 3.26, 0.14, M.dark);
-  for (const z of [-2.9, 0, 2.9]) box(0, 3.17, z, HOUSE.width, 0.2, 0.17, M.dark);
+  for (const z of [-D + 0.05, D - 0.05]) box(0, 3.21, z, HOUSE.width, 0.18, 0.19, M.dark);
   for (const z of [-D + 0.01, D - 0.01]) box(0, 0.1, z, HOUSE.width, 0.2, 0.06, M.wood);
   for (const x of [-W + 0.01, W - 0.01]) box(x, 0.1, 0, 0.06, 0.2, HOUSE.depth, M.wood);
   // Open timber arch to the connecting hall: no leaf, handle or board behind it.
@@ -195,7 +196,18 @@ export function buildHouse(scene: T.Scene) {
   rim.position.set(-2.85, 1.76, -D + 0.04);
   world.add(rim);
   // Plain brown woven rug: reference size and position, not the old central patterned rug.
-  box(RUG.x, 0.015, RUG.z, RUG.w, 0.025, RUG.d, brown);
+  box(RUG.x, 0.015, RUG.z, RUG.w, 0.025, RUG.d, M.rug);
+  for (let i = 0; i < 42; i++)
+    for (const side of [-1, 1])
+      box(
+        RUG.x - RUG.w / 2 + (i * RUG.w) / 41,
+        0.023,
+        RUG.z + side * (RUG.d / 2 + 0.035),
+        0.012,
+        0.008,
+        0.07,
+        M.linen,
+      );
   // Craftsman's settle: exposed oak rails/slats, restrained loose linen cushions.
   const s = LIVING.sofa;
   for (const x of [s.x - 1.03, s.x + 1.03])
@@ -278,16 +290,60 @@ export function buildHouse(scene: T.Scene) {
       r,
     );
   box(0, 1.24, -0.46, 0.74, 0.13, 0.085, M.dark, true, r);
-  // East-wall limestone hearth, opening toward west (not toward the sofa wall).
-  box(3.84, 0.77, -2.1, 0.29, 1.5, 1.7, M.stone);
-  box(3.66, 0.68, -2.1, 0.12, 1.08, 1.16, black);
-  for (const z of [-2.84, -1.36]) {
-    box(3.56, 0.69, z, 0.58, 1.23, 0.25, M.stone);
-    for (let i = 0; i < 5; i++) box(3.255, 0.21 + i * 0.23, z, 0.018, 0.012, 0.25, M.mortar);
+  // A pointed stone hearth, with a weathered plaster hood and a working recess.
+  box(3.84, 0.8, -2.1, 0.08, 1.38, 1.36, black);
+  const surround = new T.Shape();
+  surround.moveTo(-0.84, 0.13);
+  surround.lineTo(0.84, 0.13);
+  surround.lineTo(0.84, 1.7);
+  surround.lineTo(-0.84, 1.7);
+  surround.closePath();
+  const opening = new T.Path();
+  opening.moveTo(-0.57, 0.13);
+  opening.lineTo(-0.57, 0.76);
+  opening.quadraticCurveTo(-0.54, 1.06, 0, 1.36);
+  opening.quadraticCurveTo(0.54, 1.06, 0.57, 0.76);
+  opening.lineTo(0.57, 0.13);
+  opening.closePath();
+  surround.holes.push(opening);
+  const surroundMesh = new T.Mesh(
+    new T.ExtrudeGeometry(surround, {
+      depth: 0.32,
+      bevelEnabled: true,
+      bevelSize: 0.025,
+      bevelThickness: 0.015,
+      bevelSegments: 1,
+      steps: 1,
+    }),
+    M.stone,
+  );
+  surroundMesh.rotation.y = -Math.PI / 2;
+  surroundMesh.position.set(3.64, 0, -2.1);
+  surroundMesh.castShadow = true;
+  surroundMesh.receiveShadow = true;
+  world.add(surroundMesh);
+  // Individual voussoirs read as hand-cut masonry rather than a flat stone box.
+  for (let i = 0; i < 11; i++) {
+    const theta = (Math.PI * i) / 10,
+      y = 0.73 + Math.sin(theta) * 0.68,
+      z = -2.1 + Math.cos(theta) * 0.65;
+    const stone = box(3.29, y, z, 0.12, 0.17, 0.21, i % 3 ? M.stoneLight : M.stoneDark, true);
+    stone.rotation.x = theta - Math.PI / 2;
   }
-  box(3.52, 1.37, -2.1, 0.76, 0.21, 1.98, M.stone);
   box(3.53, 0.065, -2.1, 0.95, 0.13, 1.84, M.stone);
-  box(3.55, 1.55, -2.1, 0.7, 0.12, 2.08, M.oak);
+  box(3.57, 1.73, -2.1, 0.72, 0.11, 1.86, M.oak);
+  const hood = mesh(
+    new T.CylinderGeometry(0.52, 0.82, 1.02, 4),
+    M.plaster,
+    3.7,
+    2.27,
+    -2.1,
+    0.64,
+    1,
+    1,
+  );
+  hood.rotation.y = Math.PI / 4;
+  box(3.8, 3.1, -2.1, 0.42, 0.72, 0.78, M.plaster);
   for (const z of [-2.36, -1.95]) {
     const log = cyl(3.42, 0.25, z, 0.09, 0.58, M.dark);
     log.rotation.x = Math.PI / 2;
@@ -296,6 +352,7 @@ export function buildHouse(scene: T.Scene) {
   fire.position.set(3.07, 0.65, -2.1);
   scene.add(fire);
   const flames = hearthFire(scene);
+  const dust = windowAtmosphere(scene);
   // Entry coat stand: slim turned post with radial hooks and splayed feet.
   const c = LIVING.coat;
   cyl(c.x, 0.95, c.z, 0.035, 1.9);
@@ -315,15 +372,92 @@ export function buildHouse(scene: T.Scene) {
       0.04,
     );
   }
+  // Worn fieldstone skirting, interrupted at every doorway/window; merged by material.
+  const stones = [M.stone, M.stoneLight, M.stoneDark];
+  for (let row = 0; row < 3; row++) {
+    for (let i = 0; i < 17; i++) {
+      const x = -W + 0.18 + i * 0.48 + (row % 2) * 0.22;
+      if (x > W - 0.14) continue;
+      const width = Math.min(0.45, W - x - 0.03);
+      if (x < -3.61 || x > -2.1)
+        box(x, 0.11 + row * 0.2, -D + 0.035, width, 0.18, 0.11, stones[(i + row) % 3], true);
+      if (Math.abs(x) > 0.84)
+        box(x, 0.11 + row * 0.2, D - 0.035, width, 0.18, 0.11, stones[(i + 2 * row) % 3], true);
+    }
+    for (let i = 0; i < 17; i++) {
+      const z = -D + 0.18 + i * 0.48 + (row % 2) * 0.22;
+      if (z > D - 0.14) continue;
+      if (z < -3.1 || z > -0.95)
+        box(W - 0.035, 0.11 + row * 0.2, z, 0.11, 0.18, 0.45, stones[(i + row) % 3], true);
+      box(-W + 0.035, 0.11 + row * 0.2, z, 0.11, 0.18, 0.45, stones[(i + 2 * row) % 3], true);
+    }
+  }
+  // Compact household book press, pottery and baskets: no new room or floor plan.
+  const cabinet = LIVING.bookcase;
+  box(cabinet.x, 0.88, cabinet.z, 0.9, 1.76, 0.12, M.dark);
+  for (const x of [cabinet.x - 0.43, cabinet.x + 0.43])
+    box(x, 0.9, cabinet.z + 0.14, 0.09, 1.8, 0.4, M.oak);
+  for (const y of [0.14, 0.68, 1.22, 1.78])
+    box(cabinet.x, y, cabinet.z + 0.14, 0.94, 0.075, 0.44, M.dark);
+  for (let level = 0; level < 3; level++)
+    for (let i = 0; i < 7; i++) {
+      const x = cabinet.x - 0.32 + i * 0.1,
+        h = 0.25 + ((i * 7 + level * 3) % 5) * 0.027;
+      const book = box(
+        x,
+        0.2 + level * 0.54 + h / 2,
+        cabinet.z + 0.17,
+        0.066,
+        h,
+        0.23,
+        [M.sage, M.rust, M.blue, M.cream][(i + level) % 4],
+      );
+      book.rotation.z = i === 6 ? -0.13 : 0;
+      box(x, 0.2 + level * 0.54 + h * 0.8, cabinet.z + 0.295, 0.062, 0.015, 0.006, M.gold);
+    }
+  const jugGeometry = new T.LatheGeometry(
+    [
+      new T.Vector2(0.065, 0),
+      new T.Vector2(0.09, 0.03),
+      new T.Vector2(0.12, 0.14),
+      new T.Vector2(0.07, 0.23),
+      new T.Vector2(0.045, 0.27),
+      new T.Vector2(0.05, 0.29),
+    ],
+    16,
+  );
+  mesh(jugGeometry, M.pottery, 2.3, 0.65, -3.52, 1, 1, 1);
+  const handle = new T.Mesh(new T.TorusGeometry(0.065, 0.017, 6, 16, Math.PI * 1.6), M.pottery);
+  handle.position.set(2.39, 0.81, -3.52);
+  world.add(handle);
+  for (let i = 0; i < 3; i++) {
+    const book = box(3.5, 1.82 + i * 0.045, -2.56, 0.2, 0.04, 0.27, [M.sage, M.rust, M.cream][i]);
+    book.rotation.y = 0.1 * i;
+  }
+  // Contact shading under furniture/against the stone plinth without expensive SSAO.
+  for (const b of [LIVING.sofa, LIVING.armchair, LIVING.bookcase]) {
+    const ao = mesh(
+      new T.PlaneGeometry(b.w * 1.3, b.d * 1.6),
+      M.ao,
+      b.x,
+      0.029,
+      b.z,
+      1,
+      1,
+      1,
+      false,
+    );
+    ao.rotation.x = -Math.PI / 2;
+  }
   // Camera solids have the same architectural/furniture footprints as the movement motor.
   obstacles.splice(0, obstacles.length, ...Object.values(LIVING).map((b) => ({ ...b })));
   for (const [key, b] of Object.entries(LIVING))
     proxy(
       b.x,
-      key === 'coat' ? 0.95 : key === 'fireplace' ? 0.8 : 0.64,
+      key === 'coat' ? 0.95 : key === 'bookcase' ? 0.9 : key === 'fireplace' ? 1.6 : 0.64,
       b.z,
       b.w,
-      key === 'coat' ? 1.9 : key === 'fireplace' ? 1.6 : 1.28,
+      key === 'coat' ? 1.9 : key === 'bookcase' ? 1.8 : key === 'fireplace' ? 3.2 : 1.28,
       b.d,
     );
   // Local garden backdrop seen through the window, not another explorable stage.
@@ -376,7 +510,10 @@ export function buildHouse(scene: T.Scene) {
   originals.forEach((g) => g.dispose());
   return {
     fire,
-    animateFire: flames.update,
+    animateFire: (time: number) => {
+      flames.update(time);
+      dust.update(time);
+    },
     meshCount: staticHouse.children.length,
     cameraGeometry,
     dispose() {
@@ -385,6 +522,8 @@ export function buildHouse(scene: T.Scene) {
       });
       scene.remove(staticHouse, fire);
       flames.dispose();
+      dust.dispose();
+      vault.dispose();
       cameraMaterial.dispose();
       owned.forEach((m) => m.dispose());
     },

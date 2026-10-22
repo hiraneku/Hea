@@ -3,6 +3,8 @@ export const HOUSE = {
   width: 8.11,
   depth: 8.3,
   upper: 3.3,
+  eaves: 3.25,
+  ridge: 5.9,
   eye: 1.58,
   radius: 0.19,
   walkSpeed: 0.85,
@@ -24,6 +26,7 @@ export const LIVING = {
   sideTable: { x: 2.3, z: -3.52, w: 0.62, d: 0.62, floor: 0 },
   fireplace: { x: 3.55, z: -2.1, w: 1.0, d: 1.9, floor: 0 },
   entryDoor: { x: -0.37, z: 3.62, w: 0.55, d: 1.15, floor: 0 },
+  bookcase: { x: -1.48, z: -3.84, w: 0.92, d: 0.42, floor: 0 },
   coat: { x: -0.93, z: 3.63, w: 0.55, d: 0.55, floor: 0 },
 };
 export const RUG = { x: 0.65, z: -2.06, w: 2.65, d: 1.85 };

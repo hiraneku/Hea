@@ -1066,3 +1066,23 @@ dialog::backdrop {
     font-size: 18px;
   }
 }
+
+/* A single reset destination should not cover the interior with a full-width bar. */
+@media (min-width: 701px) {
+  .with-character .room-nav {
+    left: auto;
+    right: 43px;
+    width: 230px;
+    border: 1px solid rgba(220, 207, 173, 0.32);
+    border-radius: 3px;
+  }
+  .with-character .room-nav .nav-label {
+    display: none;
+  }
+  .with-character .room-nav button[aria-pressed='true'] {
+    background: rgba(44, 39, 27, 0.62);
+    color: #eee3cc;
+    border-left: 0;
+    padding: 15px 18px;
+  }
+}

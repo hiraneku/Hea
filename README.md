@@ -10,7 +10,8 @@ cover. Tanpa backend, akun, atau koneksi eksternal saat bermain.
 
 🏡 **Rumah Senja:** https://hiraneku.github.io/Hea/house/ — interior rumah keluarga
 isekai yang dibangun ulang bertahap, dimulai dari living room 8,11 × 8,3 m
-sesuai denah referensi, terpisah dari arena. Seret untuk melihat,
+sesuai denah referensi, terpisah dari arena. Atmosfer rumah tua: atap berkasau
+tinggi, plester/batu, karpet tenun dan cahaya jendela lembut. Seret untuk melihat,
 joystick/WASD untuk menggerakkan stickman putih. Kamera mengikuti dari belakang
 atau beralih ke first-person dengan tubuh terlihat saat menunduk; pilih ruangan atau denah untuk tur cepat.
 Rincian desain di [docs/HOUSE.md](docs/HOUSE.md).

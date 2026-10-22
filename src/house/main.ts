@@ -34,7 +34,7 @@ app.innerHTML = `
   <button id="mobile-rooms" class="mobile-rooms" aria-expanded="false">Titik awal <span>⌃</span></button>
   <div id="walk-pad" class="walk-pad" role="group" aria-label="Joystick berjalan"><span class="pad-label">GERAK</span><div id="walk-stick"></div><i class="pad-cross-x"></i><i class="pad-cross-y"></i></div>
   <div class="walk-hint"><kbd>W</kbd><span><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><small>BERJALAN</small></div>
-  <footer class="house-footer"><span>HEA / ENVIRONMENT STUDY <b>01</b></span><span id="visit-status">RUMAH SENJA · LIVING ROOM 1</span></footer>
+  <footer class="house-footer"><span>HEA / ENVIRONMENT STUDY <b>01</b></span><span id="visit-status">RUMAH SENJA · RUMAH TUA 1</span></footer>
   <dialog id="plan-dialog"><div class="dialog-head"><div><p class="eyebrow">RUMAH SENJA</p><h2>Ruang untuk hidup.</h2></div><button data-close aria-label="Tutup denah">✕</button></div><div class="plan-tabs"><button data-floor="0" aria-pressed="true">01 · Lantai bawah</button></div><p class="dialog-copy">Denah living room baru. Utara di atas, pintu masuk di bawah.</p><div id="floor-plan"></div><div class="plan-legend"><span><i></i> Ruang keluarga</span><span>8,11 × 8,3 m · living room</span></div></dialog>
   <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse. Kamera mengikuti stickman; tombol Kamera mengganti ke first-person. Menunduk untuk melihat tubuh dan kaki.</span></li><li><strong>Berjalan</strong><span>Gerakkan stickman dengan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Rumah baru, tahap pertama</strong><span>Living room mengikuti denah referensi. Ruangan lain dan akses keluar belum dibangun; lorong lengkung dalam sudah terbuka.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
   <div id="transition" aria-hidden="true"></div>`;
@@ -43,8 +43,8 @@ const view = document.querySelector<HTMLDivElement>('#view')!;
 const loading = document.querySelector<HTMLDivElement>('#loading')!;
 const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const scene = new T.Scene();
-scene.background = new T.Color('#c9d5ca');
-scene.fog = new T.Fog('#c9d5ca', 25, 85);
+scene.background = new T.Color('#bec3b0');
+scene.fog = new T.Fog('#bec3b0', 25, 85);
 const camera = new T.PerspectiveCamera(67, 1, 0.07, 100);
 camera.rotation.order = 'YXZ';
 let baseFov = 67;
@@ -59,14 +59,14 @@ renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = T.PCFSoftShadowMap;
 renderer.toneMapping = T.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.2;
+renderer.toneMappingExposure = 1.12;
 renderer.outputColorSpace = T.SRGBColorSpace;
 view.append(renderer.domElement);
 renderer.domElement.setAttribute('aria-label', 'Pemandangan interior Rumah Senja');
-scene.add(new T.HemisphereLight('#f2edd8', '#a6977e', 1.8));
-const sun = new T.DirectionalLight('#ffe1af', 3.4);
-sun.position.set(-9, 10, 8);
-sun.target.position.set(0, 1, 0);
+scene.add(new T.HemisphereLight('#e9e6d4', '#93866b', 1.4));
+const sun = new T.DirectionalLight('#fff0cb', 3.3);
+sun.position.set(2, 10, -9);
+sun.target.position.set(-0.4, 0, -1);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.left = -10;
@@ -81,6 +81,11 @@ sun.shadow.bias = -0.00015;
 sun.shadow.autoUpdate = false;
 sun.shadow.needsUpdate = true;
 scene.add(sun, sun.target);
+// Low, upward daylight bounce keeps rafters readable without a ceiling lamp.
+const floorBounce = new T.DirectionalLight('#e4d4ad', 1.25);
+floorBounce.position.set(0, 0.4, 0);
+floorBounce.target.position.set(0, 5.9, 0);
+scene.add(floorBounce, floorBounce.target);
 // Daylight and the hearth only: no overhead lamp or invisible ceiling point light.
 
 let house: ReturnType<typeof buildHouse>;

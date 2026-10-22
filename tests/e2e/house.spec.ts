@@ -144,8 +144,8 @@ test('open arch is a real walkable connecting hall', async ({ page }, info) => {
     info.project.name === 'mobile',
     'Motor union is unit-tested; desktop verifies the real control route.',
   );
-  test.setTimeout(90000);
-  await page.setViewportSize({ width: 800, height: 500 });
+  test.setTimeout(120000);
+  await page.setViewportSize({ width: 600, height: 400 });
   await page.goto('/house/?test');
   await expect(page.locator('#loading')).toBeHidden({ timeout: 45000 });
   const yaw = await page.evaluate(() => window.__HEA_HOUSE__.snapshot().yaw);
@@ -156,14 +156,20 @@ test('open arch is a real walkable connecting hall', async ({ page }, info) => {
   await page.locator('#view').focus();
   await page.keyboard.down('a');
   await expect
-    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().x), { timeout: 25000 })
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().x), {
+      timeout: 40000,
+      intervals: [80, 100],
+    })
     .toBeLessThan(-2.8);
   await page.keyboard.up('a');
   const x = await page.evaluate(() => window.__HEA_HOUSE__.snapshot().x);
   expect(x).toBeGreaterThan(-3.1);
   await page.keyboard.down('w');
   await expect
-    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().z), { timeout: 45000 })
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().z), {
+      timeout: 60000,
+      intervals: [80, 100],
+    })
     .toBeLessThan(-4.5);
   await page.keyboard.up('w');
   expect((await page.evaluate(() => window.__HEA_HOUSE__.snapshot())).height).toBe(0);

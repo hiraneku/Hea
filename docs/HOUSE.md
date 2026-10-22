@@ -22,8 +22,8 @@ Git sebelum revamp. Ruang lain menunggu referensi berikutnya.
   tanpa daun pintu. Ujung lorong masih tertutup karena ruang berikutnya belum dibangun.
 
 `src/house/layout.ts` menyimpan dimensi dan footprint furnitur bersama untuk
-scene, collision, proxy kamera dan denah. Tinggi plafon 3,3 m merupakan keputusan
-pemodelan tahap ini, bukan ukuran yang dinyatakan pada gambar pengguna.
+scene, collision, proxy kamera dan denah. Atap terbuka kini memiliki tepi 3,25 m dan puncak 5,9 m.
+Ini keputusan pemodelan atmosfer dari referensi, bukan ukuran CAD pengguna.
 
 ## Eksplorasi
 
@@ -60,14 +60,38 @@ pemodelan tahap ini, bukan ukuran yang dinyatakan pada gambar pengguna.
   panel besar di luar pintu yang merusak tampilan dihapus. Collision daun pintu
   mencegah karakter/kamera menembusnya. Daun pintu masih statis, bukan interaksi.
 
+## Atmosfer rumah tua dari referensi ilustrasi
+
+Denah 8,11 × 8,3 m dan kontrol tetap, bukan menyalin keseluruhan bangunan
+cutaway pada gambar. Tidak menambah dapur, tangga, NPC, atau lantai baru.
+
+- Plafon datar diganti atap miring terbuka, papan kayu tua, kasau, collar beam,
+  king post dan penopang. Proxy kamera mengikuti lereng, tidak menyisakan bidang
+  collision plafon datar lama.
+- Dinding plester gading bernoda halus/retak rambut, batu kaki dinding, lantai
+  flagstone berwarna tanah, karpet tenun berpinggir/fringe dan kain linen.
+- Gable utara mempunyai bukaan segitiga sungguhan dengan tracery lingkaran.
+  Daylight melewati bukaan dan memproyeksikan bentuk jendela ke lantai; kaca
+  dibuat sedikit emissive untuk menggambarkan langit terang, bukan lampu.
+- Arah matahari, hemisphere dan pantulan daylight dari lantai diatur untuk
+  menyisakan sudut teduh tanpa membuat kasau hitam. Pantulan bawah adalah
+  aproksimasi pencahayaan, **bukan lampu/fixture plafon**. Tidak memakai GI/SSAO
+  real-time atau janji hasil identik dengan ilustrasi referensi.
+- Perapian menyatu dengan hood plester dan lengkungan batu potong. Buku, rak
+  kecil dan kendi memberi kesan dihuni, tetap di tepi ruangan dan memiliki
+  collider untuk rak. Jarak karpet/kursi dari tungku tetap dipertahankan.
+- 48 motes debu kecil mengisi jalur cahaya; bukan full-screen fog atau simulasi
+  volumetrik mahal. Reduced-motion menghentikan gerak debu dan variasi api.
+- Navigasi desktop diperkecil agar tidak menutupi lantai dengan panel putih besar.
+
 ## Teknis dan pemeriksaan
 
 Geometri/material dibuat lokal tanpa CDN atau aset eksternal baru. Scene dibatch
-menjadi 18 kelompok statis; bayangan arsitektur dicache, avatar memakai contact
+menjadi sekitar 30 kelompok statis; bayangan arsitektur dicache, avatar memakai contact
 decal. Angka ini bukan janji FPS pada semua HP. Arena dan controller karakter
 bersama tidak diubah oleh revamp.
 
-- 325 unit test / 30 file lulus, termasuk dimensi, batas tahap tunggal,
+- 327 unit test / 31 file lulus, termasuk dimensi, batas tahap tunggal,
   susunan furnitur/jalur kosong, collision/sliding/substep dan kamera.
 - Delapan kasus browser desktop/HP lulus: startup independen, denah satu tahap,
   tidak ada overflow, drag look, WASD/joystick, pelepasan input, posisi avatar
@@ -86,3 +110,19 @@ bersama tidak diubah oleh revamp.
 Review: `node --experimental-strip-types scripts/review-house.mjs` dengan dev
 server aktif; `HOUSE_REVIEW_URL` dapat menunjuk build produksi berprefix `/Hea/`.
 Artefak hanya di `.cache/`, tidak ikut aset publik.
+
+### Validasi atmosfer rumah tua
+
+- Full unit suite 327 tes / 31 file lulus, termasuk dua tes baru untuk tinggi
+  atap, lereng dan bukaan segitiga yang benar-benar bisa dilewati ray.
+- Putaran browser: delapan kasus desktop/HP lulus; satu kasus jalur lorong desktop
+  timeout saat x = −2,72 m dengan motor masih bergerak pada rasterisasi software.
+  Setelah viewport navigasi diperkecil ke 600 × 400 dan budget wall-clock disesuaikan
+  (kecepatan game tidak diubah), pengujian ulang jalur lorong lulus. Kasus lorong
+  HP dilewati secara eksplisit; tidak diklaim telah diuji melalui kontrol HP.
+- Build produksi `/Hea/house/` direview pada desktop dan HP: avatar/kontrol kamera,
+  tubuh saat menunduk, pintu masuk dan atmosfer, tanpa page error. Kasau juga
+  diperiksa lewat pandangan ke atas; daylight/jendela menampilkan tracery di lantai.
+- Shader/tekstur dan shadow cache tetap WebGL lokal, tanpa workflow publikasi baru.
+  Ini pemeriksaan sampel dan bukan janji FPS HP, kesamaan identik dengan ilustrasi,
+  atau penerimaan estetika pengguna.

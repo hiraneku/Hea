@@ -7,6 +7,18 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Rumah tua — arsitektur dan atmosfer referensi ilustrasi
+
+- Atap terbuka tinggi 5,9 m, kasau/papan kayu tua, truss dan gable dengan bukaan
+  segitiga berornamen. Collision kamera mengikuti atap miring, tanpa plafon lama.
+- Flagstone, plester bernoda halus, kaki dinding batu, karpet tenun dan linen;
+  perapian berlengkung dengan hood plester, rak buku dan keramik keseharian.
+- Daylight dari jendela tinggi, pantulan lantai, sudut-sudut teduh dan debu kecil
+  di jalur cahaya. Tidak menambahkan lampu atas atau tahap rumah baru.
+- Denah, kecepatan 0,85 m/s, first-person bertubuh, lorong dan jarak aman furnitur
+  dipertahankan. Panel navigasi desktop diperkecil agar interior lebih terlihat.
+- 327 unit test lulus, termasuk clearance atap dan bukaan jendela sungguhan.
+
 ### Living room — koreksi gerak, first-person dan furnitur
 
 - Jalan dalam rumah diperlambat dari 1,65 menjadi 0,85 m/s.
