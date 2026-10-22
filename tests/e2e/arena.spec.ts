@@ -50,6 +50,9 @@ test('one-boss menu, settings, guide, reference and live demo', async ({ page })
     true,
   );
   await page.locator('#settings-button').click();
+  await expect(page.locator('#boss-mode')).toHaveValue('battle');
+  await page.locator('#boss-mode').selectOption('silent');
+  await page.locator('#boss-mode').selectOption('battle');
   await page.locator('#quality').selectOption('high');
   await page.locator('#quality').selectOption('low');
   // The performance readout is opt-in: off, the clock line is just the frame rate; on, it
@@ -80,6 +83,26 @@ test('one-boss menu, settings, guide, reference and live demo', async ({ page })
   await page.locator('#demo-exit').click();
   expect((await state(page)).mode).toBe('menu');
   expect(errors).toEqual([]);
+});
+
+test('silent boss mode parks an attackable target and cancels its attacks', async ({ page }) => {
+  await load(page);
+  await page.locator('#settings-button').click();
+  await page.locator('#boss-mode').selectOption('silent');
+  await page.locator('#panel-done').click();
+  await scenario(page, 'flight');
+  await step(page, 2);
+  const parked = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  await expect(page.locator('#boss-action')).toHaveText('BOSS DIAM · TETAP BISA DISERANG');
+  expect(parked.attacksFired).toEqual({ fire: 0, missile: 0, hammer: 0, vortex: 0 });
+  expect(parked.bossPosition).toEqual(expect.any(Array));
+  const before = await state(page);
+  await page.evaluate(() => window.__HEA_DEBUG__.harness!.damageBoss(18));
+  const after = await state(page);
+  expect(after.boss.health).toBe(before.boss.health - 18);
+  await step(page, 0.5);
+  const stillParked = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
+  expect(stillParked.bossPosition).toEqual(parked.bossPosition);
 });
 
 test('a slow machine loses resolution before it loses its shadows', async ({ page }, info) => {
@@ -617,7 +640,7 @@ test('dash speed has a smooth boost tail, and shield patches cover separate near
   expect(d.shieldPatches.length).toBeGreaterThanOrEqual(2);
   expect(d.shieldPatches.length).toBeLessThanOrEqual(3);
   expect(d.shieldPatches.length + d.patchReuses).toBe(3);
-  expect(d.shieldPatches.some((p) => p.offset[0] < -1)).toBe(true);
+  expect(d.shieldPatches.some((p) => p.offset[0] < -0.5)).toBe(true);
   // Neighbouring pieces are fitted onto one lattice, edge to edge: no piece covers another.
   expect(d.patchTiling.overlaps).toBe(0);
   expect(d.patchTiling.clusters).toBe(1);
@@ -654,12 +677,12 @@ test('a standing shield patch keeps blocking later shots on the same lane instea
   await step(page, 0.45);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
   expect((await state(page)).health).toBe(100);
-  // Three hits are well within the budget of five: the patch stands, cracked but whole.
+  // Three hits are well within the ten-hit budget: the patch stands, cracked but whole.
   expect(d.patchShatters).toBe(0);
   expect(d.shieldPatches).toHaveLength(1);
   expect(d.patchGaps).toBe(0);
-  // A six-bolt burst on one lane: the fifth hit shatters the patch, the sixth gets through the
-  // hole, and the body takes it.
+  // Eleven bolts on one lane: ten impacts shatter the patch, the eleventh crosses the hole,
+  // and the body takes that last hit.
   await scenario(page, 'shield-volley');
   await step(page, 1.2);
   d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());

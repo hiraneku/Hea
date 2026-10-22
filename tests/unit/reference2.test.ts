@@ -43,6 +43,14 @@ describe('weapon-aware cover checks', () => {
 });
 
 describe('reference2 polyhex pieces', () => {
+  it('scales the cell pattern to the projectile class', () => {
+    const small = Array.from({ length: 24 }, (_, i) => shieldLayout(i, 1.3).length),
+      large = Array.from({ length: 24 }, (_, i) => shieldLayout(i, 2.6).length);
+    expect(Math.min(...small)).toBeGreaterThanOrEqual(3);
+    expect(Math.max(...small)).toBeLessThanOrEqual(5);
+    expect(Math.min(...large)).toBeGreaterThanOrEqual(9);
+    expect(Math.max(...large)).toBeLessThanOrEqual(12);
+  });
   it('uses 5–10 edge-connected hex cells without duplicates', () => {
     for (let i = 0; i < 60; i++) {
       const cells = shieldLayout(i),

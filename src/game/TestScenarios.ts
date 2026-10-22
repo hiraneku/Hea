@@ -73,9 +73,9 @@ export const SCENARIOS: Record<string, Scenario> = {
     ).map(([x, y]) => fire([x, y, -3], [0, 0, 30], true)),
   },
   'shield-volley': {
-    note: 'A sustained burst on one lane: the patch shatters after its hit budget, then leaks.',
+    note: 'Eleven bolts on one lane: ten hits shatter the patch and the eleventh leaks through.',
     orient: [0, 0],
-    shots: [-3, -5.6, -8.2, -10.8, -13.4, -16].map((z) => fire([0.4, 0.2, z], [0, 0, 30], true)),
+    shots: Array.from({ length: 11 }, (_, i) => fire([0.4, 0.2, -3 - i * 2.6], [0, 0, 30], true)),
   },
   wall: {
     note: 'Thrown west into the low, thick "cover" block from 1.3 m off its east face.',

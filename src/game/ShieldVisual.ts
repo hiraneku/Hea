@@ -235,9 +235,19 @@ export function crackGeometry(
 }
 
 /** Connected polyhex pieces: different cell counts/layouts, always the same hexagonal prism. */
-export function shieldLayout(serial: number): HexCell[] {
+export function shieldLayout(serial: number, scale?: number): HexCell[] {
+  // Large incoming shots need a broad, multi-cell catch surface; fine bolts use a compact
+  // three/four-cell sigil. Unscaled calls preserve the historic default layout for diagnostics.
+  const counts =
+    scale === undefined
+      ? HEX_COUNTS
+      : scale < 1.45
+        ? ([3, 4, 5, 3, 5, 4] as const)
+        : scale < 2.1
+          ? ([5, 6, 7, 6, 5, 7] as const)
+          : ([9, 10, 11, 12, 10, 11] as const);
   const random = seededRandom(7411 + serial * 127),
-    count = HEX_COUNTS[serial % HEX_COUNTS.length];
+    count = counts[serial % counts.length];
   const cells: HexCell[] = [{ q: 0, r: 0 }],
     occupied = new Set(['0,0']);
   while (cells.length < count) {
@@ -259,8 +269,8 @@ export function shieldLayout(serial: number): HexCell[] {
   }
   return cells;
 }
-export function shieldPattern(serial: number) {
-  return `hex-${shieldLayout(serial).length}`;
+export function shieldPattern(serial: number, scale?: number) {
+  return `hex-${shieldLayout(serial, scale).length}`;
 }
 
 /** Per-patch reveal state shared by the three materials of a patch (0 hidden … 1 standing). */
@@ -316,8 +326,8 @@ function revealMaterial<M extends THREE.Material>(material: M, reveal: ShieldRev
   return material;
 }
 
-export function makeShieldPatch(serial: number): THREE.Group {
-  const cells = shieldLayout(serial),
+export function makeShieldPatch(serial: number, scale?: number): THREE.Group {
+  const cells = shieldLayout(serial, scale),
     radius = HEX_RADIUS,
     depth = HEX_DEPTH,
     centers = cells.map((c) => cellPoint(c.q, c.r, radius));
@@ -504,7 +514,7 @@ export function makeShieldPatch(serial: number): THREE.Group {
       ),
     ),
   );
-  group.userData.pattern = shieldPattern(serial);
+  group.userData.pattern = shieldPattern(serial, scale);
   group.userData.cells = cells;
   group.userData.centroid = [center.x, center.y];
   group.userData.count = cells.length;

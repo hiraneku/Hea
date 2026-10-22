@@ -7,6 +7,17 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Arena — tuning and temporary public-surface changes
+
+- Nova now reads as a concussive shove: fractured pressure wave, directional magic shards, debris and dust replace the soft blessing-like shell/pillar treatment; damage and launch physics are unchanged.
+- Brought the chase camera closer (new default 5.1 m, adjustable down to 3.8 m) and migrated the previous untouched 6.2 m default while preserving explicitly versioned preferences.
+- Aegis patches now survive 10 hits. Their connected hex patterns scale with incoming projectile size, and the existing trajectory prediction/side-aware interception remains the basis for placement.
+- Added a saved Settings choice between **Mode battle** and **Boss diam**. Silent mode cancels boss attacks and summons, parks the boss, and still allows it to be damaged and knocked around.
+- Magic sparks now mix directional slivers, diamonds and four-ray motes instead of identical round dots.
+- Temporarily unpublished Rumah Senja: removed its build entry, public route, bundles and navigation link while keeping its source and design notes under `src/house/`.
+
+### Rumah Senja — pemolesan arsitektur, cahaya, dan gerak kamera
+
 ### Rumah Senja — pemolesan arsitektur, cahaya, dan gerak kamera
 
 - Perapian dirapikan dengan hood berbentuk bahu meruncing dan voussoir bata/batu radial berjarak seragam; kayu kini menampilkan potongan ujung, bark gelap dan tepi bara.
@@ -54,7 +65,7 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 - Kamera pintu masuk dibatasi agar tidak keluar/terhalang daun pintu. Collider
   furnitur dipakai bersama scene/motor/proxy kamera/denah. 21 batch statis.
 - 321 unit test dan delapan kasus browser desktop/HP lulus; review visual
-  spawn, pandangan mata, dan denah. Detail serta keterbatasan: docs/HOUSE.md.
+  spawn, pandangan mata, dan denah. Detail serta keterbatasan: src/house/HOUSE.md.
 
 ### Rumah Senja — stickman yang bisa dimainkan
 
@@ -73,7 +84,7 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 - Eksplorasi kamera setinggi mata dengan joystick/WASD, collision, tangga 17
   anak dan void lantai atas; tur lima ruangan serta denah dua lantai.
 - Batch geometri dan cache shadow statis untuk mengurangi beban perangkat.
-  Arena, karakter, sprint dan fisika gameplay tetap utuh. Rincian: docs/HOUSE.md.
+  Arena, karakter, sprint dan fisika gameplay tetap utuh. Rincian: src/house/HOUSE.md.
 
 ### SPRINT 2 — koreksi kemiripan pose referensi
 

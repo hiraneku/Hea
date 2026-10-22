@@ -124,7 +124,7 @@ describe('shield patch registry', () => {
       expect(registry.absorb(patch, 1)).toBe('held');
       expect(patch.hits).toBe(n);
     }
-    expect(DUEL.shieldPatchHits).toBe(5);
+    expect(DUEL.shieldPatchHits).toBe(10);
     expect(registry.absorb(patch, 1)).toBe('shattered');
     expect(patch.hits).toBe(DUEL.shieldPatchHits);
     expect(registry.patches).toHaveLength(0);
@@ -213,7 +213,7 @@ describe('shield patch registry', () => {
     expect(registry.clusterCount).toBe(1);
     // No cell of the second piece coincides with a cell of the first: puzzle pieces, not a heap.
     const cellsOf = (serial: number, anchor: { q: number; r: number }) =>
-      shieldLayout(serial).map((c) => `${c.q + anchor.q},${c.r + anchor.r}`);
+      shieldLayout(serial, scale).map((c) => `${c.q + anchor.q},${c.r + anchor.r}`);
     const a = new Set(cellsOf(1, first.anchor));
     for (const key of cellsOf(2, second.anchor)) expect(a.has(key)).toBe(false);
     // A shot on a different lane founds its own lattice instead of warping onto this one.

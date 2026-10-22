@@ -70,5 +70,16 @@ describe('readSettings accessibility fields', () => {
     expect(settings.threatIndicator).toBe(DEFAULT_SETTINGS.threatIndicator);
     expect(settings.hudScale).toBe(DEFAULT_SETTINGS.hudScale);
     expect(settings.bindings).toEqual(DEFAULT_BINDINGS);
+    expect(settings.bossMode).toBe('battle');
+  });
+
+  it('restores the silent target mode and rejects unknown mode values', () => {
+    expect(stored({ bossMode: 'silent' }).bossMode).toBe('silent');
+    expect(stored({ bossMode: 'sleep' }).bossMode).toBe('battle');
+  });
+
+  it('brings the old default chase distance in closer while preserving versioned preferences', () => {
+    expect(stored({ cameraDistance: 6.2 }).cameraDistance).toBe(DEFAULT_SETTINGS.cameraDistance);
+    expect(stored({ cameraDistance: 6.2, cameraVersion: 2 }).cameraDistance).toBe(6.2);
   });
 });

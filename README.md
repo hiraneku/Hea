@@ -8,13 +8,7 @@ cover. Tanpa backend, akun, atau koneksi eksternal saat bermain.
 
 ▶ **Mainkan:** https://hiraneku.github.io/Hea/
 
-🏡 **Rumah Senja:** https://hiraneku.github.io/Hea/house/ — interior rumah keluarga
-isekai yang dibangun ulang bertahap, dimulai dari living room 8,11 × 8,3 m
-sesuai denah referensi, terpisah dari arena. Atmosfer rumah tua: atap berkasau
-tinggi, plester/batu, karpet tenun dan cahaya jendela lembut. Seret untuk melihat,
-joystick/WASD untuk menggerakkan stickman putih. Kamera mengikuti dari belakang
-atau beralih ke first-person dengan tubuh terlihat saat menunduk; pilih ruangan atau denah untuk tur cepat.
-Rincian desain di [docs/HOUSE.md](docs/HOUSE.md).
+🏡 **Rumah Senja dijeda sementara.** Rutenya dan aset publiknya dilepas dari situs; source tetap tersimpan di `src/house/` dan dapat dipulihkan nanti.
 
 Dibangun dari repo yang awalnya hanya berisi `reference.mp4`; video itu (dan
 `reference2.mp4`) adalah acuan arena greybox, tembakan api, laser cyan, perisai
@@ -53,7 +47,7 @@ menembakkan sinar penyapu proyektil; tahan: lancip berat pembongkar dinding),
 ia tidak bisa lolos sampai kamu melepasnya).
 
 **Aegis** aktif otomatis tanpa cooldown dan tanpa biaya, menutupi busur 240° di depan
-dan samping tubuh — **belakang adalah titik buta**. Satu patch perisai menahan 5 hit
+dan samping tubuh — **belakang adalah titik buta**. Satu patch perisai menahan 10 hit
 lalu pecah dan meninggalkan lubang sesaat di arah itu. Serangan berat boss membekukan
 kontak sejenak, lalu menghempaskanmu sebagai ragdoll menembus arena yang destruktibel.
 

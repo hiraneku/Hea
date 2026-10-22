@@ -128,6 +128,7 @@ export class Game {
   private readonly impactFrame = new ImpactFrame();
   private settings: Settings;
   private settingsApplied = false;
+  private bossModeApplied: Settings['bossMode'] = 'battle';
   private mode: Mode = 'menu';
   private returnMode: Mode = 'playing';
   private projectileSystem!: ProjectileSystem;
@@ -306,6 +307,7 @@ export class Game {
     private emit: (event: GameEvent) => void,
   ) {
     this.settings = settings;
+    this.bossModeApplied = 'battle';
     this.renderer = new THREE.WebGLRenderer({
       canvas,
       antialias: true,
@@ -855,6 +857,7 @@ export class Game {
     this.outcome = null;
     this.finishTimer = 0;
     this.testIdleBoss = this.testInvulnerable = false;
+    this.bossModeApplied = 'battle';
     this.lastImpact = null;
     this.attacksFired = { fire: 0, missile: 0, hammer: 0, vortex: 0 };
     this.clearWells();
@@ -1863,6 +1866,21 @@ export class Game {
         return;
       }
     }
+    const silentBoss = this.settings.bossMode === 'silent';
+    if (silentBoss) {
+      // A mode change takes effect immediately: no new tells, queued volleys, or lingering
+      // boss shots. Spell knockback and damage remain enabled, so this is still a live target.
+      if (this.bossModeApplied !== 'silent') {
+        b.director.interrupt();
+        this.pendingFire = [];
+        this.firePacket = null;
+        for (let i = this.projectiles.length - 1; i >= 0; i--)
+          if (this.projectiles[i].kind !== 'player') this.removeProjectile(i);
+        this.clearWells();
+        this.clearEnemies();
+      }
+      this.bossModeApplied = 'silent';
+    } else this.bossModeApplied = 'battle';
     // FALL holds the boss where it struck: no tactics, no director, no way out while
     // the caster keeps the button down. The descent itself is driven here, so the slam
     // crosses the air at full slam speed inside a frame or two.
@@ -1903,53 +1921,59 @@ export class Game {
     this.sightClock -= dt;
     this.seekClock -= dt;
     this.breachClock -= dt;
-    if (this.sightClock <= 0 && !b.tumble.physical) {
+    if (!silentBoss && this.sightClock <= 0 && !b.tumble.physical) {
       this.sightClock = 0.1;
       this.updateBossSight();
     }
     this.blockedTime = this.bossLane.mode === 'blocked' ? this.blockedTime + dt : 0;
     const recovery = b.tumble.physical ? 0 : recoveryBlend(b.knockTime) * (1 - b.tumble.weight);
     const eye = this.player.clone().addScaledVector(UP, 0.9);
-    const motor = b.tactics.step(
-      dt,
-      b.position,
-      this.player,
-      b.director.attack,
-      b.director.stage,
-      b.director.pattern,
-      // A manoeuvre waypoint must keep the player in sight and be reachable in a straight
-      // flight; otherwise the local steering would climb over a monolith to get there.
-      (goal) =>
-        this.world.firingLane(goal, eye, b.director.attack).mode !== 'blocked' &&
-        !this.trace(b.position, goal, false, 1.2),
-      this.bossLane.mode === 'clear',
-      b.director.stage === 'telegraph' && !b.tumble.physical ? b.director.elapsed : Infinity,
-    );
-    if (b.knockTime === 0)
+    const motor = silentBoss
+      ? new THREE.Vector3()
+      : b.tactics.step(
+          dt,
+          b.position,
+          this.player,
+          b.director.attack,
+          b.director.stage,
+          b.director.pattern,
+          // A manoeuvre waypoint must keep the player in sight and be reachable in a straight
+          // flight; otherwise the local steering would climb over a monolith to get there.
+          (goal) =>
+            this.world.firingLane(goal, eye, b.director.attack).mode !== 'blocked' &&
+            !this.trace(b.position, goal, false, 1.2),
+          this.bossLane.mode === 'clear',
+          b.director.stage === 'telegraph' && !b.tumble.physical ? b.director.elapsed : Infinity,
+        );
+    if (!silentBoss && b.knockTime === 0)
       this.nav.steer(b.position, motor, b.tactics.goal, this.player, this.time);
     // Obstacle avoidance must never override the duel's minimum standoff.
     const away = b.position.clone().sub(this.player);
     away.y = 0;
     const distance = away.length();
-    if (distance > 0.001 && distance < DUEL.nearRange) {
+    if (!silentBoss && distance > 0.001 && distance < DUEL.nearRange) {
       away.divideScalar(distance);
       const outward = motor.dot(away),
         retreat = Math.min(12, (DUEL.nearRange - distance) * 2.5);
       if (outward < retreat) motor.addScaledVector(away, retreat - outward);
     }
-    motor.clampLength(0, b.tactics.retreating ? BOSS_MOTOR.retreat : BOSS_MOTOR.max);
+    if (!silentBoss)
+      motor.clampLength(0, b.tactics.retreating ? BOSS_MOTOR.retreat : BOSS_MOTOR.max);
     motor.multiplyScalar(0.035 + recovery * 0.965);
     // The weight outlives the spell a little: after a release the boss climbs and moves
     // as if still carrying it, before it is fully itself again.
-    if (this.fallLinger > 0) {
+    if (!silentBoss && this.fallLinger > 0) {
       motor.multiplyScalar(0.35);
       if (motor.y > 0) motor.y *= 0.3;
     }
-    b.impulse.y -= (b.tumble.physical ? HEAVY.gravity : 14 * (1 - recovery)) * dt;
+    if (!silentBoss || b.tumble.physical || b.knockTime > 0)
+      b.impulse.y -= (b.tumble.physical ? HEAVY.gravity : 14 * (1 - recovery)) * dt;
+    else b.impulse.y = 0;
     // The motor's exponential smoothing (time constant ~0.19 s) already rounds waypoint
     // changes off; the banked, slerped presentation in Boss.present() does the rest, so the
     // navigation itself is left exactly as tuned.
-    b.velocity.lerp(motor, 1 - Math.exp(-dt * 5.2));
+    if (silentBoss) b.velocity.set(0, 0, 0);
+    else b.velocity.lerp(motor, 1 - Math.exp(-dt * 5.2));
     const extent =
         BOSS.extent * (1 - b.tumble.weight) +
         supportHeight(
@@ -1989,13 +2013,14 @@ export class Game {
     }
     if (!b.tumble.physical) b.impulse.y = damp(b.impulse.y, 0, recovery * 6, dt);
     b.group.position.copy(b.position);
-    b.group.lookAt(this.player.clone().add(UP));
+    if (!silentBoss) b.group.lookAt(this.player.clone().add(UP));
     b.group.updateMatrixWorld(true);
     if (
       !b.alive ||
       b.knockTime > 0.15 ||
       b.tumble.weight > 0.25 ||
       this.testIdleBoss ||
+      silentBoss ||
       this.bossLane.mode === 'blocked' ||
       this.hitPause.remaining > 0
     )
@@ -2506,24 +2531,12 @@ export class Game {
       // A charged Nova is the same blast grown half as large again: wider reach, a harder
       // throw, a bigger wound in a wall; its damage is unchanged.
       const grow = charge.radius;
-      this.fx.impact(end, '#dff9ff', true, grow);
-      this.fx.glyph(end, this.camera.position.clone().sub(end), '#dcf9ff', 1.55 * grow, 0.6);
-      // The detonation is a real event: a shell of displaced air, a pillar of spent light,
-      // the room lit for a heartbeat — and the ground keeps the scar, cooling slowly.
-      this.fx.energyShell(end, '#dff6ff', 4.6 * grow, 0.5);
-      this.fx.flashLight(end, '#cdefff', 300 * grow, 26 * grow, 0.6);
+      // Hard violet pressure ring, hot flash, torn directional shards and ground grit make
+      // the visual read as a concussive launch. Damage, range and knockback stay untouched.
+      this.fx.novaBlast(end, direction, grow, charge.charged);
       const groundY = this.world.surfaceHeight(end.x, end.z);
-      if (end.y - groundY < 4) {
-        this.fx.pillar(
-          new THREE.Vector3(end.x, groundY, end.z),
-          '#bfe9ff',
-          1.6 * grow,
-          (charge.charged ? 13 : 8) * grow,
-          0.75,
-        );
-        this.fx.craterGlow(new THREE.Vector3(end.x, groundY, end.z), 3.4 * grow, '#79cfff');
-      }
-      if (charge.charged) this.fx.burst(end, '#fff1c9', 36, 7, 0.5, 2);
+      if (end.y - groundY < 4)
+        this.fx.craterGlow(new THREE.Vector3(end.x, groundY, end.z), 3.4 * grow, '#ff9358');
       if (hit?.obstacle)
         this.world.damageWall(
           hit.obstacle,
@@ -3340,6 +3353,7 @@ export class Game {
         this.renderNeeded = true;
       },
       castBoss: (attack: AttackId, index = 0) => this.bossAttack(attack, index),
+      damageBoss: (amount: number) => this.damageBoss(amount, new THREE.Vector3()),
       scene: () => this.scene,
       place: (player: number[], boss: number[]) => {
         this.player.fromArray(player);

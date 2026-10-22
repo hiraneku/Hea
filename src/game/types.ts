@@ -1,6 +1,7 @@
 export type Mode = 'menu' | 'playing' | 'paused' | 'demo' | 'gameover' | 'victory';
 export type Quality = 'auto' | 'low' | 'high';
 export type CameraMode = 'third' | 'first';
+export type BossMode = 'battle' | 'silent';
 export type SpellId = 0 | 1 | 2 | 3;
 /** HUD/telegraph palette: the standard one, or a colour-vision-safe alternative. */
 export type ColorVision = 'standard' | 'deuteranopia' | 'protanopia' | 'tritanopia';
@@ -115,6 +116,8 @@ export interface Settings {
   fovFirst: number;
   /** How far behind the body the chase camera rests, metres. */
   cameraDistance: number;
+  /** Battle lets the boss fight normally; silent keeps it stationary and attackable. */
+  bossMode: BossMode;
   /** Show frame time, draw calls and render scale beside the clock, for judging performance. */
   perfHud: boolean;
   /** Snap spells to the boss in the sights (and let Bara seekers home) — on by default. */
@@ -137,7 +140,7 @@ export interface Settings {
 export const CAMERA_RANGES = {
   fovThird: { min: 65, max: 90 },
   fovFirst: { min: 75, max: 105 },
-  cameraDistance: { min: 5, max: 8 },
+  cameraDistance: { min: 3.8, max: 8 },
 } as const;
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -149,7 +152,8 @@ export const DEFAULT_SETTINGS: Settings = {
   camera: 'third',
   fovThird: 74,
   fovFirst: 82,
-  cameraDistance: 6.2,
+  cameraDistance: 5.1,
+  bossMode: 'battle',
   perfHud: false,
   aimAssist: true,
   threatIndicator: true,
@@ -385,10 +389,13 @@ export function readSettings(): Settings {
       fovThird: ranged(raw.fovThird, CAMERA_RANGES.fovThird, fallback.fovThird),
       fovFirst: ranged(raw.fovFirst, CAMERA_RANGES.fovFirst, fallback.fovFirst),
       cameraDistance: ranged(
-        raw.cameraDistance,
+        raw.cameraVersion === 2 || raw.cameraDistance !== 6.2
+          ? raw.cameraDistance
+          : fallback.cameraDistance,
         CAMERA_RANGES.cameraDistance,
         fallback.cameraDistance,
       ),
+      bossMode: raw.bossMode === 'silent' ? 'silent' : fallback.bossMode,
       perfHud: typeof raw.perfHud === 'boolean' ? raw.perfHud : fallback.perfHud,
       aimAssist: typeof raw.aimAssist === 'boolean' ? raw.aimAssist : fallback.aimAssist,
       threatIndicator:
@@ -417,7 +424,7 @@ function ranged(value: unknown, range: { min: number; max: number }, fallback: n
 
 export function saveSettings(settings: Settings): void {
   try {
-    localStorage.setItem('hea-settings', JSON.stringify(settings));
+    localStorage.setItem('hea-settings', JSON.stringify({ ...settings, cameraVersion: 2 }));
   } catch {
     /* Private browsing can disallow storage. */
   }

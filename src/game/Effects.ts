@@ -620,6 +620,8 @@ export class Effects {
   private color: Float32Array;
   private size: Float32Array;
   private alpha: Float32Array;
+  private shape: Float32Array;
+  private rotation: Float32Array;
   private cursor = 0;
   private rockCursor = 0;
   private capacity = 440;
@@ -647,6 +649,8 @@ export class Effects {
     this.color = new Float32Array(this.capacity * 3);
     this.size = new Float32Array(this.capacity);
     this.alpha = new Float32Array(this.capacity);
+    this.shape = new Float32Array(this.capacity);
+    this.rotation = new Float32Array(this.capacity);
     const geometry = new THREE.BufferGeometry();
     geometry.setAttribute(
       'position',
@@ -664,11 +668,25 @@ export class Effects {
       'aAlpha',
       new THREE.BufferAttribute(this.alpha, 1).setUsage(THREE.DynamicDrawUsage),
     );
+    geometry.setAttribute(
+      'aShape',
+      new THREE.BufferAttribute(this.shape, 1).setUsage(THREE.DynamicDrawUsage),
+    );
+    geometry.setAttribute(
+      'aRotation',
+      new THREE.BufferAttribute(this.rotation, 1).setUsage(THREE.DynamicDrawUsage),
+    );
     const material = new THREE.ShaderMaterial({
       uniforms: { screenScale: { value: 500 } },
-      vertexShader: `attribute vec3 color; attribute float aSize; attribute float aAlpha; uniform float screenScale; varying vec3 vColor; varying float vAlpha;
-      void main() { vColor = color; vAlpha = aAlpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(aSize * screenScale / max(0.5, -mv.z), 0.0, 90.0); gl_Position = projectionMatrix * mv; }`,
-      fragmentShader: `varying vec3 vColor; varying float vAlpha; void main() { float d = length(gl_PointCoord - 0.5) * 2.0; if (d > 1.0) discard; float glow = pow(1.0 - d, 2.4); gl_FragColor = vec4(vColor * 2.4, glow * vAlpha); }`,
+      vertexShader: `attribute vec3 color; attribute float aSize; attribute float aAlpha; attribute float aShape; attribute float aRotation; uniform float screenScale; varying vec3 vColor; varying float vAlpha; varying float vShape; varying float vRotation;
+      void main() { vColor = color; vAlpha = aAlpha; vShape = aShape; vRotation = aRotation; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_PointSize = clamp(aSize * screenScale / max(0.5, -mv.z), 0.0, 90.0); gl_Position = projectionMatrix * mv; }`,
+      fragmentShader: `varying vec3 vColor; varying float vAlpha; varying float vShape; varying float vRotation;
+      void main() { vec2 q = (gl_PointCoord - 0.5) * 2.0; float c = cos(vRotation), s = sin(vRotation); q = mat2(c,-s,s,c) * q; float d = length(q); float mask;
+        if (vShape < 0.5) mask = 1.0 - smoothstep(0.68, 1.0, d);
+        else if (vShape < 1.5) mask = 1.0 - smoothstep(0.48, 0.94, abs(q.x) + abs(q.y) * 0.58);
+        else if (vShape < 2.5) { float edge = 0.42 + 0.42 * abs(cos(atan(q.y,q.x) * 4.0)); mask = 1.0 - smoothstep(edge - 0.08, edge + 0.08, d); }
+        else mask = 1.0 - smoothstep(0.35, 0.72, max(abs(q.x) * 0.62, abs(q.y)) + max(0.0, abs(q.x) - 0.62) * 0.5);
+        if (mask <= 0.01) discard; float core = exp(-d * d * 10.0); float glow = mask * (0.34 + 0.66 * core); gl_FragColor = vec4(vColor * (1.6 + core), glow * vAlpha); }`,
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
@@ -840,7 +858,7 @@ export class Effects {
   }
   block(at: THREE.Vector3, orientation: THREE.Quaternion, scale = 1, life = 1.5) {
     const serial = this.shieldSerial++,
-      patch = makeShieldPatch(serial);
+      patch = makeShieldPatch(serial, scale);
     patch.position.copy(at);
     patch.quaternion.copy(orientation);
     patch.scale.setScalar(scale);
@@ -851,7 +869,7 @@ export class Effects {
     // It materialises cell by cell over the next fifth of a second (see ShieldVisual).
     this.add(patch, life, 0, 0);
     this.burst(at, '#7af1ff', scale > 2 ? 14 : 6, 2.4, 0.2 * Math.sqrt(scale), 0.4);
-    return { serial, pattern: shieldPattern(serial), life };
+    return { serial, pattern: shieldPattern(serial, scale), life };
   }
   /** The cells of a dissolving patch each leave a curl of grey vapour and glittering motes. */
   private shieldDissolve(patch: THREE.Object3D) {
@@ -2437,6 +2455,63 @@ export class Effects {
     mesh.scale.setScalar(0.2);
     this.add(mesh, 0.6, radius / 0.6);
   }
+  /** A fractured pressure front and directional shards: unmistakably an outward blast, not a blessing aura. */
+  novaBlast(at: THREE.Vector3, direction: THREE.Vector3, scale = 1, charged = false) {
+    const radius = (charged ? 7.2 : 5.1) * scale,
+      life = charged ? 0.62 : 0.5,
+      color = new THREE.Color('#986cff'),
+      material = new THREE.ShaderMaterial({
+        uniforms: { uColor: { value: color }, uFade: { value: 1 } },
+        vertexShader:
+          'varying vec2 vUv; void main(){vUv=uv;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}',
+        fragmentShader: `uniform vec3 uColor; uniform float uFade; varying vec2 vUv; void main(){float a=vUv.y*6.28318; float fractures=sin(a*15.0+sin(a*5.0)*1.7); float gaps=smoothstep(-0.78,-0.12,fractures); float band=smoothstep(0.0,0.19,vUv.x)*(1.0-smoothstep(0.72,1.0,vUv.x)); float pulse=0.72+0.28*sin(a*31.0); float alpha=band*gaps*pulse*uFade; if(alpha<0.015)discard; gl_FragColor=vec4(uColor*(1.1+band*1.7),alpha);}`,
+        transparent: true,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        toneMapped: false,
+      }),
+      wave = new THREE.Mesh(new THREE.RingGeometry(0.72, 1, 96, 1), material),
+      frame = new THREE.Quaternion().setFromUnitVectors(
+        new THREE.Vector3(0, 0, 1),
+        direction.clone().normalize(),
+      );
+    wave.position.copy(at);
+    wave.quaternion.copy(frame);
+    wave.scale.setScalar(0.1);
+    wave.userData.kind = 'nova-fracture';
+    this.add(wave, life);
+    const effect = this.timed[this.timed.length - 1];
+    effect.animate = (e, progress) => {
+      e.object.scale.setScalar(radius * (0.08 + progress * 0.92));
+      material.uniforms.uFade.value = Math.pow(1 - progress, 1.35);
+      e.object.rotateZ(0.08 * (1 - progress));
+    };
+    const count = this.emit(charged ? 100 : 74),
+      axis = direction.clone().normalize(),
+      warm = new THREE.Color('#ffb35c'),
+      cool = new THREE.Color('#77dfff');
+    for (let i = 0; i < count; i++) {
+      const p = this.sparks[this.cursor++ % this.particleBudget],
+        spread = new THREE.Vector3(Math.random() - 0.5, Math.random() - 0.35, Math.random() - 0.5),
+        shard = axis
+          .clone()
+          .addScaledVector(spread, 0.95 + Math.random() * 0.7)
+          .normalize();
+      p.p.copy(at).addScaledVector(shard, 0.15 + Math.random() * 0.4);
+      p.v.copy(shard).multiplyScalar((charged ? 16 : 12) * scale * (0.55 + Math.random() * 0.75));
+      p.v.addScaledVector(axis, 4 * scale);
+      p.color.copy(
+        i % 4 === 0 ? warm : i % 4 === 1 ? cool : i % 5 === 0 ? new THREE.Color('#ffffff') : color,
+      );
+      p.life = p.max = 0.3 + Math.random() * 0.42;
+      p.size = (0.1 + Math.random() * 0.14) * scale;
+      p.gravity = 2.8 + Math.random() * 2.4;
+    }
+    this.debris(at, charged ? 26 : 18, 7 * scale, 2.2 * scale);
+    this.dust(at, charged ? 30 : 22, 3.8 * scale, axis.clone().multiplyScalar(10 * scale));
+    this.flashLight(at, '#c29aff', charged ? 430 : 310, radius * 1.8, 0.36);
+  }
   impact(at: THREE.Vector3, color: THREE.ColorRepresentation, large = false, scale = 1) {
     this.burst(at, color, large ? 70 : 28, (large ? 9 : 4) * scale, large ? 0.65 : 0.35);
     this.debris(at, large ? 20 : 7, (large ? 6 : 3) * scale);
@@ -2517,9 +2592,20 @@ export class Effects {
         this.color[i * 3 + 2] = p.color.b;
         this.size[i] = p.size;
         this.alpha[i] = Math.min(1, p.life * 5);
+        const maxChannel = Math.max(p.color.r, p.color.g, p.color.b);
+        this.shape[i] =
+          maxChannel < 0.52
+            ? 0
+            : p.color.r > p.color.b * 1.3
+              ? 1
+              : p.color.b > p.color.r * 1.25
+                ? 2
+                : 3;
+        this.rotation[i] = Math.atan2(p.v.y, p.v.x);
       } else {
         this.size[i] = 0;
         this.alpha[i] = 0;
+        this.shape[i] = 0;
       }
     }
     for (const attribute of Object.values(this.sparkMesh.geometry.attributes))

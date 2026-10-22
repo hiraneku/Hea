@@ -103,7 +103,7 @@ app.innerHTML = `
         <div class="element-footnote"><span></span> GERAK ADALAH SEGALANYA.</div>
       </aside>
       <div class="scene-caption"><span class="caption-cross">+</span><span>SECTOR 01<br><b>THE ARENA IS ALIVE.</b></span></div>
-      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.21</span><a href="./house/" style="color:inherit;text-decoration:none">RUMAH SENJA ↗</a><a href="./preview/" style="color:inherit;text-decoration:none">PREVIEW KARAKTER ↗</a><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
+      <footer class="menu-footer"><span>WEB PROTOTYPE <b>—</b> V0.21</span><a href="./preview/" style="color:inherit;text-decoration:none">PREVIEW KARAKTER ↗</a><button id="reference-button">VIDEO REFERENSI <span>↗</span></button><span class="render-status"><i></i> WEBGL 2 <b>/</b> <span id="menu-fps">—</span> FPS</span></footer>
     </main>
     <section id="hud" aria-label="Status permainan" hidden>
       <div class="vitals"><div class="vitals-label"><span><i class="health-cross">+</i> INTEGRITAS</span><strong id="health-value">100</strong></div><div class="meter health-meter"><i id="health-fill"></i></div><span class="vitals-caption">TETAP BERGERAK. TETAP HIDUP.</span></div>
@@ -473,7 +473,7 @@ function renderPanel(type: Exclude<typeof panel, null>) {
   }[type];
   let content: string;
   if (type === 'help') {
-    content = `<p class="panel-description">Hadapi satu boss terbang, IGNIS. Ganti antara terbang dan jalan. Di mode jalan, Space/tombol Lompat dapat digunakan dua kali; di mode terbang tahan Naik/Turun. IGNIS berganti posisi serta ketinggian, menembak lewat lingkaran di sekelilingnya, melepas 12 orb homing, dan mengisi bola surya besar. Nova dapat menghempaskan boss; serangan beratnya juga bisa melontarkanmu menembus dinding atau menghantam tanah.</p>
+    content = `<p class="panel-description">Hadapi satu boss terbang, IGNIS. Di Pengaturan pilih Mode battle atau boss diam yang tetap bisa diserang. Ganti antara terbang dan jalan. Di mode jalan, Space/tombol Lompat dapat digunakan dua kali; di mode terbang tahan Naik/Turun. IGNIS berganti posisi serta ketinggian, menembak lewat lingkaran di sekelilingnya, melepas 12 orb homing, dan mengisi bola surya besar. Nova dapat menghempaskan boss; serangan beratnya juga bisa melontarkanmu menembus dinding atau menghantam tanah.</p>
       <div class="control-tabs"><button id="desktop-tab" class="${!isTouch ? 'active' : ''}">KEYBOARD + MOUSE</button><button id="mobile-tab" class="${isTouch ? 'active' : ''}">LAYAR SENTUH</button></div>
       <div id="desktop-guide" class="control-guide" ${isTouch ? 'hidden' : ''}>
         <div><span>Bergerak</span><b><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></b></div><div><span>Arahkan kamera / serang</span><b>MOUSE / KLIK KIRI</b></div><div><span>Terbang naik / turun</span><b>TAHAN <kbd>SPACE</kbd> / <kbd>C</kbd></b></div><div><span>Dash · kebal pada awal luncuran</span><b><kbd>SHIFT</kbd></b></div><div><span>Kunci / lepas pandangan boss</span><b><kbd>E</kbd> / KLIK KANAN</b></div><div><span>Perisai ON / OFF</span><b><kbd>G</kbd> / TOMBOL AEGIS</b></div><div><span>Mode terbang / jalan</span><b><kbd>F</kbd> / TOMBOL MODE</b></div><div><span>Pilih sihir</span><b><kbd>1</kbd>–<kbd>4</kbd> / <kbd>Q</kbd></b></div><div><span>Jeda / ulangi arena</span><b><kbd>ESC</kbd> / <kbd>R</kbd></b></div>
@@ -483,11 +483,12 @@ function renderPanel(type: Exclude<typeof panel, null>) {
       </div>
       <p class="panel-note">Semua tombol desktop di atas dapat dipetakan ulang di <b>Pengaturan → Pemetaan tombol</b>; petunjuk tombol di HUD mengikuti pemetaanmu. Bantuan bidik, indikator arah boss, palet aman buta warna, dan skala HUD juga diatur di sana.</p>
       <div class="guide-spells">${SPELLS.map((s, i) => `<div style="--element:${s.color}">${spellIcons[i]}<strong>${s.name}</strong><span>${s.description}</span></div>`).join('')}</div>
-      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; selama masih berdiri, jejak itu ikut menahan tembakan berikutnya pada lintasan yang sama, dan saat OFF jejak lama tidak memblokir serangan baru. Patch yang muncul berdampingan menyusun diri rapat seperti kepingan puzzle, tidak menumpuk. Proyektil benar-benar menghantam permukaannya: tubuhnya gepeng dan memercik di sana, patch terdorong dan beriak. Satu patch hanya kuat menahan lima hit: kepingnya makin menyala dan retak, lalu pecah berhamburan dan menyisakan lubang di arah itu selama sesaat—bergeraklah. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat; hit berat membeku sejenak lalu lepas dalam gerak lambat sebelum hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret: tanah terbelah membentuk alur lurus searah seretan dengan gundukan terangkat di kiri-kanannya, bongkahan tanah berhamburan, lalu tubuh langsung bangkit; bila melayang lama tanpa menyentuh apa pun, ia menegakkan diri di udara. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Pusaran Surya: benih gelap meluncur ke dekatmu lalu membuka sumur gravitasi yang menyedot tubuh dan segala percikan selama hampir dua detik, kemudian meledak menjadi cincin bara mendatar—jangan kabur lurus (punggungmu buta), tapi naik atau menukik keluar dari bidang cincinnya. Sinar Prisma menyapu garis bidikmu: rentetan api dan orb homing pecah begitu melintasinya; bola surya dan inti Pusaran Surya hanya pecah oleh lancip berat. Sinar kecil meninggalkan goresan di permukaan yang dihantamnya (tanpa membongkar dinding), lingkaran besar yang mengisi menarik garis bidik ke arah crosshair sebagai penanda, dan klik yang belum bisa dibayar membuat slot sihir meredup sekejap. Seret kamera untuk melepas fokus.</p>
+      <p class="panel-note">Bidang Aegis muncul pada lintasan proyektil dekat tubuh, termasuk sisi dan atas—bukan selalu di pusat. Aegis melindungi depan dan samping sesuai arah tubuh, bukan arah gerak. Belakang adalah titik buta: shield tidak muncul di sana, bahkan saat aktif. Saat ON, intersepsi terus aktif tanpa cooldown. Tekan G atau tombol Aegis untuk ON/OFF. Jejak shield diam di ruang lalu memudar; selama masih berdiri, jejak itu ikut menahan tembakan berikutnya pada lintasan yang sama, dan saat OFF jejak lama tidak memblokir serangan baru. Patch yang muncul berdampingan menyusun diri rapat seperti kepingan puzzle, tidak menumpuk. Proyektil benar-benar menghantam permukaannya: tubuhnya gepeng dan memercik di sana, patch terdorong dan beriak. Satu patch bertahan hingga sepuluh hit: kepingnya makin menyala dan retak, lalu pecah berhamburan dan menyisakan lubang di arah itu selama sesaat—bergeraklah. Tanpa biaya energi. Saat terkena hit ada jeda kontak singkat; hit berat membeku sejenak lalu lepas dalam gerak lambat sebelum hempasan cepat. Nova membuat boss terlempar dan berputar seperti ragdoll; skill ketiga boss memberi reaksi itu pada player. Benturan berikutnya merusak dinding atau tanah dan memicu impact frame. Hit berat memberi jeda kontak, lalu luncuran cepat. Tubuh menyerap benturan tanah tanpa memantul, berguling singkat dan terseret: tanah terbelah membentuk alur lurus searah seretan dengan gundukan terangkat di kiri-kanannya, bongkahan tanah berhamburan, lalu tubuh langsung bangkit; bila melayang lama tanpa menyentuh apa pun, ia menegakkan diri di udara. Homing dapat dihindari setelah orb berkomitmen pada lintasannya. Bola surya dapat melubangi dinding tipis. Pusaran Surya: benih gelap meluncur ke dekatmu lalu membuka sumur gravitasi yang menyedot tubuh dan segala percikan selama hampir dua detik, kemudian meledak menjadi cincin bara mendatar—jangan kabur lurus (punggungmu buta), tapi naik atau menukik keluar dari bidang cincinnya. Sinar Prisma menyapu garis bidikmu: rentetan api dan orb homing pecah begitu melintasinya; bola surya dan inti Pusaran Surya hanya pecah oleh lancip berat. Sinar kecil meninggalkan goresan di permukaan yang dihantamnya (tanpa membongkar dinding), lingkaran besar yang mengisi menarik garis bidik ke arah crosshair sebagai penanda, dan klik yang belum bisa dibayar membuat slot sihir meredup sekejap. Seret kamera untuk melepas fokus.</p>
       <button class="primary-button full-width" id="panel-done"><span>MENGERTI</span>${icons.arrow}</button>`;
   } else if (type === 'settings') {
     content = `<p class="panel-description">Preferensimu tersimpan di perangkat ini.</p>
       <div class="settings-row"><div><label for="quality">Kualitas visual</label><p>Otomatis mengutamakan performa di mobile.</p></div><select id="quality"><option value="auto" ${settings.quality === 'auto' ? 'selected' : ''}>Otomatis</option><option value="high" ${settings.quality === 'high' ? 'selected' : ''}>Tinggi</option><option value="low" ${settings.quality === 'low' ? 'selected' : ''}>Ringan</option></select></div>
+      <div class="settings-row"><div><label for="boss-mode">Perilaku boss</label><p>Diam: tidak menyerang atau bergerak, tetap bisa diserang.</p></div><select id="boss-mode"><option value="battle" ${settings.bossMode === 'battle' ? 'selected' : ''}>Mode battle</option><option value="silent" ${settings.bossMode === 'silent' ? 'selected' : ''}>Boss diam</option></select></div>
       <div class="settings-row slider-row"><div><label for="sensitivity">Sensitivitas kamera</label><b id="sensitivity-label">${settings.sensitivity.toFixed(1)}×</b></div><input id="sensitivity" type="range" min="0.3" max="2.5" step="0.1" value="${settings.sensitivity}" /></div>
       <div class="settings-row"><div><label for="sound-toggle">Audio</label><p>Efek suara sihir dan gerakan.</p></div><label class="switch"><input id="sound-toggle" type="checkbox" ${settings.sound ? 'checked' : ''} aria-label="Audio"/><span></span></label></div>
       <div class="settings-row slider-row"><div><label for="volume">Volume efek</label><b id="volume-label">${Math.round(settings.volume * 100)}%</b></div><input id="volume" type="range" min="0" max="1" step="0.05" value="${settings.volume}" /></div>
@@ -551,6 +552,10 @@ function renderPanel(type: Exclude<typeof panel, null>) {
   if (type === 'settings') {
     $<HTMLSelectElement>('#quality').onchange = (e) => {
       settings.quality = (e.target as HTMLSelectElement).value as typeof settings.quality;
+      applySettings();
+    };
+    $<HTMLSelectElement>('#boss-mode').onchange = (e) => {
+      settings.bossMode = (e.target as HTMLSelectElement).value === 'silent' ? 'silent' : 'battle';
       applySettings();
     };
     $<HTMLInputElement>('#sensitivity').oninput = (e) => {
@@ -678,15 +683,18 @@ function updateHud(s: Snapshot) {
         rise: 'MENANJAK',
         recover: 'MEMULIHKAN POSISI',
       }[s.boss.maneuver];
-  $('#boss-action').textContent = !s.boss.alive
-    ? 'DITAKLUKKAN'
-    : s.boss.stage === 'search'
-      ? 'TERHALANG / MENCARI SUDUT'
-      : s.boss.stage === 'stagger'
-        ? 'TERHEMPAS / MEMULIHKAN POSISI'
-        : s.boss.stage === 'recover'
-          ? 'MEMPOSISIKAN ULANG'
-          : `${s.boss.stage === 'telegraph' ? 'MENGISI' : 'MENEMBAK'} / ${s.boss.attack}`;
+  $('#boss-action').textContent =
+    settings.bossMode === 'silent' && s.boss.alive
+      ? 'BOSS DIAM · TETAP BISA DISERANG'
+      : !s.boss.alive
+        ? 'DITAKLUKKAN'
+        : s.boss.stage === 'search'
+          ? 'TERHALANG / MENCARI SUDUT'
+          : s.boss.stage === 'stagger'
+            ? 'TERHEMPAS / MEMULIHKAN POSISI'
+            : s.boss.stage === 'recover'
+              ? 'MEMPOSISIKAN ULANG'
+              : `${s.boss.stage === 'telegraph' ? 'MENGISI' : 'MENEMBAK'} / ${s.boss.attack}`;
   $('.boss-hud').dataset.stage = s.boss.stage;
   $('#boss-charge-fill').style.transform = `scaleX(${s.boss.charge})`;
   $('#boss-distance').textContent = `${Math.round(s.boss.distance)} M`;

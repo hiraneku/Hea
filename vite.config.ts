@@ -9,7 +9,7 @@ export default defineConfig({
     target: 'es2022',
     chunkSizeWarningLimit: 750,
     rollupOptions: {
-      input: { game: 'index.html', preview: 'preview/index.html', house: 'house/index.html' },
+      input: { game: 'index.html', preview: 'preview/index.html' },
       output: { manualChunks: { three: ['three'] } },
     },
   },

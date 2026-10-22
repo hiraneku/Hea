@@ -106,8 +106,7 @@ test.describe('golden frames', () => {
   }) => {
     await load(page);
     await scene(page, 'shield-volley');
-    await seededStep(page, 0.36, 61);
-    await seededStep(page, 0.1, 62);
+    await seededStep(page, 1.0, 61);
     await settle(page);
     const d = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics());
     expect(d.patchShatters).toBe(1);

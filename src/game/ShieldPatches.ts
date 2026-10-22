@@ -82,7 +82,7 @@ export class ShieldPatchRegistry {
       const seen = new Set<string>();
       for (const patch of this.patches) {
         if (patch.cluster !== cluster.id) continue;
-        for (const c of shieldLayout(patch.serial)) {
+        for (const c of shieldLayout(patch.serial, patch.scale)) {
           const key = cellKey(patch.anchor.q + c.q, patch.anchor.r + c.r);
           if (seen.has(key)) count++;
           seen.add(key);
@@ -155,7 +155,7 @@ export class ShieldPatchRegistry {
    * its blocking radius, so the shot it was raised for still lands on it.
    */
   place(desired: Vector3, normal: Vector3, scale: number, serial: number): PatchPlacement {
-    const cells = shieldLayout(serial),
+    const cells = shieldLayout(serial, scale),
       centroid = layoutCentroid(cells);
     const near = this.patches
       .filter(
@@ -203,7 +203,7 @@ export class ShieldPatchRegistry {
     const occupied = new Set<string>();
     for (const patch of this.patches) {
       if (patch.cluster !== cluster.id) continue;
-      for (const c of shieldLayout(patch.serial))
+      for (const c of shieldLayout(patch.serial, patch.scale))
         occupied.add(cellKey(patch.anchor.q + c.q, patch.anchor.r + c.r));
     }
     const local = desired.clone().sub(cluster.origin).applyQuaternion(cluster.inverse),

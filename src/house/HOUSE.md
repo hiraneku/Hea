@@ -1,6 +1,12 @@
-# Rumah Senja — revamp tahap 1: living room
+# Rumah Senja — source design notes (route paused)
 
-Area `/Hea/house/` terpisah dari arena. Keputusan pengguna: **mulai rumah baru
+Halaman ini dicabut sementara dari build publik atas permintaan pengguna. Source scene, layout, karakter, dan catatan ini tetap disimpan untuk pemulihan di kemudian hari.
+
+## Riwayat desain
+
+Living room — revamp tahap 1
+
+Area Rumah Senja dirancang terpisah dari arena. Keputusan pengguna: **mulai rumah baru
 bertahap**, living room dahulu, mengikuti denah/screenshot yang dikirim dengan
 **gaya desa isekai**, bukan menyalin UI aplikasi perancang pada screenshot.
 Denah rumah dua lantai sebelumnya digantikan; versi itu tetap ada dalam riwayat

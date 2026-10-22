@@ -232,7 +232,7 @@ export const DUEL = {
    * Hits one patch can take before it shatters, and the hole that leaves in the shell: for
    * `shieldGap` seconds nothing is intercepted within `shieldGapDegrees` of that direction.
    */
-  shieldPatchHits: 5,
+  shieldPatchHits: 10,
   shieldGap: 1,
   shieldGapDegrees: 30,
   /** Solar vortex: how long the well pulls before it detonates, its reach and peak pull. */
