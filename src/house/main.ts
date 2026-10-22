@@ -6,7 +6,7 @@ import * as T from 'three';
 import { HouseCharacter } from './HouseCharacter';
 import { HouseFollowCamera } from './followCamera';
 import { buildHouse } from './scene';
-import { HOUSE, ROOMS, moveInside, type RoomId } from './layout';
+import { HOUSE, ROOMS, LIVING, moveInside, type RoomId } from './layout';
 
 const app = document.querySelector<HTMLDivElement>('#house-app')!;
 const rootURL = new URL(
@@ -14,7 +14,7 @@ const rootURL = new URL(
   location.href.endsWith('/') ? location.href : location.href.replace(/[^/]*$/, ''),
 );
 app.innerHTML = `
-  <div id="view" aria-label="Interior rumah dua lantai, seret untuk melihat" tabindex="0"></div>
+  <div id="view" aria-label="Interior living room baru, seret untuk melihat" tabindex="0"></div>
   <div class="vignette" aria-hidden="true"></div>
   <header class="house-header">
     <a class="brand" href="${rootURL.href}" aria-label="Kembali ke HEA">HEA<span>.</span><small>RUANG & CERITA</small></a>
@@ -24,19 +24,19 @@ app.innerHTML = `
     <p class="eyebrow"><span class="tiny-line"></span> SEBUAH RUMAH KELUARGA</p>
     <h1>Rumah <em>Senja.</em></h1>
     <p class="intro-copy">Di antara hangatnya kayu<br>dan cerita yang dibawa pulang.</p>
-    <div class="spec"><span>02 <small>LANTAI</small></span><b>·</b><span>05 <small>RUANG</small></span><b>·</b><span>01 <small>KELUARGA</small></span></div>
+    <div class="spec"><span>01 <small>TAHAP</small></span><b>·</b><span>01 <small>RUANG</small></span><b>·</b><span>01 <small>KELUARGA</small></span></div>
   </section>
   <div id="loading" class="loading" role="status"><span></span>Menyalakan perapian…</div>
   <div class="scene-tools"><button id="camera-toggle" class="tool" aria-pressed="true" aria-label="Kamera mengikuti karakter">Kamera: Ikuti</button><button id="plan-toggle" class="tool" aria-haspopup="dialog"><span>▦</span> Denah rumah</button><button id="help-toggle" class="tool" aria-haspopup="dialog" aria-label="Petunjuk kontrol">?</button></div>
   <section class="room-caption" aria-live="polite"><p id="floor-label" class="eyebrow">LANTAI 01 <span>/</span> RUANG KELUARGA</p><h2 id="room-title">Tempat cerita pulang</h2><p id="room-description">Perapian batu, bangku berlapis linen, dan secangkir teh.</p><span class="material-note"><i></i> KAYU · BATU · LINEN · CAHAYA SORE</span></section>
   <div class="look-hint" aria-hidden="true"><span>↔</span> Seret untuk melihat sekeliling</div>
   <nav class="room-nav" aria-label="Pindah ruangan"><span class="nav-label">JELAJAHI RUMAH <span>↗</span></span>${ROOMS.map((r) => `<button data-room="${r.id}" aria-pressed="${r.id === 'living'}"><small>${r.icon}</small><span>${r.name}</span><b>↗</b></button>`).join('')}</nav>
-  <button id="mobile-rooms" class="mobile-rooms" aria-expanded="false">Pilih ruangan <span>⌃</span></button>
+  <button id="mobile-rooms" class="mobile-rooms" aria-expanded="false">Titik awal <span>⌃</span></button>
   <div id="walk-pad" class="walk-pad" role="group" aria-label="Joystick berjalan"><span class="pad-label">GERAK</span><div id="walk-stick"></div><i class="pad-cross-x"></i><i class="pad-cross-y"></i></div>
   <div class="walk-hint"><kbd>W</kbd><span><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><small>BERJALAN</small></div>
-  <footer class="house-footer"><span>HEA / ENVIRONMENT STUDY <b>01</b></span><span id="visit-status">RUMAH SENJA · STICKMAN 1</span></footer>
-  <dialog id="plan-dialog"><div class="dialog-head"><div><p class="eyebrow">RUMAH SENJA</p><h2>Ruang untuk hidup.</h2></div><button data-close aria-label="Tutup denah">✕</button></div><div class="plan-tabs"><button data-floor="0" aria-pressed="true">01 · Lantai bawah</button><button data-floor="1" aria-pressed="false">02 · Lantai atas</button></div><p class="dialog-copy">Pilih ruangan pada denah untuk masuk ke dalamnya.</p><div id="floor-plan"></div><div class="plan-legend"><span><i></i> Ruang keluarga</span><span>10 × 8 m · dua lantai</span></div></dialog>
-  <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse. Kamera mengikuti stickman; tombol Kamera mengganti ke sudut mata.</span></li><li><strong>Berjalan</strong><span>Gerakkan stickman dengan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Naik ke lantai dua</strong><span>Tangga berada di sebelah kanan pintu masuk. Dekati anak tangga dari ujung bawah dan berjalan naik.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
+  <footer class="house-footer"><span>HEA / ENVIRONMENT STUDY <b>01</b></span><span id="visit-status">RUMAH SENJA · LIVING ROOM 1</span></footer>
+  <dialog id="plan-dialog"><div class="dialog-head"><div><p class="eyebrow">RUMAH SENJA</p><h2>Ruang untuk hidup.</h2></div><button data-close aria-label="Tutup denah">✕</button></div><div class="plan-tabs"><button data-floor="0" aria-pressed="true">01 · Lantai bawah</button></div><p class="dialog-copy">Denah living room baru. Utara di atas, pintu masuk di bawah.</p><div id="floor-plan"></div><div class="plan-legend"><span><i></i> Ruang keluarga</span><span>8,11 × 8,3 m · living room</span></div></dialog>
+  <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse. Kamera mengikuti stickman; tombol Kamera mengganti ke sudut mata.</span></li><li><strong>Berjalan</strong><span>Gerakkan stickman dengan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Rumah baru, tahap pertama</strong><span>Living room mengikuti denah referensi. Ruangan lain dan akses keluar belum dibangun.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
   <div id="transition" aria-hidden="true"></div>`;
 
 const view = document.querySelector<HTMLDivElement>('#view')!;
@@ -84,9 +84,7 @@ scene.add(sun, sun.target);
 const fill = new T.PointLight('#ffe7c2', 10, 14, 2);
 fill.position.set(-0.8, 2.7, 0.8);
 scene.add(fill);
-const upperFill = new T.PointLight('#ffedcf', 12, 13, 2);
-upperFill.position.set(0.6, 5.9, 0.4);
-scene.add(upperFill);
+
 let house: ReturnType<typeof buildHouse>;
 try {
   house = buildHouse(scene);
@@ -199,14 +197,14 @@ function renderPlan(floor: number) {
   document
     .querySelectorAll<HTMLButtonElement>('[data-floor]')
     .forEach((b) => b.setAttribute('aria-pressed', String(Number(b.dataset.floor) === floor)));
-  const ground = `<rect x="30" y="30" width="250" height="300" class="plan-room living"/><rect x="280" y="30" width="220" height="150" class="plan-room kitchen"/><rect x="280" y="180" width="220" height="150" class="plan-room hall"/><rect x="46" y="46" width="90" height="25" class="furniture"/><rect x="55" y="192" width="145" height="35" class="furniture"/><rect x="80" y="125" width="95" height="38" class="furniture"/><rect x="310" y="85" width="90" height="52" class="furniture"/><text x="155" y="270">Ruang keluarga</text><text x="370" y="58">Dapur & makan</text><text x="335" y="295">Pintu masuk</text><g data-plan-room="living" role="button" tabindex="0" aria-label="Masuk ruang keluarga"><rect x="30" y="30" width="250" height="300" class="plan-hit"/></g><g data-plan-room="kitchen" role="button" tabindex="0" aria-label="Masuk dapur"><rect x="280" y="30" width="140" height="150" class="plan-hit"/></g>`;
-  const upstairs = `<rect x="30" y="30" width="250" height="145" class="plan-room children"/><rect x="30" y="175" width="250" height="155" class="plan-room parents"/><rect x="280" y="30" width="220" height="300" class="plan-room hall"/><rect x="55" y="45" width="46" height="80" class="furniture"/><rect x="124" y="45" width="46" height="80" class="furniture"/><rect x="64" y="205" width="115" height="95" class="furniture"/><rect x="300" y="43" width="80" height="20" class="furniture"/><text x="160" y="153">Kamar anak</text><text x="158" y="195">Kamar orang tua</text><text x="353" y="93">Sudut baca</text><text x="343" y="205" class="small">KORIDOR</text><g data-plan-room="parents" role="button" tabindex="0" aria-label="Masuk kamar orang tua"><rect x="30" y="175" width="250" height="155" class="plan-hit"/></g><g data-plan-room="children" role="button" tabindex="0" aria-label="Masuk kamar anak"><rect x="30" y="30" width="250" height="145" class="plan-hit"/></g><g data-plan-room="reading" role="button" tabindex="0" aria-label="Masuk sudut baca"><rect x="280" y="30" width="135" height="120" class="plan-hit"/></g>`;
-  const stairs = Array.from(
-    { length: 14 },
-    (_, i) => `<path d="M 427 ${154 + i * 11} h 60"/>`,
-  ).join('');
+  const furniture = Object.values(LIVING)
+    .map(
+      (b) =>
+        `<rect x="${30 + (b.x + HOUSE.width / 2 - b.w / 2) * 50}" y="${30 + (b.z + HOUSE.depth / 2 - b.d / 2) * 50}" width="${b.w * 50}" height="${b.d * 50}" rx="3" class="furniture"/>`,
+    )
+    .join('');
   document.querySelector('#floor-plan')!.innerHTML =
-    `<svg viewBox="0 0 530 365" role="group" aria-label="Denah lantai ${floor + 1}">${floor ? upstairs : ground}<rect x="420" y="145" width="73" height="174" class="stair-void"/>${stairs}<path d="M 455 290 V 165 m -5 8 5 -8 5 8" class="stair-arrow"/><text x="455" y="341" class="small">TANGGA</text><rect x="29" y="29" width="472" height="302" class="outline"/></svg>`;
+    `<svg viewBox="0 0 475 490" role="group" aria-label="Denah living room 8,11 × 8,3 meter"><rect x="30" y="30" width="405.5" height="415" class="plan-room living"/><rect x="217.5" y="82.75" width="162.5" height="97.5" fill="#655043" opacity=".5"/>${furniture}<rect x="200" y="374" width="62" height="37" class="furniture"/><path d="M202 445h62 M202 445v-57" class="stair-arrow"/><text x="230" y="263">Living room</text><text x="230" y="285" class="small">8,11 × 8,3 m · ≈67,3 m²</text><text x="230" y="474" class="small">PINTU MASUK · SELATAN</text><text x="230" y="19" class="small">UTARA</text><rect x="30" y="30" width="405.5" height="415" class="outline"/><g data-plan-room="living" role="button" tabindex="0" aria-label="Kembali ke titik awal living room"><rect x="31" y="31" width="403" height="413" class="plan-hit"/></g></svg>`;
   document.querySelectorAll<SVGGElement>('[data-plan-room]').forEach((g) => {
     const go = () => putInRoom(g.dataset.planRoom as RoomId);
     g.onclick = go;
@@ -377,15 +375,7 @@ function frame(now: number) {
       const floor = height > 2.6 ? 1 : 0;
       if (floor !== activeFloor) {
         activeFloor = floor;
-        updateCaption(floor ? 'reading' : 'living');
-      }
-      if (height >= 3.35) {
-        if (x < 0.1 && z > 0.35 && activeRoom !== 'parents') updateCaption('parents');
-        else if (x < 0.1 && z < 0.1 && activeRoom !== 'children') updateCaption('children');
-        else if (x > 0.4 && activeRoom !== 'reading') updateCaption('reading');
-      } else if (height < 0.1) {
-        if (x > 0.5 && z < 0.15 && activeRoom !== 'kitchen') updateCaption('kitchen');
-        else if (x < 0.1 && activeRoom !== 'living') updateCaption('living');
+        updateCaption('living');
       }
     }
   }
@@ -412,7 +402,7 @@ function frame(now: number) {
   }
   if (!reduced) {
     house.fire.intensity = 3.2 + Math.sin(now * 0.004) * 0.18 + Math.sin(now * 0.013) * 0.1;
-    house.ember.scale.y = 1 + Math.sin(now * 0.008) * 0.08;
+    house.ember.scale.y = 0.22 * (1 + Math.sin(now * 0.008) * 0.08);
   }
   renderer.render(scene, camera);
   frames++;

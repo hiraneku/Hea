@@ -19,16 +19,12 @@ try {
     page.on('pageerror', (e) => errors.push(e.message));
     await page.goto(process.env.HOUSE_REVIEW_URL || 'http://localhost:5173/house/?test');
     await page.waitForFunction(
-      () => window.__HEA_HOUSE__?.snapshot().frames > 2,
+      () => window.__HEA_HOUSE__?.snapshot().character.loaded,
       {},
       { timeout: 30000 },
     );
     await mkdir(`${destination}/${name}`, { recursive: true });
-    for (const id of quick
-      ? name === 'mobile'
-        ? ['living']
-        : ['living', 'children', 'reading']
-      : ['living', 'kitchen', 'parents', 'children', 'reading']) {
+    for (const id of ['living']) {
       if (name === 'mobile') await page.locator('#mobile-rooms').click();
       await page.locator(`[data-room="${id}"]`).click();
       await page.waitForTimeout(500);
@@ -40,6 +36,9 @@ try {
         errors: [...errors],
       });
     }
+    await page.locator('#camera-toggle').click();
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: `${destination}/${name}/eyes.png` });
     await page.locator('#plan-toggle').click();
     await page.screenshot({ path: `${destination}/${name}/plan.png` });
     await page.close();

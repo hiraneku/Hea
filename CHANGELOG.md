@@ -7,6 +7,20 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Rumah Senja — revamp tahap 1, living room referensi
+
+- Mulai rumah baru bertahap, bukan mempertahankan denah dua lantai lama.
+  Living room 8,11 × 8,3 m memakai denah/screenshot pengguna sebagai acuan.
+- Pertahankan susunan referensi: pintu selatan, area duduk timur-laut, sofa abu,
+  karpet cokelat, kursi santai, kursi goyang, meja bundar, perapian timur,
+  serta keset dan gantungan mantel dekat masuk. Gaya material desa isekai.
+- Ruang lain, tangga dan akses keluar belum dibangun; hapus tujuan tur/denah
+  lama yang tidak lagi ada. Avatar/kontrol HP dan mode kamera dipertahankan.
+- Kamera pintu masuk dibatasi agar tidak keluar/terhalang daun pintu. Collider
+  furnitur dipakai bersama scene/motor/proxy kamera/denah. 21 batch statis.
+- 321 unit test dan delapan kasus browser desktop/HP lulus; review visual
+  spawn, pandangan mata, dan denah. Detail serta keterbatasan: docs/HOUSE.md.
+
 ### Rumah Senja — stickman yang bisa dimainkan
 
 - Spawn rig stickman putih lokal; joystick HP/WASD menggerakkan karakter melalui

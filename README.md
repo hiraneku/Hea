@@ -9,7 +9,8 @@ cover. Tanpa backend, akun, atau koneksi eksternal saat bermain.
 ▶ **Mainkan:** https://hiraneku.github.io/Hea/
 
 🏡 **Rumah Senja:** https://hiraneku.github.io/Hea/house/ — interior rumah keluarga
-isekai dua lantai yang bisa dijelajahi, terpisah dari arena. Seret untuk melihat,
+isekai yang dibangun ulang bertahap, dimulai dari living room 8,11 × 8,3 m
+sesuai denah referensi, terpisah dari arena. Seret untuk melihat,
 joystick/WASD untuk menggerakkan stickman putih. Kamera mengikuti dari belakang
 atau beralih ke pandangan mata; pilih ruangan atau denah untuk tur cepat.
 Rincian desain di [docs/HOUSE.md](docs/HOUSE.md).

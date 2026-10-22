@@ -1,50 +1,36 @@
 import { describe, expect, it } from 'vitest';
-import { HOUSE, ROOMS, stairHeight, floorAt, canOccupy, moveInside } from '../../src/house/layout';
-
-describe('two-storey family-house layout', () => {
-  it('provides the agreed family rooms, split over two floors', () => {
-    expect(ROOMS.filter((r) => r.floor === 0)).toHaveLength(2);
-    expect(ROOMS.filter((r) => r.floor === 1)).toHaveLength(3);
-    expect(ROOMS.find((r) => r.id === 'parents')!.position[1]).toBe(HOUSE.upper);
-    expect(ROOMS.find((r) => r.id === 'children')!.position[1]).toBe(HOUSE.upper);
-    for (const room of ROOMS)
-      expect(floorAt(room.position[0], room.position[2], room.position[1])).toBe(room.position[1]);
+import { HOUSE, ROOMS, LIVING, floorAt, canOccupy, moveInside } from '../../src/house/layout';
+describe('reference living room, first stage', () => {
+  it('uses reference dimensions and only the agreed living room', () => {
+    expect(HOUSE.width).toBe(8.11);
+    expect(HOUSE.depth).toBe(8.3);
+    expect(ROOMS.map((r) => r.id)).toEqual(['living']);
+    expect(floorAt(0, 2.55, 0)).toBe(0);
+    expect(floorAt(0, 0, 3.4)).toBeNull();
   });
-  it('climbs and descends the full continuous stair route without teleporting floors', () => {
-    const up = moveInside(3.65, 3.55, 0, 0, -5, []);
-    expect(up.z).toBeCloseTo(-1.45);
-    expect(up.height).toBeCloseTo(3.4);
-    const landing = moveInside(up.x, up.z, up.height, -1.65, 0, []);
-    expect(landing.x).toBeCloseTo(2);
-    expect(landing.height).toBe(3.4);
-    const down = moveInside(up.x, up.z, up.height, 0, 5, []);
-    expect(down.z).toBeCloseTo(3.55);
-    expect(down.height).toBeCloseTo(0);
-    expect(stairHeight(3.3)).toBe(0);
-    expect(stairHeight(-1.12)).toBeCloseTo(3.4);
+  it('keeps seating north-east and entry/open circulation south', () => {
+    expect(LIVING.sofa.z).toBeLessThan(-3);
+    expect(LIVING.fireplace.x).toBeGreaterThan(3.5);
+    expect(LIVING.armchair.x).toBeLessThan(LIVING.rocking.x);
+    expect(LIVING.coat.z).toBeGreaterThan(3);
+    const b = Object.values(LIVING);
+    for (const z of [3, 2, 1, 0]) expect(canOccupy(0, z, 0, b)).toBe(true);
   });
-  it('does not step into the stair void, through the underside, or across the outer shell', () => {
-    expect(floorAt(4.4, 0, 3.4)).toBeNull();
-    expect(floorAt(3.65, 0, 0)).toBeNull();
-    expect(floorAt(5, 0, 0)).toBeNull();
-    const wall = moveInside(0, 1.5, 0, 100, 0, []);
-    expect(wall.x).toBeLessThanOrEqual(4.63);
-    expect(wall.x).toBeGreaterThan(2.5);
+  it('cannot exit the shell or an unbuilt future room', () => {
+    const p = moveInside(0, 1.5, 0, 100, 0, []);
+    expect(p.x).toBeLessThanOrEqual(HOUSE.width / 2 - HOUSE.radius);
+    expect(floorAt(0, 4.16, 0)).toBeNull();
   });
-  it('blocks furniture, slides along it, and keeps floor-specific partitions separate', () => {
-    const furniture = [{ x: 0, z: 0, w: 1, d: 1, floor: 0 }];
-    expect(canOccupy(0, 0, 0, furniture)).toBe(false);
-    expect(canOccupy(0, 0, 3.4, furniture)).toBe(true);
-    const stopped = moveInside(-1.5, 0, 0, 3, 0, furniture);
-    expect(stopped.x).toBeLessThan(-0.68);
-    const slide = moveInside(-0.72, 0, 0, 0.5, 1.7, furniture);
-    expect(slide.z).toBeGreaterThan(1.6);
+  it('blocks furniture but permits sliding along its edge', () => {
+    const b = [{ x: 0, z: 0, w: 1, d: 1, floor: 0 }];
+    expect(canOccupy(0, 0, 0, b)).toBe(false);
+    const p = moveInside(-1.5, 0, 0, 3, 0, b);
+    expect(p.x).toBeLessThan(-0.68);
+    expect(moveInside(-0.72, 0, 0, 0.5, 1.7, b).z).toBeGreaterThan(1.6);
   });
-  it('substeps large movements instead of tunnelling through thin partitions', () => {
-    const wall = [{ x: 0.25, z: 0, w: 0.14, d: 2.5, floor: 1 }];
-    const stopped = moveInside(-1, 0, 3.4, 2.5, 0, wall);
-    expect(stopped.x).toBeLessThan(0.25 - 0.07 - HOUSE.radius);
-    const doorway = moveInside(-1, -1.75, 3.4, 2.5, 0, wall);
-    expect(doorway.x).toBeGreaterThan(1.4);
+  it('substeps instead of tunnelling through a thin collider', () => {
+    const b = [{ x: 0.25, z: 0, w: 0.14, d: 2.5, floor: 0 }];
+    expect(moveInside(-1, 0, 0, 2.5, 0, b).x).toBeLessThan(0.25 - 0.07 - HOUSE.radius);
+    expect(moveInside(-1, -1.75, 0, 2.5, 0, b).x).toBeGreaterThan(1.4);
   });
 });

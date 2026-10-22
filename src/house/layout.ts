@@ -1,5 +1,5 @@
-/** Dimensions are metres. Layout/navigation is isolated from arena physics. */
-export const HOUSE = { width: 10, depth: 8, upper: 3.4, eye: 1.58, radius: 0.19 };
+/** Reference living room, metres; north is -Z, entrance is south. */
+export const HOUSE = { width: 8.11, depth: 8.3, upper: 3.3, eye: 1.58, radius: 0.19 };
 export interface Obstacle {
   x: number;
   z: number;
@@ -8,81 +8,37 @@ export interface Obstacle {
   floor: number;
 }
 export const obstacles: Obstacle[] = [];
+/** Shared footprints: scene, motor, camera proxies and plan derive from these. */
+export const LIVING = {
+  sofa: { x: 1.32, z: -3.45, w: 2.3, d: 0.83, floor: 0 },
+  armchair: { x: 0.12, z: -2.12, w: 0.82, d: 0.82, floor: 0 },
+  rocking: { x: 2.55, z: -0.98, w: 1.3, d: 1.4, floor: 0 },
+  sideTable: { x: 2.91, z: -3.52, w: 0.62, d: 0.62, floor: 0 },
+  fireplace: { x: 3.68, z: -2.1, w: 0.75, d: 1.9, floor: 0 },
+  coat: { x: -0.93, z: 3.63, w: 0.55, d: 0.55, floor: 0 },
+};
 export const ROOMS = [
   {
     id: 'living',
-    name: 'Ruang keluarga',
+    name: 'Living room',
     floor: 0,
-    subtitle: 'Tempat cerita pulang',
+    subtitle: 'Ruang untuk berkumpul',
     description:
-      'Perapian batu, bangku berlapis linen, dan secangkir teh. Jantung rumah tempat seluruh keluarga berkumpul.',
-    position: [-0.15, 0, 1.65],
-    target: [-3.05, 1.2, -2.6],
+      'Living room baru mengikuti denah referensi: ruang lega, sofa linen abu, kursi goyang kayu dan perapian batu.',
+    position: [0, 0, 1.7],
+    target: [1.3, 1.15, -2.2],
     icon: '01',
-  },
-  {
-    id: 'kitchen',
-    name: 'Dapur & meja makan',
-    floor: 0,
-    subtitle: 'Roti hangat untuk semua',
-    description:
-      'Dapur kayu sederhana dengan pantry, keranjang panen, dan meja makan empat kursi. Satu ruang terbuka untuk keseharian keluarga.',
-    position: [0.1, 0, 0.8],
-    target: [2, 1.0, -2.65],
-    icon: '02',
-  },
-  {
-    id: 'parents',
-    name: 'Kamar orang tua',
-    floor: 1,
-    subtitle: 'Istirahat di bawah kasau',
-    description:
-      'Tempat tidur berlapis selimut sage, peti linen, lemari kayu, dan cahaya jendela. Tenang, hangat, tanpa kemewahan berlebihan.',
-    position: [-0.65, 3.4, 1.7],
-    target: [-3.0, 4.25, 2.25],
-    icon: '03',
-  },
-  {
-    id: 'children',
-    name: 'Kamar anak',
-    floor: 1,
-    subtitle: 'Dua tempat bermimpi',
-    description:
-      'Dua ranjang kecil, meja belajar bersama, mainan kayu, dan buku cerita. Ruang yang tumbuh bersama anak-anak.',
-    position: [-0.7, 3.4, -1.25],
-    target: [-3.2, 4.1, -2.3],
-    icon: '04',
-  },
-  {
-    id: 'reading',
-    name: 'Sudut baca',
-    floor: 1,
-    subtitle: 'Sore yang berjalan pelan',
-    description:
-      'Kursi dekat jendela, rak buku keluarga, dan pandangan ke kebun. Terhubung dengan bordes tangga dan kedua kamar.',
-    position: [2.0, 3.4, -0.3],
-    target: [1.0, 4.15, -3.0],
-    icon: '05',
   },
 ] as const;
 export type RoomId = (typeof ROOMS)[number]['id'];
-
-/** Continuous ramp over visible treads avoids stair-induced camera vibration. */
-export function stairHeight(z: number) {
-  return Math.max(0, Math.min(HOUSE.upper, ((3.3 - z) / 4.42) * HOUSE.upper));
-}
 export function floorAt(x: number, z: number, currentHeight: number): number | null {
-  const r = HOUSE.radius;
-  if (Math.abs(x) > 4.82 - r || Math.abs(z) > 3.82 - r) return null;
-  if (x > 2.95 && x < 4.35 && z > -1.12 && z < 3.3) {
-    if (x < 3.15 || x > 4.12) return null;
-    const h = stairHeight(z);
-    return Math.abs(h - currentHeight) < 0.34 ? h : null;
-  }
-  // The upstairs stairwell is genuinely open, not a painted stair texture.
-  if (currentHeight > 1.7 && x > 2.8 && x < 4.47 && z > -1.12 && z < 3.5) return null;
-  const h = currentHeight > 1.7 ? HOUSE.upper : 0;
-  return Math.abs(h - currentHeight) < 0.34 ? h : null;
+  if (
+    Math.abs(x) > HOUSE.width / 2 - HOUSE.radius ||
+    Math.abs(z) > HOUSE.depth / 2 - HOUSE.radius ||
+    Math.abs(currentHeight) > 0.34
+  )
+    return null;
+  return 0;
 }
 export function canOccupy(x: number, z: number, height: number, blockers = obstacles) {
   const floor = height > 2.6 ? 1 : 0;
