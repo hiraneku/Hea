@@ -281,6 +281,24 @@ export class AutoShield {
   }
 }
 
+/**
+ * Last-line shield position when a projectile reaches the body before a predictive patch can
+ * stand. Preserve the shot's transverse lane (clamped to the body footprint) instead of
+ * snapping every emergency patch to the chest centre; the projectile still meets the plate.
+ */
+export function shieldBodyInterceptOffset(
+  relativeStart: Vector3,
+  relativeEnd: Vector3,
+  fraction: number,
+  projectileVelocity: Vector3,
+): Vector3 {
+  const towardSource = projectileVelocity.clone().normalize().negate(),
+    contact = relativeStart.clone().lerp(relativeEnd, clamp(fraction, 0, 1)),
+    lateral = contact.addScaledVector(towardSource, -contact.dot(towardSource));
+  lateral.clampLength(0, DUEL.bodyRadius);
+  return lateral.addScaledVector(towardSource, DUEL.shieldNear);
+}
+
 /** Relative-motion CCD. Near misses don't waste the automatic shield. */
 export function threatTime(
   projectile: Point3,

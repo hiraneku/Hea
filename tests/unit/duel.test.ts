@@ -13,6 +13,7 @@ import {
   threatTime,
   ATTACK_ORDER,
   PROJECTILES,
+  shieldBodyInterceptOffset,
 } from '../../src/game/combat';
 import { DestructibleVolume, TerrainDeformation } from '../../src/game/destruction';
 import { groundHeight, resolveCircle, segmentBox } from '../../src/game/math';
@@ -77,6 +78,18 @@ describe('maximum automatic Aegis', () => {
     expect(
       threatTime(new Vector3(12, 0, 0), new Vector3(-24, 0, 0), new Vector3(), new Vector3(), 0.13),
     ).toBeNull();
+  });
+  it('keeps an emergency patch on the projectile’s off-centre impact lane', () => {
+    const offset = shieldBodyInterceptOffset(
+      new Vector3(-0.62, 0.2, -2.2),
+      new Vector3(-0.58, 0.2, -0.55),
+      0.8,
+      new Vector3(0, 0, 28),
+    );
+    expect(offset.x).toBeCloseTo(-0.588);
+    expect(offset.y).toBeCloseTo(0.2);
+    expect(offset.z).toBeCloseTo(-DUEL.shieldNear);
+    expect(Math.hypot(offset.x, offset.y)).toBeLessThanOrEqual(DUEL.bodyRadius);
   });
   it('accounts for player motion rather than blocking harmless nearby shots', () => {
     const p = new Vector3(3, 0, 0),

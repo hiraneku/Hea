@@ -46,6 +46,7 @@ import {
   shieldCovers,
   shieldScale,
   shieldIntercept,
+  shieldBodyInterceptOffset,
   salvoSpread,
   HitPause,
   PROJECTILES,
@@ -2780,8 +2781,15 @@ export class Game {
         if (hitPlayer !== null && (!worldHit || hitPlayer <= worldHit.t)) {
           if (this.aegis.enabled && covered && !this.patches.gapAt(relativeStart)) {
             // The shell's last line: a piece snaps up right at the body and takes the shot.
-            const direction = p.velocity.clone().normalize().negate(),
-              at = center.clone().addScaledVector(direction, DUEL.shieldNear),
+            const contactCenter = previousCenter.clone().lerp(center, hitPlayer),
+              relativeOffset = shieldBodyInterceptOffset(
+                relativeStart,
+                relativeEnd,
+                hitPlayer,
+                p.velocity,
+              ),
+              at = contactCenter.add(relativeOffset),
+              direction = p.velocity.clone().normalize().negate(),
               scale = shieldScale(p.radius),
               radius = patchRadius(scale);
             const patch =
