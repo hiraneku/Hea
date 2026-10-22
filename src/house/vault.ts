@@ -71,32 +71,32 @@ export function buildVault(world: T.Group, collision: T.Group, proxyMaterial: T.
       beam(
         new T.Vector3(side * (W - 0.05), HOUSE.eaves - 0.07, z),
         new T.Vector3(0, HOUSE.ridge - 0.09, z),
+        0.105,
         0.13,
-        0.17,
       );
     }
     for (const z of [-3.8, 0, 3.8])
       beam(
         new T.Vector3(side * (W - 0.2), 2.65, z),
-        new T.Vector3(side * (W - 0.85), 3.56, z),
-        0.11,
+        new T.Vector3(side * (W - 0.85), 3.48, z),
+        0.105,
       );
   }
   box(0, HOUSE.ridge - 0.12, 0, 0.2, 0.22, D * 2, M.dark);
   for (const z of [-2.65, 2.65]) {
-    box(0, 4.35, z, 4.2, 0.14, 0.15, M.dark);
+    box(0, 4.35, z, 4.25, 0.13, 0.14, M.dark);
     beam(new T.Vector3(0, 4.36, z), new T.Vector3(0, HOUSE.ridge - 0.1, z), 0.1);
   }
   // Gable triangle, north pierced by a high tracery window. Never a luminous rectangle on plaster.
   const pane = new T.Shape();
-  pane.moveTo(0.45, 3.63);
-  pane.lineTo(1.95, 3.63);
-  pane.lineTo(1.2, 4.88);
+  pane.moveTo(-0.9, 3.63);
+  pane.lineTo(0.9, 3.63);
+  pane.lineTo(0, 5.12);
   pane.closePath();
   const glass = new T.MeshStandardMaterial({
-    color: '#e9dfac',
-    emissive: '#edda99',
-    emissiveIntensity: 1.5,
+    color: '#e2e8e4',
+    emissive: '#d6e2e8',
+    emissiveIntensity: 0.6,
     roughness: 0.65,
     side: T.DoubleSide,
   });
@@ -108,9 +108,9 @@ export function buildVault(world: T.Group, collision: T.Group, proxyMaterial: T.
     shape.closePath();
     if (side === -1) {
       const hole = new T.Path();
-      hole.moveTo(0.45, 3.63);
-      hole.lineTo(1.2, 4.88);
-      hole.lineTo(1.95, 3.63);
+      hole.moveTo(-0.9, 3.63);
+      hole.lineTo(0, 5.12);
+      hole.lineTo(0.9, 3.63);
       hole.closePath();
       shape.holes.push(hole);
     }
@@ -128,16 +128,17 @@ export function buildVault(world: T.Group, collision: T.Group, proxyMaterial: T.
       p.position.z = -D + 0.11;
       world.add(p);
       const z = -D + 0.15;
-      beam(new T.Vector3(0.4, 3.59, z), new T.Vector3(2, 3.59, z), 0.085);
-      beam(new T.Vector3(0.4, 3.59, z), new T.Vector3(1.2, 4.98, z), 0.085);
-      beam(new T.Vector3(2, 3.59, z), new T.Vector3(1.2, 4.98, z), 0.085);
-      beam(new T.Vector3(1.2, 3.65, z), new T.Vector3(1.2, 4.64, z), 0.035);
+      beam(new T.Vector3(-0.96, 3.59, z), new T.Vector3(0.96, 3.59, z), 0.058);
+      beam(new T.Vector3(-0.96, 3.59, z), new T.Vector3(0, 5.22, z), 0.058);
+      beam(new T.Vector3(0.96, 3.59, z), new T.Vector3(0, 5.22, z), 0.058);
+      beam(new T.Vector3(0, 3.65, z), new T.Vector3(0, 4.91, z), 0.026);
+      beam(new T.Vector3(-0.54, 3.91, z), new T.Vector3(0.54, 3.91, z), 0.022);
       for (const [x, y, r] of [
-        [0.91, 3.91, 0.18],
-        [1.49, 3.91, 0.18],
-        [1.2, 4.37, 0.16],
+        [-0.36, 3.97, 0.2],
+        [0.36, 3.97, 0.2],
+        [0, 4.55, 0.18],
       ]) {
-        const o = new T.Mesh(new T.TorusGeometry(r, 0.022, 6, 24), M.oak);
+        const o = new T.Mesh(new T.TorusGeometry(r, 0.011, 8, 48), M.oak);
         o.position.set(x, y, z);
         o.castShadow = true;
         world.add(o);

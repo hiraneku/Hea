@@ -27,6 +27,8 @@ export const LIVING = {
   fireplace: { x: 3.55, z: -2.1, w: 1.0, d: 1.9, floor: 0 },
   entryDoor: { x: -0.37, z: 3.62, w: 0.55, d: 1.15, floor: 0 },
   bookcase: { x: -1.48, z: -3.84, w: 0.92, d: 0.42, floor: 0 },
+  writingDesk: { x: -3.72, z: 0.65, w: 0.53, d: 1.2, floor: 0 },
+  chest: { x: 2.65, z: 3.77, w: 1.1, d: 0.55, floor: 0 },
   coat: { x: -0.93, z: 3.63, w: 0.55, d: 0.55, floor: 0 },
 };
 export const RUG = { x: 0.65, z: -2.06, w: 2.65, d: 1.85 };
@@ -39,7 +41,7 @@ export const ROOMS = [
     description:
       'Living room baru mengikuti denah referensi: ruang lega, sofa linen abu, kursi goyang kayu dan perapian batu.',
     position: [0, 0, 1.7],
-    target: [1.3, 1.15, -2.2],
+    target: [0.65, 1.15, -2.2],
     icon: '01',
   },
 ] as const;

@@ -29,7 +29,7 @@ Ini keputusan pemodelan atmosfer dari referensi, bukan ukuran CAD pengguna.
 
 - Stickman putih otomatis spawn di area terbuka dekat pintu masuk.
 - Joystick HP/WASD/panah untuk berjalan; seret untuk melihat. Kamera mengikuti
-  atau beralih ke first-person melalui tombol **Kamera: Ikuti / Mata**.
+  atau beralih ke first-person melalui tombol **Kamera: Ikuti / Mata**. Saat berjalan, kamera mata mengikuti ritme langkah dengan ayunan kepala/samping ringan dan kembali halus saat berhenti; gerak dinonaktifkan pada preferensi reduced-motion.
   Tubuh/tangan/kaki tetap terlihat saat menunduk; hanya segitiga kepala yang
   dihilangkan pada salinan geometri render privat, tanpa mengubah GLB atau tulang.
   Kecepatan berjalan 0,85 m/s, turun dari 1,65 m/s.
@@ -54,8 +54,7 @@ Ini keputusan pemodelan atmosfer dari referensi, bukan ukuran CAD pengguna.
   dengan proyeksi ke depan tungku yang lebih kecil. Ini proporsi game, bukan
   spesifikasi keselamatan konstruksi perapian sungguhan.
 - Titik cahaya plafon dihapus; pencahayaan dari daylight/ambient dan perapian.
-- Api memakai tujuh lidah volume meruncing yang bergerak independen, gradien
-  kuning-jingga, kayu bakar, serta bara naik. Tetap api stylized, bukan simulasi fluida.
+- Api kini memakai lidah shader bertepi lembut, kayu bakar dengan permukaan hangus dan potongan serat terlihat, serta bara kecil. Gerak tetap stylized; bukan simulasi pembakaran/fluida.
 - Pintu masuk diperbaiki arah engsel/bukaannya, panel dua sisi dan latch besi;
   panel besar di luar pintu yang merusak tampilan dihapus. Collision daun pintu
   mencegah karakter/kamera menembusnya. Daun pintu masih statis, bukan interaksi.
@@ -70,9 +69,7 @@ cutaway pada gambar. Tidak menambah dapur, tangga, NPC, atau lantai baru.
   collision plafon datar lama.
 - Dinding plester gading bernoda halus/retak rambut, batu kaki dinding, lantai
   flagstone berwarna tanah, karpet tenun berpinggir/fringe dan kain linen.
-- Gable utara mempunyai bukaan segitiga sungguhan dengan tracery lingkaran.
-  Daylight melewati bukaan dan memproyeksikan bentuk jendela ke lantai; kaca
-  dibuat sedikit emissive untuk menggambarkan langit terang, bukan lampu.
+- Gable utara mempunyai bukaan segitiga di sumbu tengah, rangka lebih tipis dan tracery bertingkat. Kaca dibuat sedikit emissive untuk menggambarkan langit, bukan lampu. Jalur sinar dan tumpahan cahaya lantai adalah pendekatan shader lembut tanpa volumetrik/pencahayaan global.
 - Arah matahari, hemisphere dan pantulan daylight dari lantai diatur untuk
   menyisakan sudut teduh tanpa membuat kasau hitam. Pantulan bawah adalah
   aproksimasi pencahayaan, **bukan lampu/fixture plafon**. Tidak memakai GI/SSAO
@@ -91,11 +88,11 @@ menjadi sekitar 30 kelompok statis; bayangan arsitektur dicache, avatar memakai 
 decal. Angka ini bukan janji FPS pada semua HP. Arena dan controller karakter
 bersama tidak diubah oleh revamp.
 
-- 327 unit test / 31 file lulus, termasuk dimensi, batas tahap tunggal,
+- 329 unit test / 32 file lulus, termasuk dimensi, batas tahap tunggal,
   susunan furnitur/jalur kosong, collision/sliding/substep dan kamera.
-- Delapan kasus browser desktop/HP lulus: startup independen, denah satu tahap,
-  tidak ada overflow, drag look, WASD/joystick, pelepasan input, posisi avatar
-  mengikuti motor, reset titik awal, mode kamera dan kegagalan model eksplisit.
+- Putaran browser final: **13 lulus, 1 dilewati eksplisit** (lorong fisik di HP);
+  mencakup startup/denah, kontrol desktop dan joystick sentuh, mode kamera,
+  pengujian kamera langkah first-person, identitas 22 buku dan kegagalan model.
 - Build Pages juga dibuka pada prefix `/Hea/house/`: avatar termuat pada
   desktop/HP tanpa page error; screenshot pandangan mata dan denah diperiksa.
 - Satu kasus browser tambahan memverifikasi perjalanan WASD melalui lengkungan
@@ -113,16 +110,13 @@ Artefak hanya di `.cache/`, tidak ikut aset publik.
 
 ### Validasi atmosfer rumah tua
 
-- Full unit suite 327 tes / 31 file lulus, termasuk dua tes baru untuk tinggi
-  atap, lereng dan bukaan segitiga yang benar-benar bisa dilewati ray.
-- Putaran browser: delapan kasus desktop/HP lulus; satu kasus jalur lorong desktop
-  timeout saat x = −2,72 m dengan motor masih bergerak pada rasterisasi software.
-  Setelah viewport navigasi diperkecil ke 600 × 400 dan budget wall-clock disesuaikan
-  (kecepatan game tidak diubah), pengujian ulang jalur lorong lulus. Kasus lorong
-  HP dilewati secara eksplisit; tidak diklaim telah diuji melalui kontrol HP.
+- Full unit suite 329 tes / 32 file lulus, termasuk clearance atap, bukaan jendela
+  yang benar-benar terbuka, langkah kamera dan reduced-motion.
+- Putaran browser final: 13 lulus dan satu kasus lorong fisik HP dilewati secara
+  eksplisit. Jalur lorong desktop lulus setelah budget waktu uji disesuaikan untuk
+  rasterisasi software; kecepatan gerak permainan tidak diubah.
 - Build produksi `/Hea/house/` direview pada desktop dan HP: avatar/kontrol kamera,
-  tubuh saat menunduk, pintu masuk dan atmosfer, tanpa page error. Kasau juga
-  diperiksa lewat pandangan ke atas; daylight/jendela menampilkan tracery di lantai.
+  first-person, buku, pintu masuk dan interior, tanpa page error. Kasau diperiksa
+  lewat pandangan ke atas; daylight/jendela, flame, batu dan furnitur diperiksa ulang.
 - Shader/tekstur dan shadow cache tetap WebGL lokal, tanpa workflow publikasi baru.
-  Ini pemeriksaan sampel dan bukan janji FPS HP, kesamaan identik dengan ilustrasi,
-  atau penerimaan estetika pengguna.
+  Tidak ada jaminan FPS HP, kesamaan identik dengan ilustrasi, atau penerimaan estetika pengguna. Pencahayaan ini memakai shadow map/ambient fill dan tumpahan shader, bukan path tracing atau GI fisik.

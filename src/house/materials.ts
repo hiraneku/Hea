@@ -18,7 +18,7 @@ function paint(size: number, draw: (c: CanvasRenderingContext2D, size: number) =
   return map;
 }
 const timber = paint(512, (c, s) => {
-  c.fillStyle = '#ad794a';
+  c.fillStyle = '#a28c70';
   c.fillRect(0, 0, s, s);
   for (let i = 0; i < 1200; i++) {
     const x = random() * s,
@@ -64,7 +64,7 @@ const plaster = paint(512, (c, s) => {
   }
 });
 export const floorMap = paint(1024, (c, s) => {
-  c.fillStyle = '#605d50';
+  c.fillStyle = '#807b6d';
   c.fillRect(0, 0, s, s);
   const tile = s / 6;
   for (let row = 0; row < 6; row++)
@@ -84,7 +84,7 @@ export const floorMap = paint(1024, (c, s) => {
       c.closePath();
       c.fill();
       c.strokeStyle = 'rgba(230,218,186,.18)';
-      c.lineWidth = 2;
+      c.lineWidth = 1;
       c.stroke();
     }
   for (let i = 0; i < 70000; i++) {
@@ -161,11 +161,19 @@ export const artMap = paint(256, (c, s) => {
   c.fill();
 });
 function mat(color: string, map?: T.Texture) {
-  return new T.MeshStandardMaterial({ color, map, roughness: 0.89 });
+  const bump = map?.clone();
+  if (bump) bump.colorSpace = T.NoColorSpace;
+  return new T.MeshStandardMaterial({
+    color,
+    map,
+    roughness: map === fabric ? 0.96 : 0.92,
+    bumpMap: bump,
+    bumpScale: map === floorMap ? 0.035 : map === plaster ? 0.018 : 0.012,
+  });
 }
 export const M = {
   wood: mat('#a78f68', timber),
-  dark: mat('#63533f', timber),
+  dark: mat('#7c6c59', timber),
   edge: mat('#9c704e', timber),
   oak: mat('#bca37a', timber),
   floor: mat('#ffffff', floorMap),

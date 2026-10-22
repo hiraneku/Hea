@@ -2,6 +2,7 @@ import * as T from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { M } from './materials';
+import { boundBook, openJournal, BOOK_TITLES, disposeBookAssets, type HouseBook } from './books';
 import { windowAtmosphere } from './windowAtmosphere';
 import { buildVault } from './vault';
 import { hearthFire } from './hearthFire';
@@ -10,6 +11,15 @@ import { HOUSE, LIVING, RUG, obstacles } from './layout';
 /** Reference layout, reinterpreted as a village home. No speculative extra rooms. */
 export function buildHouse(scene: T.Scene) {
   const world = new T.Group();
+  const interactiveBooks = new T.Group();
+  const bookHitMaterial = new T.MeshBasicMaterial({
+    colorWrite: false,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    side: T.DoubleSide,
+  });
+  const books: HouseBook[] = [];
   const unit = new T.BoxGeometry(1, 1, 1),
     soft = new RoundedBoxGeometry(1, 1, 1, 3, 0.065);
   const cylinder = new T.CylinderGeometry(1, 1, 1, 20),
@@ -20,8 +30,8 @@ export function buildHouse(scene: T.Scene) {
     owned.push(m);
     return m;
   };
-  const grey = material('#696d65'),
-    brown = material('#4d3d2e'),
+  const grey = material('#908b7d'),
+    brown = material('#66533b'),
     black = material('#211d18');
   const cameraGeometry = new T.Group(),
     cameraMaterial = new T.MeshBasicMaterial({ side: T.DoubleSide });
@@ -89,6 +99,29 @@ export function buildHouse(scene: T.Scene) {
     );
     o.quaternion.setFromUnitVectors(new T.Vector3(0, 1, 0), b.clone().sub(a).normalize());
     return o;
+  }
+  function registerBook(book: T.Group, id: string, title: string, w: number, h: number, d: number) {
+    interactiveBooks.add(book);
+    book.updateMatrixWorld(true);
+    book.traverse((child) => {
+      if (child instanceof T.Mesh) {
+        const geometry = child.geometry.clone().applyMatrix4(child.matrixWorld);
+        const visual = new T.Mesh(geometry, child.material);
+        visual.castShadow = child.castShadow;
+        visual.receiveShadow = true;
+        world.add(visual);
+      }
+    });
+    for (const child of [...book.children])
+      if (child instanceof T.Mesh) {
+        book.remove(child);
+        child.geometry.dispose();
+      }
+    const hit = new T.Mesh(new T.BoxGeometry(w, h, d), bookHitMaterial);
+    hit.name = 'book-pickup-hitbox';
+    hit.userData = { bookId: id, title };
+    book.add(hit);
+    books.push({ id, title, position: book.position.clone(), object: book });
   }
   const proxy = (x: number, y: number, z: number, w: number, h: number, d: number) =>
     mesh(unit, cameraMaterial, x, y, z, w, h, d, false, cameraGeometry);
@@ -228,8 +261,23 @@ export function buildHouse(scene: T.Scene) {
   }
   for (let i = 0; i < 3; i++) {
     const x = s.x + (i - 1) * 0.67;
-    box(x, 0.48, s.z + 0.025, 0.65, 0.16, 0.64, grey, true);
-    box(x, 0.83, s.z - 0.22, 0.61, 0.38, 0.1, M.linen, true);
+    mesh(soft, M.linen, x, 0.51, s.z + 0.035, 0.65, 0.22, 0.65, true);
+    const cushion = mesh(soft, grey, x, 0.9, s.z - 0.19, 0.63, 0.51, 0.2, true);
+    cushion.rotation.x = -0.11;
+  }
+  for (const side of [-1, 1]) {
+    const pillow = mesh(
+      soft,
+      side < 0 ? M.sage : M.rust,
+      s.x + side * 0.86,
+      0.75,
+      s.z + 0.02,
+      0.27,
+      0.34,
+      0.31,
+      true,
+    );
+    pillow.rotation.z = -side * 0.2;
   }
   // Round three-legged side table, as in plan.
   const t = LIVING.sideTable;
@@ -256,8 +304,9 @@ export function buildHouse(scene: T.Scene) {
   }
   for (let i = 0; i < 7; i++) box((i - 3) * 0.095, 0.85, -0.29, 0.045, 0.6, 0.05, M.oak, false, a);
   box(0, 1.13, -0.29, 0.78, 0.1, 0.09, M.oak, true, a);
-  box(0, 0.48, 0, 0.61, 0.15, 0.59, grey, true, a);
-  box(0, 0.84, -0.23, 0.56, 0.35, 0.08, M.linen, true, a);
+  box(0, 0.49, 0.01, 0.62, 0.2, 0.61, M.linen, true, a);
+  const chairBack = box(0, 0.88, -0.2, 0.59, 0.48, 0.14, grey, true, a);
+  chairBack.rotation.x = -0.1;
   // Wooden rocking chair with curved runners, spindle back and a readable silhouette.
   const r = new T.Group();
   r.position.set(LIVING.rocking.x, 0, LIVING.rocking.z);
@@ -322,31 +371,125 @@ export function buildHouse(scene: T.Scene) {
   surroundMesh.castShadow = true;
   surroundMesh.receiveShadow = true;
   world.add(surroundMesh);
-  // Individual voussoirs read as hand-cut masonry rather than a flat stone box.
-  for (let i = 0; i < 11; i++) {
-    const theta = (Math.PI * i) / 10,
-      y = 0.73 + Math.sin(theta) * 0.68,
-      z = -2.1 + Math.cos(theta) * 0.65;
-    const stone = box(3.29, y, z, 0.12, 0.17, 0.21, i % 3 ? M.stoneLight : M.stoneDark, true);
-    stone.rotation.x = theta - Math.PI / 2;
+  // Proper radial wedge blocks with a constant joint gap and shared arch center.
+  for (let i = 0; i < 13; i++) {
+    const t0 = (i * Math.PI) / 13 + 0.013,
+      t1 = ((i + 1) * Math.PI) / 13 - 0.013;
+    const shape = new T.Shape();
+    for (let j = 0; j <= 6; j++) {
+      const t = t0 + ((t1 - t0) * j) / 6;
+      const u = Math.cos(t) * 0.76,
+        v = 0.74 + Math.sin(t) * 0.79;
+      if (j) shape.lineTo(u, v);
+      else shape.moveTo(u, v);
+    }
+    for (let j = 6; j >= 0; j--) {
+      const t = t0 + ((t1 - t0) * j) / 6;
+      shape.lineTo(Math.cos(t) * 0.58, 0.74 + Math.sin(t) * 0.6);
+    }
+    shape.closePath();
+    const stone = new T.Mesh(
+      new T.ExtrudeGeometry(shape, {
+        depth: 0.09,
+        bevelEnabled: true,
+        bevelSize: 0.009,
+        bevelThickness: 0.008,
+        bevelSegments: 2,
+      }),
+      i % 3 === 0 ? M.stoneDark : M.stoneLight,
+    );
+    stone.rotation.y = -Math.PI / 2;
+    stone.position.set(3.32, 0, -2.1);
+    stone.castShadow = true;
+    stone.receiveShadow = true;
+    world.add(stone);
   }
   box(3.53, 0.065, -2.1, 0.95, 0.13, 1.84, M.stone);
   box(3.57, 1.73, -2.1, 0.72, 0.11, 1.86, M.oak);
-  const hood = mesh(
-    new T.CylinderGeometry(0.52, 0.82, 1.02, 4),
-    M.plaster,
-    3.7,
-    2.27,
-    -2.1,
-    0.64,
-    1,
-    1,
-  );
-  hood.rotation.y = Math.PI / 4;
-  box(3.8, 3.1, -2.1, 0.42, 0.72, 0.78, M.plaster);
-  for (const z of [-2.36, -1.95]) {
-    const log = cyl(3.42, 0.25, z, 0.09, 0.58, M.dark);
-    log.rotation.x = Math.PI / 2;
+  // Rectangular tapered hood: the former four-sided cylinder produced an untidy diamond.
+  // Tapered masonry/plaster breast with two clean shoulder returns into the stack.
+  const hoodShape = new T.Shape();
+  hoodShape.moveTo(-0.84, 0.13);
+  hoodShape.lineTo(0.84, 0.13);
+  hoodShape.lineTo(0.84, 0.4);
+  hoodShape.lineTo(0.62, 0.67);
+  hoodShape.lineTo(0.32, 0.91);
+  hoodShape.lineTo(0.22, 1.15);
+  hoodShape.lineTo(-0.22, 1.15);
+  hoodShape.lineTo(-0.32, 0.91);
+  hoodShape.lineTo(-0.62, 0.67);
+  hoodShape.lineTo(-0.84, 0.4);
+  hoodShape.closePath();
+  const hoodGeo = new T.ExtrudeGeometry(hoodShape, {
+    depth: 0.56,
+    bevelEnabled: true,
+    bevelSize: 0.018,
+    bevelThickness: 0.012,
+    bevelSegments: 2,
+    curveSegments: 3,
+  });
+  const hoodMesh = new T.Mesh(hoodGeo, M.plaster);
+  hoodMesh.rotation.y = Math.PI / 2;
+  hoodMesh.position.set(3.3, 1.65, -2.1);
+  hoodMesh.castShadow = true;
+  hoodMesh.receiveShadow = true;
+  world.add(hoodMesh);
+  box(3.76, 3.1, -2.1, 0.42, 0.72, 0.89, M.plaster);
+  // Bark, cut end grain, charcoal and glowing fissures: not two smooth brown cylinders.
+  const charredWood = material('#373128');
+  charredWood.emissive.set('#211208');
+  charredWood.emissiveIntensity = 0.18;
+  for (let i = 0; i < 3; i++) {
+    const logGroup = new T.Group();
+    logGroup.position.set(3.18, 0.3 + i * 0.09, -2.1 + (i - 1) * 0.17);
+    logGroup.rotation.set(Math.PI / 2, 0.12 * (i - 1), 0.18 * (i - 1));
+    world.add(logGroup);
+    const bark = new T.Mesh(
+      new T.CylinderGeometry(0.066, 0.078, 0.58, 16, 4),
+      i === 1 ? charredWood : M.dark,
+    );
+    bark.castShadow = true;
+    bark.receiveShadow = true;
+    logGroup.add(bark);
+    for (let k = 0; k < 9; k++) {
+      const a = (k * Math.PI * 2) / 9;
+      beam(
+        new T.Vector3(Math.cos(a) * 0.077, -0.27, Math.sin(a) * 0.077),
+        new T.Vector3(Math.cos(a + 0.08) * 0.077, 0.26, Math.sin(a + 0.08) * 0.077),
+        0.011,
+        k % 3 ? M.iron : M.edge,
+        logGroup,
+      );
+    }
+    for (const end of [-1, 1]) {
+      const disk = new T.Mesh(new T.CylinderGeometry(0.064, 0.064, 0.008, 20), M.edge);
+      disk.position.y = end * 0.294;
+      disk.castShadow = true;
+      logGroup.add(disk);
+      for (const radius of [0.023, 0.044]) {
+        const ring = new T.Mesh(new T.TorusGeometry(radius, 0.0025, 4, 20), M.dark);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = end * 0.3;
+        logGroup.add(ring);
+      }
+    }
+  }
+  const crossLog = new T.Group();
+  crossLog.position.set(3.28, 0.37, -2.1);
+  crossLog.rotation.z = Math.PI / 2;
+  world.add(crossLog);
+  const crossBark = new T.Mesh(new T.CylinderGeometry(0.078, 0.068, 0.48, 18, 4), M.dark);
+  crossBark.castShadow = true;
+  crossBark.receiveShadow = true;
+  crossLog.add(crossBark);
+  const cutEnd = new T.Mesh(new T.CylinderGeometry(0.068, 0.068, 0.009, 20), M.edge);
+  cutEnd.position.y = 0.244;
+  crossLog.add(cutEnd);
+  for (const radius of [0.024, 0.046]) {
+    const ring = new T.Mesh(new T.TorusGeometry(radius, 0.0025, 5, 24), M.iron);
+    ring.position.y = 0.251;
+    ring.rotation.x = Math.PI / 2;
+    crossLog.add(ring);
   }
   const fire = new T.PointLight('#ffb95c', 3.2, 5, 2);
   fire.position.set(3.07, 0.65, -2.1);
@@ -372,26 +515,40 @@ export function buildHouse(scene: T.Scene) {
       0.04,
     );
   }
-  // Worn fieldstone skirting, interrupted at every doorway/window; merged by material.
+  // Regular bonded courses with clipped ends and consistent 12 mm mortar joints.
   const stones = [M.stone, M.stoneLight, M.stoneDark];
-  for (let row = 0; row < 3; row++) {
-    for (let i = 0; i < 17; i++) {
-      const x = -W + 0.18 + i * 0.48 + (row % 2) * 0.22;
-      if (x > W - 0.14) continue;
-      const width = Math.min(0.45, W - x - 0.03);
-      if (x < -3.61 || x > -2.1)
-        box(x, 0.11 + row * 0.2, -D + 0.035, width, 0.18, 0.11, stones[(i + row) % 3], true);
-      if (Math.abs(x) > 0.84)
-        box(x, 0.11 + row * 0.2, D - 0.035, width, 0.18, 0.11, stones[(i + 2 * row) % 3], true);
-    }
-    for (let i = 0; i < 17; i++) {
-      const z = -D + 0.18 + i * 0.48 + (row % 2) * 0.22;
-      if (z > D - 0.14) continue;
-      if (z < -3.1 || z > -0.95)
-        box(W - 0.035, 0.11 + row * 0.2, z, 0.11, 0.18, 0.45, stones[(i + row) % 3], true);
-      box(-W + 0.035, 0.11 + row * 0.2, z, 0.11, 0.18, 0.45, stones[(i + 2 * row) % 3], true);
+  function course(start: number, end: number, axis: 'x' | 'z', fixed: number) {
+    for (let row = 0; row < 3; row++) {
+      let edge = start;
+      let n = 0;
+      while (edge < end - 0.025) {
+        const length = Math.min(n === 0 && row % 2 ? 0.23 : 0.46, end - edge);
+        if (length > 0.035) {
+          const c = edge + length / 2,
+            y = 0.105 + row * 0.195;
+          box(
+            axis === 'x' ? c : fixed,
+            y,
+            axis === 'z' ? c : fixed,
+            axis === 'x' ? length - 0.012 : 0.095,
+            0.18,
+            axis === 'z' ? length - 0.012 : 0.095,
+            stones[(n + row) % 3],
+            true,
+          );
+        }
+        edge += length;
+        n++;
+      }
     }
   }
+  course(-W + 0.09, -3.61, 'x', -D + 0.028);
+  course(-2.1, W - 0.09, 'x', -D + 0.028);
+  course(-W + 0.09, -0.79, 'x', D - 0.028);
+  course(0.79, W - 0.09, 'x', D - 0.028);
+  course(-D + 0.09, -3.12, 'z', W - 0.028);
+  course(-0.98, D - 0.09, 'z', W - 0.028);
+  course(-D + 0.09, D - 0.09, 'z', -W + 0.028);
   // Compact household book press, pottery and baskets: no new room or floor plan.
   const cabinet = LIVING.bookcase;
   box(cabinet.x, 0.88, cabinet.z, 0.9, 1.76, 0.12, M.dark);
@@ -401,20 +558,37 @@ export function buildHouse(scene: T.Scene) {
     box(cabinet.x, y, cabinet.z + 0.14, 0.94, 0.075, 0.44, M.dark);
   for (let level = 0; level < 3; level++)
     for (let i = 0; i < 7; i++) {
-      const x = cabinet.x - 0.32 + i * 0.1,
-        h = 0.25 + ((i * 7 + level * 3) % 5) * 0.027;
-      const book = box(
-        x,
-        0.2 + level * 0.54 + h / 2,
-        cabinet.z + 0.17,
-        0.066,
-        h,
-        0.23,
-        [M.sage, M.rust, M.blue, M.cream][(i + level) % 4],
-      );
-      book.rotation.z = i === 6 ? -0.13 : 0;
-      box(x, 0.2 + level * 0.54 + h * 0.8, cabinet.z + 0.295, 0.062, 0.015, 0.006, M.gold);
+      const h = 0.27 + ((i * 7 + level * 3) % 5) * 0.022,
+        id = `shelf-${level}-${i}`,
+        book = boundBook(id, i, h);
+      book.position.set(cabinet.x - 0.32 + i * 0.1, 0.19 + level * 0.54 + h / 2, cabinet.z + 0.17);
+      registerBook(book, id, BOOK_TITLES[i], 0.09, h + 0.04, 0.25);
     }
+  // Small writing surface under the window, and a linen chest against the south wall.
+  const desk = LIVING.writingDesk;
+  box(desk.x, 0.76, desk.z, 0.54, 0.065, 1.17, M.oak, true);
+  for (const x of [desk.x - 0.2, desk.x + 0.2])
+    for (const z of [desk.z - 0.48, desk.z + 0.48]) box(x, 0.36, z, 0.065, 0.72, 0.065, M.dark);
+  box(desk.x, 0.6, desk.z, 0.45, 0.16, 1.03, M.dark);
+  box(desk.x + 0.24, 0.6, desk.z, 0.025, 0.11, 0.7, M.oak);
+  const journal = openJournal('travel-journal');
+  journal.position.set(desk.x, 0.805, desk.z);
+  journal.rotation.y = Math.PI / 2;
+  interactiveBooks.add(journal);
+  books.push({
+    id: 'travel-journal',
+    title: BOOK_TITLES[0],
+    position: journal.position.clone(),
+    object: journal,
+  });
+  const chest = LIVING.chest;
+  box(chest.x, 0.3, chest.z, 1.05, 0.48, 0.51, M.dark, true);
+  box(chest.x, 0.56, chest.z, 1.1, 0.075, 0.55, M.oak, true);
+  for (const x of [chest.x - 0.35, chest.x + 0.35]) {
+    box(x, 0.33, chest.z + 0.263, 0.055, 0.45, 0.016, M.iron);
+    box(x, 0.605, chest.z, 0.055, 0.015, 0.51, M.iron);
+  }
+  box(chest.x, 0.36, chest.z + 0.28, 0.08, 0.1, 0.02, M.gold);
   const jugGeometry = new T.LatheGeometry(
     [
       new T.Vector2(0.065, 0),
@@ -493,7 +667,7 @@ export function buildHouse(scene: T.Scene) {
     } else b.geos.push(g);
   });
   const staticHouse = new T.Group();
-  scene.add(staticHouse);
+  scene.add(staticHouse, interactiveBooks);
   for (const b of batches.values()) {
     const g = mergeGeometries(b.geos, false);
     if (!g) throw new Error('House batch failed');
@@ -510,6 +684,7 @@ export function buildHouse(scene: T.Scene) {
   originals.forEach((g) => g.dispose());
   return {
     fire,
+    books,
     animateFire: (time: number) => {
       flames.update(time);
       dust.update(time);
@@ -520,12 +695,17 @@ export function buildHouse(scene: T.Scene) {
       staticHouse.traverse((o) => {
         if (o instanceof T.Mesh) o.geometry.dispose();
       });
-      scene.remove(staticHouse, fire);
+      scene.remove(staticHouse, interactiveBooks, fire);
+      interactiveBooks.traverse((o) => {
+        if (o instanceof T.Mesh) o.geometry.dispose();
+      });
       flames.dispose();
       dust.dispose();
       vault.dispose();
       cameraMaterial.dispose();
       owned.forEach((m) => m.dispose());
+      disposeBookAssets();
+      bookHitMaterial.dispose();
     },
   };
 }

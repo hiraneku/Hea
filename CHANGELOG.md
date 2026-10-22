@@ -7,6 +7,15 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Rumah Senja — pemolesan arsitektur, cahaya, dan gerak kamera
+
+- Perapian dirapikan dengan hood berbentuk bahu meruncing dan voussoir bata/batu radial berjarak seragam; kayu kini menampilkan potongan ujung, bark gelap dan tepi bara.
+- Jendela gable dipusatkan pada sumbu ruang, rangka diperkecil dan tracery disusun ulang. Plester, kayu, lantai, kain dan batu mendapat detail bump lembut; shadow map VSM dan cahaya langit dibuat lebih halus.
+- Sofa/kursi diberi bantalan lebih membulat. Ditambah meja tulis, jurnal terbuka dan peti penyimpanan tanpa mengubah denah atau jarak tungku.
+- Buku diberi cover, spine berjudul, halaman dan ID objek stabil yang dapat menjadi fondasi raycast/mekanik interaksi selanjutnya.
+- First-person memiliki sway/head-bob ringan mengikuti jarak langkah dan mereda saat berhenti; reduced-motion menonaktifkannya.
+- Jalur cahaya/floor spill adalah pendekatan shader ringan—bukan path tracing/GI fisik. Verifikasi visual meliputi desktop/HP.
+
 ### Rumah tua — arsitektur dan atmosfer referensi ilustrasi
 
 - Atap terbuka tinggi 5,9 m, kasau/papan kayu tua, truss dan gable dengan bukaan

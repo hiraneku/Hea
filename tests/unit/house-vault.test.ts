@@ -44,8 +44,8 @@ describe('open timber vault', () => {
       const r = new T.Raycaster(new T.Vector3(x, 4.2, -5), new T.Vector3(0, 0, 1), 0, 1);
       return r.intersectObject(collision, true);
     };
-    expect(ray(1.2)).toHaveLength(0);
-    expect(ray(0).length).toBeGreaterThan(0);
+    expect(ray(0)).toHaveLength(0);
+    expect(ray(1.2).length).toBeGreaterThan(0);
     vault.dispose();
   });
 });

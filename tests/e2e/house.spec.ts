@@ -26,6 +26,17 @@ declare global {
         };
         cameraMode: string;
         cameraDistance: number;
+        cameraY: number;
+        walkBob: { side: number; y: number; roll: number; pitch: number };
+        books: {
+          id: string;
+          title: string;
+          x: number;
+          y: number;
+          z: number;
+          interactive: boolean;
+          name: string;
+        }[];
       };
     };
   }
@@ -173,4 +184,33 @@ test('open arch is a real walkable connecting hall', async ({ page }, info) => {
     .toBeLessThan(-4.5);
   await page.keyboard.up('w');
   expect((await page.evaluate(() => window.__HEA_HOUSE__.snapshot())).height).toBe(0);
+});
+
+test('books have stable individual identities and reusable interaction metadata', async ({
+  page,
+}) => {
+  await page.goto('/house/?test');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30000 });
+  const books = await page.evaluate(() => window.__HEA_HOUSE__.snapshot().books);
+  expect(books).toHaveLength(22);
+  expect(new Set(books.map((book) => book.id)).size).toBe(22);
+  expect(books.every((book) => book.interactive && book.name === `book:${book.id}`)).toBe(true);
+  expect(books.find((book) => book.id === 'travel-journal')?.title).toBe('Catatan Perjalanan');
+});
+
+test('first-person camera follows footfalls and settles at rest', async ({ page }) => {
+  await page.goto('/house/?test');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 30000 });
+  await page.locator('#camera-toggle').click();
+  await page.locator('#view').focus();
+  await page.keyboard.down('w');
+  await expect.poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().moving)).toBe(true);
+  const heights: number[] = [];
+  for (let i = 0; i < 18; i++) {
+    await page.waitForTimeout(55);
+    heights.push(await page.evaluate(() => window.__HEA_HOUSE__.snapshot().cameraY));
+  }
+  await page.keyboard.up('w');
+  await expect.poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().moving)).toBe(false);
+  expect(Math.max(...heights) - Math.min(...heights)).toBeGreaterThan(0.01);
 });

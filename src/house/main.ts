@@ -3,6 +3,7 @@ import '@fontsource/inter/latin-500.css';
 import '@fontsource/inter/latin-600.css';
 import './style.css';
 import * as T from 'three';
+import { WalkCamera } from './WalkCamera';
 import { HouseCharacter } from './HouseCharacter';
 import { HouseFollowCamera } from './followCamera';
 import { buildHouse } from './scene';
@@ -36,7 +37,7 @@ app.innerHTML = `
   <div class="walk-hint"><kbd>W</kbd><span><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><small>BERJALAN</small></div>
   <footer class="house-footer"><span>HEA / ENVIRONMENT STUDY <b>01</b></span><span id="visit-status">RUMAH SENJA · RUMAH TUA 1</span></footer>
   <dialog id="plan-dialog"><div class="dialog-head"><div><p class="eyebrow">RUMAH SENJA</p><h2>Ruang untuk hidup.</h2></div><button data-close aria-label="Tutup denah">✕</button></div><div class="plan-tabs"><button data-floor="0" aria-pressed="true">01 · Lantai bawah</button></div><p class="dialog-copy">Denah living room baru. Utara di atas, pintu masuk di bawah.</p><div id="floor-plan"></div><div class="plan-legend"><span><i></i> Ruang keluarga</span><span>8,11 × 8,3 m · living room</span></div></dialog>
-  <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse. Kamera mengikuti stickman; tombol Kamera mengganti ke first-person. Menunduk untuk melihat tubuh dan kaki.</span></li><li><strong>Berjalan</strong><span>Gerakkan stickman dengan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Rumah baru, tahap pertama</strong><span>Living room mengikuti denah referensi. Ruangan lain dan akses keluar belum dibangun; lorong lengkung dalam sudah terbuka.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
+  <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse. Kamera mengikuti stickman; tombol Kamera mengganti ke first-person. Saat berjalan, kamera mata ikut mengayun lembut; menunduk untuk melihat tubuh dan kaki.</span></li><li><strong>Berjalan</strong><span>Gerakkan stickman dengan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Rumah baru, tahap pertama</strong><span>Living room mengikuti denah referensi. Ruangan lain dan akses keluar belum dibangun; lorong lengkung dalam sudah terbuka.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
   <div id="transition" aria-hidden="true"></div>`;
 
 const view = document.querySelector<HTMLDivElement>('#view')!;
@@ -57,14 +58,14 @@ try {
 }
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = T.PCFSoftShadowMap;
+renderer.shadowMap.type = T.VSMShadowMap;
 renderer.toneMapping = T.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.12;
+renderer.toneMappingExposure = 1.18;
 renderer.outputColorSpace = T.SRGBColorSpace;
 view.append(renderer.domElement);
 renderer.domElement.setAttribute('aria-label', 'Pemandangan interior Rumah Senja');
-scene.add(new T.HemisphereLight('#e9e6d4', '#93866b', 1.4));
-const sun = new T.DirectionalLight('#fff0cb', 3.3);
+scene.add(new T.HemisphereLight('#e8eff4', '#938b7b', 1.45));
+const sun = new T.DirectionalLight('#fff5e9', 2.5);
 sun.position.set(2, 10, -9);
 sun.target.position.set(-0.4, 0, -1);
 sun.castShadow = true;
@@ -75,14 +76,16 @@ sun.shadow.camera.top = 10;
 sun.shadow.camera.bottom = -10;
 sun.shadow.camera.near = 0.5;
 sun.shadow.camera.far = 35;
-sun.shadow.normalBias = 0.025;
+sun.shadow.normalBias = 0.018;
+sun.shadow.radius = 3;
+sun.shadow.blurSamples = 6;
 sun.shadow.bias = -0.00015;
 // Architecture is static: reuse its shadow map on mobile instead of redrawing it every frame.
 sun.shadow.autoUpdate = false;
 sun.shadow.needsUpdate = true;
 scene.add(sun, sun.target);
 // Low, upward daylight bounce keeps rafters readable without a ceiling lamp.
-const floorBounce = new T.DirectionalLight('#e4d4ad', 1.25);
+const floorBounce = new T.DirectionalLight('#e9e5dc', 0.72);
 floorBounce.position.set(0, 0.4, 0);
 floorBounce.target.position.set(0, 5.9, 0);
 scene.add(floorBounce, floorBounce.target);
@@ -103,12 +106,14 @@ let x = 0,
   activeRoom: RoomId = 'living',
   activeFloor = 0,
   planFloor = 0;
+let headMotion = { side: 0, y: 0, roll: 0, pitch: 0 };
 let moving = false,
   tourTimer: ReturnType<typeof setTimeout> | undefined;
 let character: HouseCharacter | undefined;
 let characterError = false;
 let following = true;
 const followCamera = new HouseFollowCamera();
+const walkCamera = new WalkCamera();
 const keys = new Set<string>();
 const stick = { x: 0, y: 0 };
 const dialogs = [...document.querySelectorAll<HTMLDialogElement>('dialog')];
@@ -145,6 +150,7 @@ function putInRoom(id: RoomId, immediate = false) {
     pitch = camera.rotation.x;
     character?.reset(x, height, z, yaw);
     followCamera.reset();
+    walkCamera.reset();
     moving = false;
     updateCaption(id);
     view.focus({ preventScroll: true });
@@ -393,6 +399,7 @@ function frame(now: number) {
     pitch,
   );
   character?.setFirstPerson(!following);
+  headMotion = walkCamera.update(dt, Math.hypot(x - beforeX, z - beforeZ), !following && !reduced);
   if (character && following) {
     character.setVisible(
       followCamera.update(camera, dt, x, height, z, yaw, pitch, house.cameraGeometry, baseFov),
@@ -401,11 +408,11 @@ function frame(now: number) {
     camera.fov = baseFov;
     camera.updateProjectionMatrix();
     camera.position.set(
-      x - Math.sin(yaw) * 0.1,
-      height + HOUSE.firstPersonEye,
-      z - Math.cos(yaw) * 0.1,
+      x - Math.sin(yaw) * 0.1 + Math.cos(yaw) * headMotion.side,
+      height + HOUSE.firstPersonEye + headMotion.y,
+      z - Math.cos(yaw) * 0.1 - Math.sin(yaw) * headMotion.side,
     );
-    camera.rotation.set(pitch, yaw, 0);
+    camera.rotation.set(pitch + headMotion.pitch, yaw, headMotion.roll);
     character?.setVisible(true);
   }
   if (!reduced) {
@@ -434,8 +441,19 @@ if (new URLSearchParams(location.search).has('test')) {
         frames,
         drawCalls: renderer.info.render.calls,
         staticBatches: house.meshCount,
+        books: house.books.map((b) => ({
+          id: b.id,
+          title: b.title,
+          x: b.position.x,
+          y: b.position.y,
+          z: b.position.z,
+          interactive: b.object.userData.pickupReady === true,
+          name: b.object.name,
+        })),
         character: character?.snapshot() ?? { loaded: false, visible: false },
         cameraMode: following ? 'follow' : 'eyes',
+        walkBob: headMotion,
+        cameraY: camera.position.y,
         cameraDistance: followCamera.distance,
       }),
     },
