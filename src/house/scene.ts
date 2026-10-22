@@ -2,7 +2,8 @@ import * as T from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { M } from './materials';
-import { HOUSE, LIVING, obstacles } from './layout';
+import { hearthFire } from './hearthFire';
+import { HOUSE, LIVING, RUG, obstacles } from './layout';
 
 /** Reference layout, reinterpreted as a village home. No speculative extra rooms. */
 export function buildHouse(scene: T.Scene) {
@@ -18,7 +19,6 @@ export function buildHouse(scene: T.Scene) {
     return m;
   };
   const grey = material('#696d65'),
-    lightGrey = material('#a0a69a'),
     brown = material('#4d3d2e'),
     black = material('#211d18');
   const cameraGeometry = new T.Group(),
@@ -101,7 +101,31 @@ export function buildHouse(scene: T.Scene) {
   proxy(0, -0.1, 0, HOUSE.width, 0.2, HOUSE.depth);
   box(0, 3.34, 0, HOUSE.width + 0.3, 0.16, HOUSE.depth + 0.3, M.plaster);
   proxy(0, 3.34, 0, HOUSE.width, 0.16, HOUSE.depth);
-  wall(0, -D - 0.09, HOUSE.width + 0.36, 0.18);
+  // Real arched opening: side piers and the curved spandrel, not a door on a solid wall.
+  wall((-W - 3.5) / 2, -D - 0.09, W - 3.5, 0.18);
+  wall((-2.2 + W) / 2, -D - 0.09, W + 2.2, 0.18);
+  const spandrel = new T.Shape();
+  spandrel.moveTo(-0.65, 3.25);
+  spandrel.lineTo(0.65, 3.25);
+  spandrel.lineTo(0.65, 1.76);
+  spandrel.absarc(0, 1.76, 0.65, 0, Math.PI, false);
+  spandrel.closePath();
+  const archTop = new T.Mesh(
+    new T.ExtrudeGeometry(spandrel, { depth: 0.18, bevelEnabled: false, curveSegments: 20 }),
+    M.plaster,
+  );
+  archTop.position.set(-2.85, 0, -D - 0.18);
+  world.add(archTop);
+  const archProxy = archTop.clone();
+  cameraGeometry.add(archProxy);
+  box(-2.85, -0.09, -5.25, 1.3, 0.18, 2.2, M.floor);
+  proxy(-2.85, -0.1, -5.25, 1.3, 0.2, 2.2);
+  for (const x of [-3.59, -2.11]) {
+    wall(x, -5.25, 0.18, 2.2, 2.7);
+  }
+  wall(-2.85, -6.44, 1.66, 0.18, 2.7);
+  box(-2.85, 2.78, -5.25, 1.66, 0.16, 2.2, M.plaster);
+  proxy(-2.85, 2.78, -5.25, 1.66, 0.16, 2.2);
   wall(W + 0.09, 0, 0.18, HOUSE.depth);
   // Entrance opening in south wall. Closed porch view keeps this first stage self-contained.
   wall((-W - 0.62) / 2, D + 0.09, W - 0.62, 0.18);
@@ -112,14 +136,25 @@ export function buildHouse(scene: T.Scene) {
   box(0, 2.47, D, 1.42, 0.14, 0.24, M.oak);
   const door = new T.Group();
   door.position.set(-0.59, 0, D);
-  door.rotation.y = -1.17;
+  door.rotation.y = 1.17;
   world.add(door);
   box(0.57, 1.17, 0, 1.14, 2.34, 0.065, M.dark, false, door);
-  for (const y of [0.65, 1.75]) box(0.57, y, -0.045, 0.86, 0.77, 0.04, M.oak, false, door);
-  cyl(1.02, 1.15, -0.09, 0.045, 0.12, M.gold, door);
-  box(0, 1.25, D + 0.65, 1.3, 2.5, 0.1, M.dark); // temporary closed porch, not another finished room
+  // Recessed panels on both faces, iron strap hinges and a horizontal latch.
+  for (const side of [-1, 1]) {
+    for (const y of [0.65, 1.75]) box(0.57, y, side * 0.041, 0.86, 0.77, 0.025, M.oak, false, door);
+    for (const y of [0.32, 2.02])
+      box(0.2, y, side * 0.045, 0.36, 0.065, 0.025, M.iron, false, door);
+    box(1.0, 1.13, side * 0.07, 0.14, 0.035, 0.05, M.iron, false, door);
+  }
+  // Porch is open daylight, not the opaque panel that previously obscured the entry.
+  box(0, -0.08, D + 0.65, 1.6, 0.16, 1.3, M.stone);
   box(0, 0.016, 3.18, 1.25, 0.024, 0.74, brown);
-  proxy(0, 1.25, D, 1.3, 2.5, 0.08); // Keep the follow camera inside the entry aperture.
+  const doorProxy = door.clone();
+  doorProxy.traverse((o) => {
+    if (o instanceof T.Mesh) o.material = cameraMaterial;
+  });
+  cameraGeometry.add(doorProxy);
+  proxy(0, 1.25, D, 1.3, 2.5, 0.08);
   // West window: genuine aperture with wood mullions, linen curtains, garden outside.
   wall(-W - 0.09, (-D - 0.4) / 2, 0.18, D - 0.4);
   wall(-W - 0.09, (D + 1.7) / 2, 0.18, D - 1.7);
@@ -153,41 +188,36 @@ export function buildHouse(scene: T.Scene) {
   for (const z of [-2.9, 0, 2.9]) box(0, 3.17, z, HOUSE.width, 0.2, 0.17, M.dark);
   for (const z of [-D + 0.01, D - 0.01]) box(0, 0.1, z, HOUSE.width, 0.2, 0.06, M.wood);
   for (const x of [-W + 0.01, W - 0.01]) box(x, 0.1, 0, 0.06, 0.2, HOUSE.depth, M.wood);
-  // Future north-west connection is represented by a closed arched timber door.
-  const arch = new T.Shape();
-  arch.moveTo(-0.62, 0);
-  arch.lineTo(0.62, 0);
-  arch.lineTo(0.62, 1.76);
-  arch.absarc(0, 1.76, 0.62, 0, Math.PI, false);
-  arch.lineTo(-0.62, 0);
-  const archGeo = new T.ExtrudeGeometry(arch, {
-    depth: 0.07,
-    bevelEnabled: false,
-    curveSegments: 20,
-  });
-  const arched = new T.Mesh(archGeo, M.oak);
-  arched.position.set(-2.85, 0, -D + 0.025);
-  world.add(arched);
-  for (const x of [-3.51, -2.19]) box(x, 0.89, -D + 0.08, 0.12, 1.78, 0.16, M.dark);
-  const arc = new T.TorusGeometry(0.66, 0.06, 6, 32, Math.PI);
+  // Open timber arch to the connecting hall: no leaf, handle or board behind it.
+  for (const x of [-3.55, -2.15]) box(x, 0.88, -D + 0.04, 0.1, 1.76, 0.18, M.dark);
+  const arc = new T.TorusGeometry(0.7, 0.05, 6, 32, Math.PI);
   const rim = new T.Mesh(arc, M.dark);
-  rim.position.set(-2.85, 1.76, -D + 0.1);
+  rim.position.set(-2.85, 1.76, -D + 0.04);
   world.add(rim);
-  for (let i = 0; i < 7; i++) box(-3.37 + i * 0.17, 0.82, -D + 0.108, 0.012, 1.6, 0.008, M.edge);
-  cyl(-2.47, 1.0, -D + 0.17, 0.035, 0.12, M.iron);
   // Plain brown woven rug: reference size and position, not the old central patterned rug.
-  box(1.32, 0.015, -2.12, 3.25, 0.025, 1.95, brown);
-  // Three-seat linen sofa, north wall, facing south into the seating group.
+  box(RUG.x, 0.015, RUG.z, RUG.w, 0.025, RUG.d, brown);
+  // Craftsman's settle: exposed oak rails/slats, restrained loose linen cushions.
   const s = LIVING.sofa;
-  for (const x of [s.x - 0.9, s.x + 0.9])
-    for (const z of [s.z - 0.25, s.z + 0.25]) box(x, 0.14, z, 0.085, 0.28, 0.085, M.dark);
-  box(s.x, 0.35, s.z, 2.22, 0.28, 0.78, grey, true);
-  box(s.x, 0.79, s.z - 0.32, 2.28, 0.76, 0.2, grey, true);
-  for (const side of [-1, 1]) box(s.x + side * 1.08, 0.62, s.z, 0.19, 0.48, 0.86, grey, true);
+  for (const x of [s.x - 1.03, s.x + 1.03])
+    for (const z of [s.z - 0.29, s.z + 0.29]) {
+      cyl(x, 0.25, z, 0.055, 0.5, M.dark);
+      cyl(x, 0.52, z, 0.07, 0.08, M.oak);
+    }
+  box(s.x, 0.35, s.z, 2.23, 0.12, 0.73, M.dark);
+  box(s.x, 0.22, s.z + 0.29, 2.1, 0.08, 0.06, M.oak);
+  box(s.x, 1.12, s.z - 0.32, 2.3, 0.11, 0.1, M.oak, true);
+  box(s.x, 0.58, s.z - 0.32, 2.2, 0.09, 0.08, M.dark);
+  for (let i = 0; i < 13; i++)
+    box(s.x - 1.02 + i * 0.17, 0.85, s.z - 0.33, 0.065, 0.5, 0.055, M.oak);
+  for (const side of [-1, 1]) {
+    box(s.x + side * 1.07, 0.74, s.z, 0.105, 0.1, 0.88, M.oak, true);
+    for (const z of [s.z - 0.22, s.z + 0.22])
+      box(s.x + side * 1.07, 0.57, z, 0.045, 0.26, 0.045, M.dark);
+  }
   for (let i = 0; i < 3; i++) {
-    const x = s.x + (i - 1) * 0.66;
-    box(x, 0.53, s.z + 0.04, 0.64, 0.16, 0.64, grey, true);
-    box(x, 0.91, s.z - 0.19, 0.64, 0.49, 0.16, grey, true);
+    const x = s.x + (i - 1) * 0.67;
+    box(x, 0.48, s.z + 0.025, 0.65, 0.16, 0.64, grey, true);
+    box(x, 0.83, s.z - 0.22, 0.61, 0.38, 0.1, M.linen, true);
   }
   // Round three-legged side table, as in plan.
   const t = LIVING.sideTable;
@@ -200,16 +230,22 @@ export function buildHouse(scene: T.Scene) {
       0.055,
     );
   }
-  // Upholstered armchair faces into the rug from its west edge.
+  // Matching oak armchair, not a modern upholstered tub chair.
   const a = new T.Group();
   a.position.set(LIVING.armchair.x, 0, LIVING.armchair.z);
   a.rotation.y = Math.PI / 2;
   world.add(a);
-  box(0, 0.43, 0, 0.69, 0.22, 0.66, lightGrey, true, a);
-  box(0, 0.79, -0.26, 0.73, 0.64, 0.18, lightGrey, true, a);
-  for (const side of [-1, 1]) box(side * 0.34, 0.66, 0.02, 0.14, 0.4, 0.67, lightGrey, true, a);
-  for (const x of [-0.25, 0.25])
-    for (const z of [-0.23, 0.23]) box(x, 0.15, z, 0.065, 0.3, 0.065, M.oak, false, a);
+  box(0, 0.37, 0, 0.7, 0.1, 0.68, M.dark, false, a);
+  for (const x of [-0.3, 0.3])
+    for (const z of [-0.25, 0.25]) cyl(x, 0.23, z, 0.045, 0.46, M.dark, a);
+  for (const x of [-0.34, 0.34]) {
+    box(x, 0.72, 0, 0.09, 0.09, 0.76, M.oak, true, a);
+    for (const z of [-0.25, 0.25]) box(x, 0.55, z, 0.045, 0.32, 0.045, M.dark, false, a);
+  }
+  for (let i = 0; i < 7; i++) box((i - 3) * 0.095, 0.85, -0.29, 0.045, 0.6, 0.05, M.oak, false, a);
+  box(0, 1.13, -0.29, 0.78, 0.1, 0.09, M.oak, true, a);
+  box(0, 0.48, 0, 0.61, 0.15, 0.59, grey, true, a);
+  box(0, 0.84, -0.23, 0.56, 0.35, 0.08, M.linen, true, a);
   // Wooden rocking chair with curved runners, spindle back and a readable silhouette.
   const r = new T.Group();
   r.position.set(LIVING.rocking.x, 0, LIVING.rocking.z);
@@ -250,7 +286,7 @@ export function buildHouse(scene: T.Scene) {
     for (let i = 0; i < 5; i++) box(3.255, 0.21 + i * 0.23, z, 0.018, 0.012, 0.25, M.mortar);
   }
   box(3.52, 1.37, -2.1, 0.76, 0.21, 1.98, M.stone);
-  box(3.43, 0.08, -2.1, 1.04, 0.16, 2.02, M.stone);
+  box(3.53, 0.065, -2.1, 0.95, 0.13, 1.84, M.stone);
   box(3.55, 1.55, -2.1, 0.7, 0.12, 2.08, M.oak);
   for (const z of [-2.36, -1.95]) {
     const log = cyl(3.42, 0.25, z, 0.09, 0.58, M.dark);
@@ -259,13 +295,7 @@ export function buildHouse(scene: T.Scene) {
   const fire = new T.PointLight('#ffb95c', 3.2, 5, 2);
   fire.position.set(3.07, 0.65, -2.1);
   scene.add(fire);
-  const flameGeometry = new T.SphereGeometry(1, 10, 10),
-    flameMaterial = M.glow.clone();
-  owned.push(flameMaterial);
-  const ember = new T.Mesh(flameGeometry, flameMaterial);
-  ember.position.set(3.42, 0.38, -2.1);
-  ember.scale.set(0.12, 0.22, 0.33);
-  scene.add(ember);
+  const flames = hearthFire(scene);
   // Entry coat stand: slim turned post with radial hooks and splayed feet.
   const c = LIVING.coat;
   cyl(c.x, 0.95, c.z, 0.035, 1.9);
@@ -346,15 +376,15 @@ export function buildHouse(scene: T.Scene) {
   originals.forEach((g) => g.dispose());
   return {
     fire,
-    ember,
+    animateFire: flames.update,
     meshCount: staticHouse.children.length,
     cameraGeometry,
     dispose() {
       staticHouse.traverse((o) => {
         if (o instanceof T.Mesh) o.geometry.dispose();
       });
-      scene.remove(staticHouse, fire, ember);
-      flameGeometry.dispose();
+      scene.remove(staticHouse, fire);
+      flames.dispose();
       cameraMaterial.dispose();
       owned.forEach((m) => m.dispose());
     },

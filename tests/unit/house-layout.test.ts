@@ -14,7 +14,8 @@ describe('reference living room, first stage', () => {
     expect(LIVING.armchair.x).toBeLessThan(LIVING.rocking.x);
     expect(LIVING.coat.z).toBeGreaterThan(3);
     const b = Object.values(LIVING);
-    for (const z of [3, 2, 1, 0]) expect(canOccupy(0, z, 0, b)).toBe(true);
+    expect(canOccupy(0.35, 3, 0, b)).toBe(true);
+    for (const z of [2, 1, 0]) expect(canOccupy(0, z, 0, b)).toBe(true);
   });
   it('cannot exit the shell or an unbuilt future room', () => {
     const p = moveInside(0, 1.5, 0, 100, 0, []);

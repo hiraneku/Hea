@@ -5,6 +5,7 @@ import { CharacterLocomotion } from '../character/CharacterLocomotion';
 import { CharacterFacing } from '../character/CharacterFacing';
 import { CharacterArmSpace } from '../character/CharacterArmSpace';
 import { CharacterLook } from '../character/CharacterLook';
+import { firstPersonBody } from './firstPersonBody';
 import { M } from './materials';
 
 /** House motor owns world translation. The existing private rig supplies poses only. */
@@ -16,6 +17,12 @@ export class HouseCharacter {
   private readonly arms: CharacterArmSpace;
   private readonly look: CharacterLook;
   private readonly contact: T.Mesh;
+  private firstPerson = false;
+  private readonly bodyMeshes: {
+    mesh: T.SkinnedMesh;
+    full: T.BufferGeometry;
+    body: T.BufferGeometry;
+  }[] = [];
   readonly scale = 0.82; // Original normalized 2 m rig -> 1.64 m household stature.
   private constructor(
     readonly model: T.Group,
@@ -30,7 +37,10 @@ export class HouseCharacter {
         // anchors the avatar without forcing the complete house shadow to redraw.
         o.castShadow = false;
         o.receiveShadow = true;
-        if (o instanceof T.SkinnedMesh) o.frustumCulled = false;
+        if (o instanceof T.SkinnedMesh) {
+          o.frustumCulled = false;
+          this.bodyMeshes.push({ mesh: o, full: o.geometry, body: firstPersonBody(o) });
+        }
       }
     });
     this.playback = new CharacterPlayback(model, animations);
@@ -89,7 +99,7 @@ export class HouseCharacter {
     if (moving)
       this.playback.speed = T.MathUtils.clamp(
         speed / (this.playback.authoredWalkSpeed * this.scale),
-        0.5,
+        0.2,
         2.2,
       );
     this.playback.setMode(moving ? 'walk' : 'bind');
@@ -112,9 +122,16 @@ export class HouseCharacter {
   setVisible(visible: boolean) {
     this.root.visible = visible;
   }
+  setFirstPerson(enabled: boolean) {
+    if (enabled === this.firstPerson) return;
+    this.firstPerson = enabled;
+    for (const b of this.bodyMeshes) b.mesh.geometry = enabled ? b.body : b.full;
+    this.contact.visible = !enabled;
+  }
   snapshot() {
     return {
       loaded: true,
+      firstPerson: this.firstPerson,
       position: { x: this.root.position.x, y: this.root.position.y, z: this.root.position.z },
       visible: this.root.visible,
       bodyYaw: this.facing.yaw,
@@ -123,6 +140,8 @@ export class HouseCharacter {
     };
   }
   dispose() {
+    this.setFirstPerson(false);
+    for (const b of this.bodyMeshes) b.body.dispose();
     this.playback.dispose();
     this.contact.geometry.dispose();
     (this.contact.material as T.Material).dispose();

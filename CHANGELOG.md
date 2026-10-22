@@ -7,6 +7,20 @@ dipindahkan dari README (yang kini ringkas) tanpa mengubah isinya.
 
 ## [Unreleased]
 
+### Living room — koreksi gerak, first-person dan furnitur
+
+- Jalan dalam rumah diperlambat dari 1,65 menjadi 0,85 m/s.
+- Mode Mata menampilkan tubuh ketika menunduk; kepala dihilangkan hanya pada
+  salinan geometri tampilan, bukan mengubah rig/GLB asli.
+- Rangka sofa/kursi santai kayu-linen menggantikan desain upholstery modern.
+  Kursi goyang dan karpet dijauhkan dari tungku; ukuran karpet/alas batu disesuaikan.
+- Api berlapis meruncing, sway independen dan bara naik menggantikan bola emissive.
+  Hapus point-light plafon; pertahankan daylight/ambient serta cahaya perapian.
+- Pintu masuk diperbaiki panel/engsel/latch dan collider-nya. Pintu dalam diganti
+  bukaan lengkung sungguhan dengan lorong penghubung yang bisa dilewati.
+- 325 unit test lulus; delapan kasus browser HP/desktop dan satu jalur lorong
+  desktop lulus. Review build produksi mencakup tubuh first-person dan pintu masuk.
+
 ### Rumah Senja — revamp tahap 1, living room referensi
 
 - Mulai rumah baru bertahap, bukan mempertahankan denah dua lantai lama.

@@ -17,6 +17,7 @@ declare global {
         staticBatches: number;
         character: {
           loaded: boolean;
+          firstPerson?: boolean;
           visible: boolean;
           bodyYaw?: number;
           walkPhase?: number;
@@ -113,8 +114,14 @@ test('white stickman spawns in the new living room and camera modes work without
     .toBe('eyes');
   await expect
     .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().character.visible))
-    .toBe(false);
+    .toBe(true);
+  await expect
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().character.firstPerson))
+    .toBe(true);
   await page.locator('#camera-toggle').click();
+  await expect
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().character.firstPerson))
+    .toBe(false);
   if (info.project.name === 'mobile') await page.locator('#mobile-rooms').click();
   await page.locator('[data-room="living"]').click();
   await expect.poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().height)).toBe(0);
@@ -130,4 +137,34 @@ test('required house stickman load failure stays explicit and offers retry', asy
   await expect(page.locator('#loading')).toContainText('Stickman gagal dimuat', { timeout: 30000 });
   await expect(page.locator('#retry-character')).toBeVisible();
   expect((await page.evaluate(() => window.__HEA_HOUSE__.snapshot())).character.loaded).toBe(false);
+});
+
+test('open arch is a real walkable connecting hall', async ({ page }, info) => {
+  test.skip(
+    info.project.name === 'mobile',
+    'Motor union is unit-tested; desktop verifies the real control route.',
+  );
+  test.setTimeout(90000);
+  await page.setViewportSize({ width: 800, height: 500 });
+  await page.goto('/house/?test');
+  await expect(page.locator('#loading')).toBeHidden({ timeout: 45000 });
+  const yaw = await page.evaluate(() => window.__HEA_HOUSE__.snapshot().yaw);
+  await page.mouse.move(200, 250);
+  await page.mouse.down();
+  await page.mouse.move(200 + yaw / 0.0035, 250, { steps: 3 });
+  await page.mouse.up();
+  await page.locator('#view').focus();
+  await page.keyboard.down('a');
+  await expect
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().x), { timeout: 25000 })
+    .toBeLessThan(-2.8);
+  await page.keyboard.up('a');
+  const x = await page.evaluate(() => window.__HEA_HOUSE__.snapshot().x);
+  expect(x).toBeGreaterThan(-3.1);
+  await page.keyboard.down('w');
+  await expect
+    .poll(() => page.evaluate(() => window.__HEA_HOUSE__.snapshot().z), { timeout: 45000 })
+    .toBeLessThan(-4.5);
+  await page.keyboard.up('w');
+  expect((await page.evaluate(() => window.__HEA_HOUSE__.snapshot())).height).toBe(0);
 });

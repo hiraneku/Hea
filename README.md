@@ -12,7 +12,7 @@ cover. Tanpa backend, akun, atau koneksi eksternal saat bermain.
 isekai yang dibangun ulang bertahap, dimulai dari living room 8,11 × 8,3 m
 sesuai denah referensi, terpisah dari arena. Seret untuk melihat,
 joystick/WASD untuk menggerakkan stickman putih. Kamera mengikuti dari belakang
-atau beralih ke pandangan mata; pilih ruangan atau denah untuk tur cepat.
+atau beralih ke first-person dengan tubuh terlihat saat menunduk; pilih ruangan atau denah untuk tur cepat.
 Rincian desain di [docs/HOUSE.md](docs/HOUSE.md).
 
 Dibangun dari repo yang awalnya hanya berisi `reference.mp4`; video itu (dan

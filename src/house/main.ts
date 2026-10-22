@@ -6,7 +6,7 @@ import * as T from 'three';
 import { HouseCharacter } from './HouseCharacter';
 import { HouseFollowCamera } from './followCamera';
 import { buildHouse } from './scene';
-import { HOUSE, ROOMS, LIVING, moveInside, type RoomId } from './layout';
+import { HOUSE, ROOMS, LIVING, RUG, moveInside, type RoomId } from './layout';
 
 const app = document.querySelector<HTMLDivElement>('#house-app')!;
 const rootURL = new URL(
@@ -36,7 +36,7 @@ app.innerHTML = `
   <div class="walk-hint"><kbd>W</kbd><span><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd></span><small>BERJALAN</small></div>
   <footer class="house-footer"><span>HEA / ENVIRONMENT STUDY <b>01</b></span><span id="visit-status">RUMAH SENJA · LIVING ROOM 1</span></footer>
   <dialog id="plan-dialog"><div class="dialog-head"><div><p class="eyebrow">RUMAH SENJA</p><h2>Ruang untuk hidup.</h2></div><button data-close aria-label="Tutup denah">✕</button></div><div class="plan-tabs"><button data-floor="0" aria-pressed="true">01 · Lantai bawah</button></div><p class="dialog-copy">Denah living room baru. Utara di atas, pintu masuk di bawah.</p><div id="floor-plan"></div><div class="plan-legend"><span><i></i> Ruang keluarga</span><span>8,11 × 8,3 m · living room</span></div></dialog>
-  <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse. Kamera mengikuti stickman; tombol Kamera mengganti ke sudut mata.</span></li><li><strong>Berjalan</strong><span>Gerakkan stickman dengan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Rumah baru, tahap pertama</strong><span>Living room mengikuti denah referensi. Ruangan lain dan akses keluar belum dibangun.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
+  <dialog id="help-dialog"><div class="dialog-head"><div><p class="eyebrow">SILAKAN MASUK</p><h2>Jadikan dirimu di rumah.</h2></div><button data-close aria-label="Tutup petunjuk">✕</button></div><ul class="help-list"><li><strong>Lihat sekeliling</strong><span>Seret layar dengan jari atau mouse. Kamera mengikuti stickman; tombol Kamera mengganti ke first-person. Menunduk untuk melihat tubuh dan kaki.</span></li><li><strong>Berjalan</strong><span>Gerakkan stickman dengan joystick di kiri bawah, WASD, atau tombol panah. Furnitur dan dinding menghalangi jalan.</span></li><li><strong>Rumah baru, tahap pertama</strong><span>Living room mengikuti denah referensi. Ruangan lain dan akses keluar belum dibangun; lorong lengkung dalam sudah terbuka.</span></li><li><strong>Pindah ruangan</strong><span>Pilih nama ruangan atau gunakan denah untuk langsung berpindah.</span></li></ul></dialog>
   <div id="transition" aria-hidden="true"></div>`;
 
 const view = document.querySelector<HTMLDivElement>('#view')!;
@@ -81,9 +81,7 @@ sun.shadow.bias = -0.00015;
 sun.shadow.autoUpdate = false;
 sun.shadow.needsUpdate = true;
 scene.add(sun, sun.target);
-const fill = new T.PointLight('#ffe7c2', 10, 14, 2);
-fill.position.set(-0.8, 2.7, 0.8);
-scene.add(fill);
+// Daylight and the hearth only: no overhead lamp or invisible ceiling point light.
 
 let house: ReturnType<typeof buildHouse>;
 try {
@@ -204,7 +202,7 @@ function renderPlan(floor: number) {
     )
     .join('');
   document.querySelector('#floor-plan')!.innerHTML =
-    `<svg viewBox="0 0 475 490" role="group" aria-label="Denah living room 8,11 × 8,3 meter"><rect x="30" y="30" width="405.5" height="415" class="plan-room living"/><rect x="217.5" y="82.75" width="162.5" height="97.5" fill="#655043" opacity=".5"/>${furniture}<rect x="200" y="374" width="62" height="37" class="furniture"/><path d="M202 445h62 M202 445v-57" class="stair-arrow"/><text x="230" y="263">Living room</text><text x="230" y="285" class="small">8,11 × 8,3 m · ≈67,3 m²</text><text x="230" y="474" class="small">PINTU MASUK · SELATAN</text><text x="230" y="19" class="small">UTARA</text><rect x="30" y="30" width="405.5" height="415" class="outline"/><g data-plan-room="living" role="button" tabindex="0" aria-label="Kembali ke titik awal living room"><rect x="31" y="31" width="403" height="413" class="plan-hit"/></g></svg>`;
+    `<svg viewBox="0 0 475 490" role="group" aria-label="Denah living room 8,11 × 8,3 meter"><rect x="30" y="30" width="405.5" height="415" class="plan-room living"/><rect x="${30 + (RUG.x + HOUSE.width / 2 - RUG.w / 2) * 50}" y="${30 + (RUG.z + HOUSE.depth / 2 - RUG.d / 2) * 50}" width="${RUG.w * 50}" height="${RUG.d * 50}" fill="#655043" opacity=".5"/>${furniture}<rect x="200" y="374" width="62" height="37" class="furniture"/><path d="M202 445h62 M202 445v-57" class="stair-arrow"/><text x="230" y="263">Living room</text><text x="230" y="285" class="small">8,11 × 8,3 m · ≈67,3 m²</text><text x="230" y="474" class="small">PINTU MASUK · SELATAN</text><text x="230" y="19" class="small">UTARA</text><rect x="30" y="30" width="405.5" height="415" class="outline"/><path d="M58 30h65" stroke="#cbd4be" stroke-width="5"/><text x="90" y="19" class="small">LORONG</text><g data-plan-room="living" role="button" tabindex="0" aria-label="Kembali ke titik awal living room"><rect x="31" y="31" width="403" height="413" class="plan-hit"/></g></svg>`;
   document.querySelectorAll<SVGGElement>('[data-plan-room]').forEach((g) => {
     const go = () => putInRoom(g.dataset.planRoom as RoomId);
     g.onclick = go;
@@ -236,7 +234,7 @@ view.addEventListener('pointerdown', (e) => {
 view.addEventListener('pointermove', (e) => {
   if (e.pointerId !== lookPointer) return;
   yaw -= (e.clientX - lastLookX) * 0.0035;
-  pitch = T.MathUtils.clamp(pitch - (e.clientY - lastLookY) * 0.003, -1.15, 1.1);
+  pitch = T.MathUtils.clamp(pitch - (e.clientY - lastLookY) * 0.003, -1.48, 1.1);
   lastLookX = e.clientX;
   lastLookY = e.clientY;
   document.body.classList.add('experienced');
@@ -360,7 +358,7 @@ function frame(now: number) {
     }
     moving = length > 0.04;
     if (moving) {
-      const speed = 1.65 * dt;
+      const speed = HOUSE.walkSpeed * dt;
       const p = moveInside(
         x,
         z,
@@ -389,6 +387,7 @@ function frame(now: number) {
     yaw,
     pitch,
   );
+  character?.setFirstPerson(!following);
   if (character && following) {
     character.setVisible(
       followCamera.update(camera, dt, x, height, z, yaw, pitch, house.cameraGeometry, baseFov),
@@ -396,13 +395,17 @@ function frame(now: number) {
   } else {
     camera.fov = baseFov;
     camera.updateProjectionMatrix();
-    camera.position.set(x, height + HOUSE.eye, z);
+    camera.position.set(
+      x - Math.sin(yaw) * 0.1,
+      height + HOUSE.firstPersonEye,
+      z - Math.cos(yaw) * 0.1,
+    );
     camera.rotation.set(pitch, yaw, 0);
-    character?.setVisible(false);
+    character?.setVisible(true);
   }
   if (!reduced) {
     house.fire.intensity = 3.2 + Math.sin(now * 0.004) * 0.18 + Math.sin(now * 0.013) * 0.1;
-    house.ember.scale.y = 0.22 * (1 + Math.sin(now * 0.008) * 0.08);
+    house.animateFire(now * 0.001);
   }
   renderer.render(scene, camera);
   frames++;

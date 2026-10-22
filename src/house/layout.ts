@@ -1,5 +1,13 @@
 /** Reference living room, metres; north is -Z, entrance is south. */
-export const HOUSE = { width: 8.11, depth: 8.3, upper: 3.3, eye: 1.58, radius: 0.19 };
+export const HOUSE = {
+  width: 8.11,
+  depth: 8.3,
+  upper: 3.3,
+  eye: 1.58,
+  radius: 0.19,
+  walkSpeed: 0.85,
+  firstPersonEye: 1.55,
+};
 export interface Obstacle {
   x: number;
   z: number;
@@ -10,13 +18,15 @@ export interface Obstacle {
 export const obstacles: Obstacle[] = [];
 /** Shared footprints: scene, motor, camera proxies and plan derive from these. */
 export const LIVING = {
-  sofa: { x: 1.32, z: -3.45, w: 2.3, d: 0.83, floor: 0 },
-  armchair: { x: 0.12, z: -2.12, w: 0.82, d: 0.82, floor: 0 },
-  rocking: { x: 2.55, z: -0.98, w: 1.3, d: 1.4, floor: 0 },
-  sideTable: { x: 2.91, z: -3.52, w: 0.62, d: 0.62, floor: 0 },
-  fireplace: { x: 3.68, z: -2.1, w: 0.75, d: 1.9, floor: 0 },
+  sofa: { x: 0.65, z: -3.45, w: 2.3, d: 0.83, floor: 0 },
+  armchair: { x: -0.55, z: -2.12, w: 0.82, d: 0.82, floor: 0 },
+  rocking: { x: 1.7, z: -0.55, w: 1.3, d: 1.4, floor: 0 },
+  sideTable: { x: 2.3, z: -3.52, w: 0.62, d: 0.62, floor: 0 },
+  fireplace: { x: 3.55, z: -2.1, w: 1.0, d: 1.9, floor: 0 },
+  entryDoor: { x: -0.37, z: 3.62, w: 0.55, d: 1.15, floor: 0 },
   coat: { x: -0.93, z: 3.63, w: 0.55, d: 0.55, floor: 0 },
 };
+export const RUG = { x: 0.65, z: -2.06, w: 2.65, d: 1.85 };
 export const ROOMS = [
   {
     id: 'living',
@@ -32,12 +42,17 @@ export const ROOMS = [
 ] as const;
 export type RoomId = (typeof ROOMS)[number]['id'];
 export function floorAt(x: number, z: number, currentHeight: number): number | null {
-  if (
-    Math.abs(x) > HOUSE.width / 2 - HOUSE.radius ||
-    Math.abs(z) > HOUSE.depth / 2 - HOUSE.radius ||
-    Math.abs(currentHeight) > 0.34
-  )
-    return null;
+  const main =
+    Math.abs(x) <= HOUSE.width / 2 - HOUSE.radius && Math.abs(z) <= HOUSE.depth / 2 - HOUSE.radius;
+  const corridor =
+    x >= -3.5 + HOUSE.radius &&
+    x <= -2.2 - HOUSE.radius &&
+    z <= -HOUSE.depth / 2 + 0.25 &&
+    z >= -6.35 + HOUSE.radius;
+  // Join across the old north wall only through the actual 1.3 m opening.
+  const join =
+    x >= -3.5 + HOUSE.radius && x <= -2.2 - HOUSE.radius && z >= -6.35 + HOUSE.radius && z <= -3.8;
+  if ((!main && !corridor && !join) || Math.abs(currentHeight) > 0.34) return null;
   return 0;
 }
 export function canOccupy(x: number, z: number, height: number, blockers = obstacles) {
