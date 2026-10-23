@@ -3,7 +3,7 @@ import * as THREE from 'three';
 import { EarthFists } from '../../src/game/EarthFists';
 
 describe('Battle Mode earth fists', () => {
-  it('forms two continuous ground-grown arms into detailed fists, idles, and retracts smoothly', () => {
+  it('pulls individual stones from the ground and assembles two fists, then retracts them', () => {
     const scene = new THREE.Scene();
     const fists = new EarthFists(scene);
     const player = new THREE.Vector3(2, 0.66, -3);
@@ -12,27 +12,29 @@ describe('Battle Mode earth fists', () => {
     expect(fists.group.visible).toBe(false);
     expect(fists.group.children).toHaveLength(2);
     fists.setActive(true);
-    fists.update(1.4, player, Math.PI / 4, groundAt, 1.4);
+    fists.update(1.7, player, Math.PI / 4, groundAt, 1.7);
 
     expect(fists.group.visible).toBe(true);
     expect(fists.group.position.x).toBeGreaterThan(0);
     expect(fists.group.position.z).toBeLessThan(0);
-    for (const arm of fists.group.children) {
-      const forearm = arm.getObjectByName('earth-forearm') as THREE.Mesh;
-      const fist = arm.getObjectByName('earth-fist') as THREE.Group;
-      expect(forearm.scale.y).toBeGreaterThan(1);
-      expect(fist.scale.x).toBeCloseTo(1);
-      expect(fist.children.length).toBeGreaterThan(9);
+    for (const assembly of fists.group.children) {
+      const stones = assembly.children.filter((part) => part.name.startsWith('earth-'));
+      expect(stones.length).toBeGreaterThan(12);
+      expect(assembly.getObjectByName('earth-palm-stone')!.position.y).toBeGreaterThan(1);
+      expect(assembly.children.filter((part) => part.name === 'earth-knuckle')).toHaveLength(4);
+      expect(assembly.getObjectByName('earth-thumb')!.position.z).toBeGreaterThan(0);
     }
 
+    const raised = (fists.group.children[0].getObjectByName('earth-palm-stone') as THREE.Mesh)
+      .position.y;
     fists.setActive(false);
-    fists.update(0.24, player, Math.PI / 4, groundAt, 1.64);
+    fists.update(0.31, player, Math.PI / 4, groundAt, 2.01);
     expect(fists.group.visible).toBe(true);
     expect(
-      (fists.group.children[0].getObjectByName('earth-fist') as THREE.Group).scale.x,
-    ).toBeLessThan(1);
+      (fists.group.children[0].getObjectByName('earth-palm-stone') as THREE.Mesh).position.y,
+    ).toBeLessThan(raised);
 
-    fists.update(0.3, player, Math.PI / 4, groundAt, 1.94);
+    fists.update(0.4, player, Math.PI / 4, groundAt, 2.41);
     expect(fists.group.visible).toBe(false);
     fists.dispose();
   });
