@@ -688,6 +688,66 @@
 }
 
 /* --- Accessibility: boss direction indicator, HUD scale, colour-vision palettes --- */
+.earth-battle-toggle {
+  pointer-events: auto;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 22px;
+  padding: 3px 7px;
+  border: 1px solid #b6a17c75;
+  border-radius: 3px;
+  background: linear-gradient(110deg, #594735d9, #29382ed9);
+  color: #e3d4b4;
+  font: 600 6px var(--mono);
+  letter-spacing: 0.65px;
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition:
+    color 0.2s,
+    background 0.2s,
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.earth-battle-toggle svg {
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.earth-battle-toggle i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.42;
+}
+.earth-battle-toggle:not(:disabled):hover,
+.earth-battle-toggle[aria-pressed='true'] {
+  border-color: #e4c594;
+  background: linear-gradient(110deg, #766043ed, #435340ed);
+  color: #fff0cf;
+  box-shadow: 0 0 12px #bea16c37;
+}
+.earth-battle-toggle[aria-pressed='true'] i {
+  opacity: 1;
+  box-shadow: 0 0 7px currentColor;
+}
+.earth-battle-toggle:focus-visible {
+  outline: 2px solid #f2ddb2;
+  outline-offset: 2px;
+}
+.earth-battle-toggle:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
 #boss-indicator {
   position: absolute;
   left: 50%;

@@ -87,6 +87,7 @@ import {
 import { ARENA, BOSS, FLIGHT, GROUND, HEAVY } from './config';
 import { flightWish, advanceFlight, dashBoost } from './flight';
 import { Ragdoll, type RagdollSurface } from './Ragdoll';
+import { EarthFists } from './EarthFists';
 import type { FiringLane } from './AttackSight';
 import {
   AirDash,
@@ -120,6 +121,7 @@ export class Game {
   readonly controls: Controls;
   readonly audio: AudioEngine;
   private world: World;
+  private earthFists!: EarthFists;
   private fx: Effects;
   private boss: Boss;
   private aegis = new AutoShield();
@@ -342,6 +344,7 @@ export class Game {
     this.fx.eye = this.camera;
     this.projectileSystem = new ProjectileSystem(this.scene, this.fx.sigilMap);
     this.world = new World(this.scene, this.fx);
+    this.earthFists = new EarthFists(this.scene);
     this.fx.setGroundSampler((x, z) => this.world.surfaceHeight(x, z));
     this.boss = new Boss(this.scene, this.fx);
     this.enemyHost = {
@@ -497,6 +500,14 @@ export class Game {
     this.renderer.setAnimationLoop((timestamp) => this.tick(timestamp));
   }
 
+  get earthBattleActive() {
+    return this.earthFists.active;
+  }
+  toggleEarthBattle() {
+    if (this.mode !== 'playing') return false;
+    this.earthFists.setActive(!this.earthFists.active);
+    return this.earthFists.active;
+  }
   private setFlight(enabled: boolean) {
     if (this.flightEnabled === enabled) return;
     this.flightEnabled = enabled;
@@ -806,6 +817,7 @@ export class Game {
     this.clearProjectiles();
     this.clearEnemies();
     this.fx.clear();
+    this.earthFists.reset();
     this.world.reset();
     this.boss.reset();
     this.aegis.reset();
@@ -1734,6 +1746,20 @@ export class Game {
       restingPivot * (1 - this.playerTumble.weight) +
       (supportHeight(this.avatar.quaternion, new THREE.Vector3(0.325, 0.65, 0.325)) + 0.025) *
         this.playerTumble.weight;
+    this.earthFists.update(
+      dt,
+      this.avatar.position,
+      this.yaw,
+      (x, z) =>
+        groundHeight(
+          x,
+          z,
+          this.player.y + 2.5,
+          this.world.obstaclesNear(x, z, 1.4),
+          this.world.surfaceHeight(x, z),
+        ),
+      this.time,
+    );
     if (this.ragdoll.active) {
       // The jointed body rides the physics root while the tumble lasts, then gathers itself
       // into the avatar's standing pose as the tumble recovers and hands back to the box.
@@ -3436,6 +3462,7 @@ export class Game {
     document.removeEventListener('visibilitychange', this.visibilityListener);
     this.clearProjectiles();
     this.fx.clear();
+    this.earthFists.dispose();
     this.composer.dispose();
     this.impactFrame.dispose();
     this.renderer.dispose();

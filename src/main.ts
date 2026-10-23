@@ -122,7 +122,7 @@ app.innerHTML = `
       <div id="pointer-tip">KLIK ARENA UNTUK MEMBIDIK <span>·</span> ESC UNTUK JEDA</div>
       <div class="desktop-hints"><div><kbd data-hint="forward">W</kbd><kbd data-hint="left">A</kbd><kbd data-hint="back">S</kbd><kbd data-hint="right">D</kbd><span>GERAK</span></div><div><kbd><span data-hint="rise">SPACE</span> / <span data-hint="descend">C</span></kbd><span>NAIK / TURUN</span><kbd data-hint="flight">F</kbd><span>MODE</span><kbd data-hint="focus">E</kbd><span>FOKUS BOSS</span></div><div class="hints-muted"><kbd data-hint="pace">T</kbd><span>JALAN / LARI / SPRINT</span><kbd data-hint="view">V</kbd><span>SUDUT PANDANG</span><kbd>R</kbd><span>ULANGI</span><kbd data-hint="cycle">Q</kbd><span>GANTI SIHIR</span></div></div>
       <div class="spell-dock">
-        <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span></div>
+        <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span><button id="earth-battle-toggle" class="earth-battle-toggle" type="button" aria-label="Aktifkan sihir tanah: Battle Mode" aria-pressed="false" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15.5 5.2 9l2.2 2.1L10 5l2 4 2.2-1.8L17 15.5H3Z"/><path d="M6.1 15.5h7.8"/></svg><span>BATTLE MODE</span><i></i></button></div>
         <div class="spell-slots" id="spell-slots"></div>
         <div class="energy-row"><span>ENERGI</span><div class="meter energy-meter"><i id="energy-fill"></i></div><b id="energy-value">100</b></div>
       </div>
@@ -255,6 +255,16 @@ const dryUntil = [0, 0, 0];
 
 function event(event: GameEvent) {
   if (event.type === 'mode') {
+    const earthToggle = document.querySelector<HTMLButtonElement>('#earth-battle-toggle');
+    if (earthToggle) {
+      const active = game?.earthBattleActive ?? false;
+      earthToggle.disabled = event.mode !== 'playing';
+      earthToggle.setAttribute('aria-pressed', String(active));
+      earthToggle.setAttribute(
+        'aria-label',
+        active ? 'Nonaktifkan sihir tanah: Battle Mode' : 'Aktifkan sihir tanah: Battle Mode',
+      );
+    }
     experience.dataset.mode = event.mode;
     $('#menu').hidden = event.mode !== 'menu';
     $('#hud').hidden =
@@ -861,6 +871,17 @@ async function boot() {
     $('#demo-play').onclick = start;
     $('#demo-button').onclick = () => game.demo();
     $('#demo-exit').onclick = menu;
+    $('#earth-battle-toggle').onclick = (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const active = game.toggleEarthBattle();
+      const button = $<HTMLButtonElement>('#earth-battle-toggle');
+      button.setAttribute('aria-pressed', String(active));
+      button.setAttribute(
+        'aria-label',
+        active ? 'Nonaktifkan sihir tanah: Battle Mode' : 'Aktifkan sihir tanah: Battle Mode',
+      );
+    };
     $('#brand').onclick = () => {
       if (game.snapshot.mode === 'playing') game.pause();
       else if (game.snapshot.mode === 'demo') menu();
