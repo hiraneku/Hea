@@ -2,8 +2,12 @@ import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 
 const UP = new THREE.Vector3(0, 1, 0);
-const ASSEMBLY_TIME = 1.34;
-const RETRACTION_TIME = 0.62;
+const ASSEMBLY_TIME = 2.85;
+const RETRACTION_TIME = 0.72;
+const FIST_SCALE = 1.18;
+const FIST_SPACING = 0.36;
+/** Rolls the fist onto a horizontal punch axis: dorsal knuckles now project forward along -Z. */
+const PUNCH_ROTATION = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -Math.PI / 2);
 
 function smooth01(value: number) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
@@ -13,6 +17,8 @@ function smooth01(value: number) {
 interface StonePiece {
   mesh: THREE.Mesh;
   start: THREE.Vector3;
+  startWorld: THREE.Vector3;
+  liftedWorld: THREE.Vector3;
   target: THREE.Vector3;
   startRotation: THREE.Euler;
   targetRotation: THREE.Euler;
@@ -25,31 +31,36 @@ interface StonePiece {
 interface EarthFistAssembly {
   side: number;
   group: THREE.Group;
+  source: THREE.Group;
   pieces: StonePiece[];
   originStones: THREE.Mesh[];
   groundHeight: number;
   handHeight: number;
 }
 
-/** Small coherent stones are gathered off the surface and fitted together into a fist. */
-function stoneGeometry(width: number, height: number, depth: number, roundness = 0.07) {
+function stoneGeometry(width: number, height: number, depth: number, roundness = 0.09) {
   return new RoundedBoxGeometry(width, height, depth, 2, roundness);
 }
 
 /**
- * The Earth Battle summon is assembled from solid rock pieces visibly pulled off the ground.
- * Palm, four curled fingers, raised knuckles, thumb, and a short stony wrist arrive in order;
- * the fist faces the player's forward direction. There is deliberately no continuous soil arm.
+ * A pair of oversized stone fists assembled in a staged lift-and-flight sequence. The fists
+ * follow the player, but their source stones are anchored directly in the scene at the summon
+ * location and never inherit the player's later movement.
  */
 export class EarthFists {
   readonly group = new THREE.Group();
   private assemblies: EarthFistAssembly[] = [];
   private enabled = false;
+  private anchored = false;
   private elapsed = 0;
   private progress = 0;
   private readonly targetPosition = new THREE.Vector3();
   private readonly facing = new THREE.Quaternion();
+  private readonly yawRotation = new THREE.Quaternion();
   private readonly sideOffset = new THREE.Vector3();
+  private readonly targetWorld = new THREE.Vector3();
+  private readonly startRotation = new THREE.Quaternion();
+  private readonly targetRotation = new THREE.Quaternion();
   private readonly materials = [
     new THREE.MeshStandardMaterial({ color: '#77634d', roughness: 0.96, flatShading: true }),
     new THREE.MeshStandardMaterial({ color: '#927a5b', roughness: 0.94, flatShading: true }),
@@ -60,6 +71,7 @@ export class EarthFists {
   constructor(private readonly scene: THREE.Scene) {
     this.group.name = 'earth-battle-fists';
     this.group.visible = false;
+    this.group.scale.setScalar(FIST_SCALE);
     for (const side of [-1, 1]) this.assemblies.push(this.createAssembly(side));
     this.scene.add(this.group);
   }
@@ -67,11 +79,17 @@ export class EarthFists {
   private createAssembly(side: number): EarthFistAssembly {
     const assemblyGroup = new THREE.Group();
     assemblyGroup.name = `earth-fist-${side < 0 ? 'left' : 'right'}`;
-    assemblyGroup.position.set(side * 0.83, 0, -0.2);
+    assemblyGroup.position.set(side * FIST_SPACING, 0, -0.18);
     this.group.add(assemblyGroup);
+
+    // This group is deliberately a sibling in world space, not a child of the moving fist rig.
+    const source = new THREE.Group();
+    source.name = `earth-source-${side < 0 ? 'left' : 'right'}`;
+    source.visible = false;
+    this.scene.add(source);
+
     const pieces: StonePiece[] = [];
     let order = 0;
-
     const addStone = (
       name: string,
       geometry: THREE.BufferGeometry,
@@ -82,121 +100,124 @@ export class EarthFists {
     ) => {
       const mesh = new THREE.Mesh(geometry, this.materials[materialIndex % this.materials.length]);
       mesh.name = name;
+      mesh.visible = false;
       mesh.castShadow = mesh.receiveShadow = true;
       const index = order++;
-      const targetPosition = new THREE.Vector3(...target);
-      // Every substantial piece begins low, in the dirt around the fist's source point,
-      // then travels on a short arcing path to its specific place in the hand.
       const start = new THREE.Vector3(
-        THREE.MathUtils.clamp(target[0] * 0.35 + Math.sin(index * 2.21) * 0.38, -0.62, 0.62),
-        0.09 + (index % 3) * 0.025,
-        0.12 + Math.cos(index * 1.73) * 0.36,
+        THREE.MathUtils.clamp(target[0] * 0.35 + Math.sin(index * 2.21) * 0.4, -0.72, 0.72),
+        0.08 + (index % 3) * 0.025,
+        0.12 + Math.cos(index * 1.73) * 0.4,
       );
       const startRotation = new THREE.Euler(
         0.25 + Math.sin(index * 1.3) * 0.3,
         Math.cos(index * 1.9) * 0.55,
         Math.sin(index * 2.7) * 0.6,
       );
-      assemblyGroup.add(mesh);
+      this.scene.add(mesh);
+      const targetOrientation = new THREE.Quaternion()
+        .setFromEuler(new THREE.Euler(...rotation))
+        .premultiply(PUNCH_ROTATION);
       pieces.push({
         mesh,
         start,
-        target: targetPosition,
+        startWorld: new THREE.Vector3(),
+        liftedWorld: new THREE.Vector3(),
+        target: new THREE.Vector3(...target).applyQuaternion(PUNCH_ROTATION),
         startRotation,
-        targetRotation: new THREE.Euler(...rotation),
-        delay: assemblyDelay ?? 0.03 + index * 0.045,
-        duration: 0.58,
+        targetRotation: new THREE.Euler().setFromQuaternion(targetOrientation),
+        delay: assemblyDelay ?? 0.12 + index * 0.075,
+        duration: ASSEMBLY_TIME * 0.38,
         progress: 0,
         fromProgress: 0,
       });
     };
 
-    // A broad palm slab is the anchor stone. It arrives first, then the wrist braces settle in.
-    addStone(
-      'earth-palm-stone',
-      stoneGeometry(0.74, 0.66, 0.48, 0.14),
-      0,
-      [0, 0, 0],
-      [0, 0, 0],
-      0.1,
-    );
+    // Wide, faceted palm, then a short braced wrist — no continuous arm or soil column.
+    addStone('earth-palm-stone', stoneGeometry(0.88, 0.76, 0.59, 0.16), 0, [0, 0, 0], [0, 0, 0], 0.2);
     for (let index = 0; index < 3; index++) {
-      const x = (index - 1) * 0.21;
+      const x = (index - 1) * 0.24;
       addStone(
         'earth-wrist-stone',
-        stoneGeometry(0.24, 0.2, 0.34, 0.06),
+        stoneGeometry(0.29, 0.23, 0.37, 0.08),
         index + 1,
-        [x, -0.35, 0.015],
+        [x, -0.39, 0.02],
         [0, side * (index - 1) * 0.1, side * (index - 1) * 0.06],
-        0.16 + index * 0.075,
+        0.56 + index * 0.13,
       );
     }
 
-    // Four distinct curled fingers and four raised knuckles make the hand read as a fist,
-    // not as a lump. The fist thrusts along local -Z; these dorsal details stay visible to the camera.
+    // Four separate curled fingers, each with a second segment and a bold raised knuckle.
     for (let index = 0; index < 4; index++) {
-      const x = (index - 1.5) * 0.175;
+      const x = (index - 1.5) * 0.2;
+      const curl = (index - 1.5) * 0.045;
       addStone(
         'earth-curled-finger',
-        stoneGeometry(0.145, 0.225, 0.17, 0.052),
+        stoneGeometry(0.175, 0.235, 0.19, 0.065),
         1 + (index % 2),
-        [x, -0.045, 0.31],
-        [0, 0, side * (index - 1.5) * 0.025],
-        0.32 + index * 0.075,
+        [x, -0.06, 0.34],
+        [curl, 0, side * (index - 1.5) * 0.035],
+        0.88 + index * 0.11,
+      );
+      addStone(
+        'earth-finger-tip',
+        stoneGeometry(0.16, 0.17, 0.19, 0.055),
+        index % 2 === 0 ? 0 : 2,
+        [x * 0.92, -0.2, 0.42],
+        [0.15 + curl, 0, side * (index - 1.5) * 0.03],
+        1.22 + index * 0.1,
       );
       addStone(
         'earth-knuckle',
-        new THREE.DodecahedronGeometry(0.13, 0),
+        new THREE.DodecahedronGeometry(0.17, 0),
         2,
-        [x, 0.235, 0.305],
-        [0, 0, side * (index - 1.5) * 0.035],
-        0.54 + index * 0.07,
+        [x, 0.275, 0.34],
+        [0, 0, side * (index - 1.5) * 0.04],
+        1.57 + index * 0.12,
       );
     }
 
-    // Thin dark stone seams keep each finger separate and visible from behind the guard.
+    // Dark seams make the four knuckles and folded fingers legible from the front.
     for (let index = 0; index < 3; index++) {
       addStone(
         'earth-finger-seam',
-        stoneGeometry(0.018, 0.09, 0.016, 0.004),
+        stoneGeometry(0.022, 0.11, 0.02, 0.005),
         3,
-        [(index - 1) * 0.175 + 0.0875, 0.015, 0.405],
+        [(index - 1) * 0.2 + 0.1, 0.035, 0.445],
         [0, 0, 0],
-        0.84 + index * 0.035,
+        1.92 + index * 0.06,
       );
     }
 
-    // The thumb folds across the inside of the fingers, mirrored toward the player for each fist.
+    // The thumb folds diagonally across the fist's front, so the silhouette reads as a punch.
     addStone(
       'earth-thumb',
-      stoneGeometry(0.17, 0.34, 0.18, 0.062),
+      stoneGeometry(0.21, 0.38, 0.22, 0.075),
       2,
-      [-side * 0.255, -0.035, 0.39],
-      [0.03, 0, side * 0.72],
-      0.88,
+      [-side * 0.31, -0.015, 0.43],
+      [0.08, 0, side * 0.78],
+      2.15,
     );
 
-    // A few low source stones stay on the surface under each assembly: a visible origin mark,
-    // not a pillar or a trail of airborne debris.
     const originStones: THREE.Mesh[] = [];
-    for (let index = 0; index < 3; index++) {
-      const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.25, 0), this.materials[3]);
+    for (let index = 0; index < 4; index++) {
+      const stone = new THREE.Mesh(new THREE.DodecahedronGeometry(0.28, 0), this.materials[3]);
       stone.name = 'earth-origin-stone';
-      stone.position.set((index - 1) * 0.25, 0.08, 0.22 + (index % 2) * 0.12);
-      stone.scale.set(1, 0.32, 0.7);
+      stone.position.set((index - 1.5) * 0.28, 0.08, 0.18 + (index % 2) * 0.16);
+      stone.scale.set(1, 0.33, 0.72);
       stone.rotation.y = index * 0.8;
       stone.castShadow = stone.receiveShadow = true;
-      assemblyGroup.add(stone);
+      source.add(stone);
       originStones.push(stone);
     }
 
     return {
       side,
       group: assemblyGroup,
+      source,
       pieces,
       originStones,
       groundHeight: 0,
-      handHeight: 1.5,
+      handHeight: 1.6,
     };
   }
 
@@ -208,32 +229,78 @@ export class EarthFists {
     if (this.enabled === active) return;
     this.enabled = active;
     this.elapsed = 0;
-    for (const assembly of this.assemblies)
-      for (const piece of assembly.pieces) piece.fromProgress = piece.progress;
     if (active) this.group.visible = true;
+    for (const assembly of this.assemblies) {
+      assembly.source.visible = active || assembly.pieces.some((piece) => piece.progress > 0);
+      for (const piece of assembly.pieces) piece.fromProgress = piece.progress;
+    }
   }
 
   reset() {
     this.enabled = false;
+    this.anchored = false;
     this.elapsed = 0;
     this.progress = 0;
     this.group.visible = false;
     for (const assembly of this.assemblies) {
+      assembly.source.visible = false;
       for (const piece of assembly.pieces) {
         piece.progress = piece.fromProgress = 0;
-        piece.mesh.position.copy(piece.start);
-        piece.mesh.rotation.copy(piece.startRotation);
-        piece.mesh.scale.setScalar(0.38);
+        piece.mesh.position.copy(piece.startWorld);
+        piece.mesh.visible = false;
       }
     }
   }
 
   dispose() {
     this.scene.remove(this.group);
-    this.group.traverse((object) => {
-      if (object instanceof THREE.Mesh) object.geometry.dispose();
-    });
+    for (const assembly of this.assemblies) this.scene.remove(assembly.source);
+    for (const assembly of this.assemblies)
+      for (const piece of assembly.pieces) {
+        this.scene.remove(piece.mesh);
+        piece.mesh.geometry.dispose();
+      }
+    this.assemblies.forEach((assembly) =>
+      assembly.source.traverse((object) => {
+        if (object instanceof THREE.Mesh) object.geometry.dispose();
+      }),
+    );
     this.materials.forEach((material) => material.dispose());
+  }
+
+  private anchorSources(
+    player: THREE.Vector3,
+    yaw: number,
+    groundAt: (x: number, z: number) => number,
+  ) {
+    this.yawRotation.setFromAxisAngle(UP, yaw);
+    this.group.position.set(player.x, 0, player.z);
+    this.group.rotation.y = yaw;
+    this.group.updateMatrixWorld(true);
+
+    for (const assembly of this.assemblies) {
+      const offset = this.sideOffset
+        .set(assembly.side * FIST_SPACING * FIST_SCALE, 0, -0.18 * FIST_SCALE)
+        .applyQuaternion(this.yawRotation);
+      const x = player.x + offset.x;
+      const z = player.z + offset.z;
+      const ground = groundAt(x, z);
+      assembly.groundHeight = ground;
+      assembly.source.position.set(x, ground, z);
+      assembly.source.rotation.y = yaw;
+      assembly.source.visible = true;
+      assembly.source.updateMatrixWorld(true);
+      for (const piece of assembly.pieces) {
+        piece.startWorld.copy(piece.start).applyQuaternion(this.yawRotation);
+        piece.startWorld.add(assembly.source.position);
+        piece.liftedWorld.copy(piece.startWorld).add(new THREE.Vector3(0, 0.62, 0));
+        piece.mesh.position.copy(piece.startWorld);
+        piece.mesh.quaternion.setFromEuler(piece.startRotation).premultiply(this.yawRotation);
+        piece.mesh.scale.setScalar(0.48 * FIST_SCALE);
+        piece.mesh.visible = true;
+      }
+    }
+    this.anchored = true;
   }
 
   update(
@@ -249,20 +316,23 @@ export class EarthFists {
     }
     this.group.visible = true;
     this.elapsed += dt;
-    const transition = smooth01(this.elapsed / (this.enabled ? ASSEMBLY_TIME : RETRACTION_TIME));
+    if (this.enabled && !this.anchored) this.anchorSources(player, yaw, groundAt);
+
     this.targetPosition.set(player.x, 0, player.z);
     this.group.position.lerp(this.targetPosition, 1 - Math.exp(-12 * dt));
     this.group.rotation.y = yaw;
+    this.group.updateMatrixWorld(true);
     this.facing.setFromAxisAngle(UP, yaw);
 
     let maxProgress = 0;
     for (const assembly of this.assemblies) {
       const offset = this.sideOffset
-        .set(assembly.side * 0.83, 0, -0.2)
+        .set(assembly.side * FIST_SPACING, 0, -0.18)
         .applyQuaternion(this.facing);
       assembly.groundHeight = groundAt(player.x + offset.x, player.z + offset.z);
-      assembly.handHeight = Math.max(1.55, player.y - assembly.groundHeight + 0.52);
-      assembly.group.position.y = assembly.groundHeight;
+      assembly.handHeight = Math.max(1.12, player.y - assembly.groundHeight + 0.3);
+      assembly.group.position.y = assembly.groundHeight / FIST_SCALE;
+      assembly.group.updateMatrixWorld(true);
 
       const ready = this.enabled && assembly.pieces.every((piece) => piece.progress > 0.99);
       const bob = ready ? Math.sin(time * 2.3 + (assembly.side > 0 ? Math.PI : 0)) * 0.035 : 0;
@@ -271,32 +341,55 @@ export class EarthFists {
       assembly.group.rotation.z = ready
         ? -assembly.side * 0.035 + Math.sin(time * 1.7 + assembly.side) * 0.018
         : 0;
+      assembly.group.updateMatrixWorld(true);
 
       for (const piece of assembly.pieces) {
         const rise = smooth01((this.elapsed - piece.delay) / piece.duration);
         piece.progress = this.enabled
           ? piece.fromProgress + (1 - piece.fromProgress) * rise
-          : piece.fromProgress * (1 - transition);
-        const amount = piece.progress;
-        const arc = Math.sin(amount * Math.PI) * 0.32;
-        piece.mesh.position.set(
-          THREE.MathUtils.lerp(piece.start.x, piece.target.x, amount),
-          THREE.MathUtils.lerp(piece.start.y, assembly.handHeight + piece.target.y, amount) + arc,
-          THREE.MathUtils.lerp(piece.start.z, piece.target.z, amount),
+          : piece.fromProgress * (1 - smooth01(this.elapsed / RETRACTION_TIME));
+
+        this.targetWorld.set(
+          piece.target.x,
+          assembly.handHeight + piece.target.y,
+          piece.target.z,
         );
-        piece.mesh.rotation.set(
-          THREE.MathUtils.lerp(piece.startRotation.x, piece.targetRotation.x, amount),
-          THREE.MathUtils.lerp(piece.startRotation.y, piece.targetRotation.y, amount),
-          THREE.MathUtils.lerp(piece.startRotation.z, piece.targetRotation.z, amount),
+        assembly.group.localToWorld(this.targetWorld);
+        if (this.enabled) {
+          const pieceTime = THREE.MathUtils.clamp((this.elapsed - piece.delay) / piece.duration, 0, 1);
+          const lifted = smooth01(Math.min(1, pieceTime / 0.36));
+          const assembled = smooth01(Math.max(0, (pieceTime - 0.36) / 0.64));
+          if (pieceTime < 0.36) {
+            piece.mesh.position.lerpVectors(piece.startWorld, piece.liftedWorld, lifted);
+          } else {
+            piece.mesh.position.lerpVectors(piece.liftedWorld, this.targetWorld, assembled);
+            piece.mesh.position.y += Math.sin(assembled * Math.PI) * 0.24;
+          }
+        } else {
+          piece.mesh.position.lerpVectors(piece.startWorld, this.targetWorld, piece.progress);
+        }
+
+        this.startRotation.setFromEuler(piece.startRotation).premultiply(this.facing);
+        this.targetRotation.setFromEuler(piece.targetRotation).premultiply(this.facing);
+        piece.mesh.quaternion.slerpQuaternions(
+          this.startRotation,
+          this.targetRotation,
+          piece.progress,
         );
-        piece.mesh.scale.setScalar(THREE.MathUtils.lerp(0.38, 1, amount));
-        maxProgress = Math.max(maxProgress, amount);
+        piece.mesh.scale.setScalar(THREE.MathUtils.lerp(0.48, 1, piece.progress) * FIST_SCALE);
+        maxProgress = Math.max(maxProgress, piece.progress);
       }
       for (const stone of assembly.originStones)
         stone.visible = this.enabled || assembly.pieces.some((piece) => piece.progress > 0);
     }
 
     this.progress = maxProgress;
-    if (!this.enabled && maxProgress <= 0.001) this.group.visible = false;
+    if (!this.enabled && maxProgress <= 0.001) {
+      this.group.visible = false;
+      for (const assembly of this.assemblies) assembly.source.visible = false;
+      this.anchored = false;
+      for (const piece of this.assemblies.flatMap((assembly) => assembly.pieces))
+        piece.mesh.visible = false;
+    }
   }
 }

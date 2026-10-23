@@ -110,6 +110,9 @@ const START = new THREE.Vector3(0, 1.8, 24);
 const UP = new THREE.Vector3(0, 1, 0);
 /** Reach (m) of the solar sphere's blast when it bursts against the world. */
 const HAMMER_SPLASH = 3.6;
+const EARTH_ULTIMATE_COST = 55;
+const EARTH_ULTIMATE_COOLDOWN = 18;
+const EARTH_ULTIMATE_DURATION = 8.5;
 /** Height of the ragdoll's pelvis above the physics root (the lying body's thickness). */
 const RAGDOLL_ROOT = 0.3;
 const direction = new THREE.Vector3();
@@ -261,7 +264,9 @@ export class Game {
   private get spell(): SpellId {
     return this.settings.loadout[this.slot] ?? 0;
   }
-  private cooldowns = [0, 0, 0, 0];
+  private cooldowns = Array(SPELLS.length).fill(0) as number[];
+  private earthUltimateCooldown = 0;
+  private earthBattleTimer = 0;
   private lockedOn = false;
   private damageDealt = 0;
   private impacts = 0;
@@ -503,10 +508,21 @@ export class Game {
   get earthBattleActive() {
     return this.earthFists.active;
   }
-  toggleEarthBattle() {
-    if (this.mode !== 'playing') return false;
-    this.earthFists.setActive(!this.earthFists.active);
-    return this.earthFists.active;
+  activateEarthBattle() {
+    if (
+      this.mode !== 'playing' ||
+      this.spell !== 4 ||
+      this.earthFists.active ||
+      this.earthUltimateCooldown > 0 ||
+      this.energy < EARTH_ULTIMATE_COST
+    )
+      return false;
+    this.energy -= EARTH_ULTIMATE_COST;
+    this.earthUltimateCooldown = EARTH_ULTIMATE_COOLDOWN;
+    this.earthBattleTimer = EARTH_ULTIMATE_DURATION;
+    this.earthFists.setActive(true);
+    this.audio.cast(4);
+    return true;
   }
   private setFlight(enabled: boolean) {
     if (this.flightEnabled === enabled) return;
@@ -567,6 +583,8 @@ export class Game {
       cooldowns: this.cooldowns.map((c, i) =>
         SPELLS[i].cooldown > 0 ? clamp(c / SPELLS[i].cooldown, 0, 1) : 0,
       ),
+      earthBattleActive: this.earthFists.active,
+      earthUltimateCooldown: clamp(this.earthUltimateCooldown / EARTH_ULTIMATE_COOLDOWN, 0, 1),
       damageDealt: this.damageDealt,
       impacts: this.impacts,
       wallsBroken: this.world.wallsBroken,
@@ -818,6 +836,9 @@ export class Game {
     this.clearEnemies();
     this.fx.clear();
     this.earthFists.reset();
+    this.earthBattleTimer = 0;
+    this.earthUltimateCooldown = 0;
+    this.cooldowns = Array(SPELLS.length).fill(0) as number[];
     this.world.reset();
     this.boss.reset();
     this.aegis.reset();
@@ -853,7 +874,7 @@ export class Game {
     this.slot = 0;
     this.endFallSilent();
     this.fallLinger = 0;
-    this.cooldowns = [0, 0, 0, 0];
+    this.cooldowns = Array(SPELLS.length).fill(0) as number[];
     this.pendingPlayerImpulse = null;
     this.lastBlock = null;
     this.contacts = 0;
@@ -1182,6 +1203,11 @@ export class Game {
     this.dashCooldown = Math.max(0, this.dashCooldown - dt);
 
     this.cooldowns = this.cooldowns.map((c) => Math.max(0, c - dt));
+    this.earthUltimateCooldown = Math.max(0, this.earthUltimateCooldown - dt);
+    if (this.earthBattleTimer > 0) {
+      this.earthBattleTimer = Math.max(0, this.earthBattleTimer - dt);
+      if (this.earthBattleTimer === 0) this.earthFists.setActive(false);
+    }
     if (this.fallPhase === 'idle') this.energy = Math.min(100, this.energy + dt * 12);
     else if (this.fallPhase === 'build') this.energy = Math.min(100, this.energy + dt * 6);
     if (this.damageTimer > 9 && !this.outcome) this.health = Math.min(100, this.health + dt * 3);
@@ -2548,6 +2574,19 @@ export class Game {
     if (this.spell === 0) {
       this.spawn(origin, direction.clone().multiplyScalar(40), 'player', spell.damage, hasTarget);
       this.fx.glyph(origin, direction, '#ffa34f', 0.27, 0.25);
+    } else if (this.spell === 4) {
+      this.spawn(
+        origin,
+        direction.clone().multiplyScalar(31),
+        'player',
+        spell.damage,
+        hasTarget,
+        null,
+        1,
+        0.24,
+        'earth',
+      );
+      this.fx.glyph(origin, direction, '#c7a87c', 0.32, 0.2);
     } else if (this.spell === 1) {
       this.prisma.raiseCircle(hasTarget);
     } else {
@@ -2631,6 +2670,7 @@ export class Game {
     aimOffset: THREE.Vector3 | null = null,
     power = 1,
     radiusOverride?: number,
+    appearance?: 'earth',
   ) {
     this.projectileSystem.spawn(
       at,
@@ -2641,6 +2681,7 @@ export class Game {
       aimOffset,
       power,
       radiusOverride,
+      appearance,
     );
     if (kind !== 'player') this.attacksFired[kind]++;
   }
@@ -3387,6 +3428,7 @@ export class Game {
         this.renderNeeded = true;
       },
       castBoss: (attack: AttackId, index = 0) => this.bossAttack(attack, index),
+      castPlayer: () => this.cast(),
       damageBoss: (amount: number) => this.damageBoss(amount, new THREE.Vector3()),
       scene: () => this.scene,
       place: (player: number[], boss: number[]) => {

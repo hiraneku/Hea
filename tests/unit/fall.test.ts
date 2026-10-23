@@ -59,27 +59,31 @@ describe('FALL pressure', () => {
     expect(director.stage).toBe('recover');
   });
 
-  it('is registered as the fourth spell, a held gravity control', () => {
+  it('keeps FALL as a held gravity control and registers TITAN as a basic earth attack', () => {
     expect(SPELLS[3].name).toBe('FALL');
     expect(SPELLS[3].school).toBe('Gravitasi');
     expect(SPELLS[3].cast).toBe('Tahan');
     expect(SPELLS[3].cooldown).toBe(FALL.cooldown);
+    expect(SPELLS[4].name).toBe('TITAN');
+    expect(SPELLS[4].school).toBe('Tanah');
+    expect(SPELLS[4].cast).toBe('Ketuk');
+    expect(SPELLS[4].damage).toBeGreaterThan(0);
   });
 });
 
 describe('spell loadout', () => {
-  it('defaults to the four spells in registry order', () => {
-    expect(normalizeLoadout(undefined)).toEqual([0, 1, 2, 3]);
-    expect(normalizeLoadout('junk')).toEqual([0, 1, 2, 3]);
+  it('defaults to the five spells in registry order', () => {
+    expect(normalizeLoadout(undefined)).toEqual([0, 1, 2, 3, 4]);
+    expect(normalizeLoadout('junk')).toEqual([0, 1, 2, 3, 4]);
   });
 
   it('keeps a stored order and drops repeats and unknown ids', () => {
-    expect(normalizeLoadout([3, 0, 0, 9, 1])).toEqual([3, 0, 1, 2]);
+    expect(normalizeLoadout([4, 3, 0, 0, 9, 1])).toEqual([4, 3, 0, 1, 2]);
   });
 
-  it('fills empty slots in registry order and never exceeds four', () => {
-    expect(normalizeLoadout([2])).toEqual([2, 0, 1, 3]);
-    expect(normalizeLoadout([3, 2, 1, 0, 0])).toHaveLength(4);
+  it('fills empty slots in registry order and never exceeds five', () => {
+    expect(normalizeLoadout([2])).toEqual([2, 0, 1, 3, 4]);
+    expect(normalizeLoadout([4, 3, 2, 1, 0, 0])).toHaveLength(5);
   });
 
   it('normalizes the equipped list for the BARU badges', () => {

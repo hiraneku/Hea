@@ -30,7 +30,7 @@ import {
 const app = document.querySelector<HTMLDivElement>('#app')!;
 const settings = readSettings();
 const isTouch = matchMedia('(pointer: coarse)').matches || navigator.maxTouchPoints > 0;
-const spellIcons = [icons.flame, icons.prism, icons.nova, icons.gravity];
+const spellIcons = [icons.flame, icons.prism, icons.nova, icons.gravity, icons.earth];
 
 /** A `KeyboardEvent.code` as a keycap: `KeyW` → `W`, `ShiftLeft` → `SHIFT`. */
 function keyLabel(code: string): string {
@@ -122,7 +122,7 @@ app.innerHTML = `
       <div id="pointer-tip">KLIK ARENA UNTUK MEMBIDIK <span>·</span> ESC UNTUK JEDA</div>
       <div class="desktop-hints"><div><kbd data-hint="forward">W</kbd><kbd data-hint="left">A</kbd><kbd data-hint="back">S</kbd><kbd data-hint="right">D</kbd><span>GERAK</span></div><div><kbd><span data-hint="rise">SPACE</span> / <span data-hint="descend">C</span></kbd><span>NAIK / TURUN</span><kbd data-hint="flight">F</kbd><span>MODE</span><kbd data-hint="focus">E</kbd><span>FOKUS BOSS</span></div><div class="hints-muted"><kbd data-hint="pace">T</kbd><span>JALAN / LARI / SPRINT</span><kbd data-hint="view">V</kbd><span>SUDUT PANDANG</span><kbd>R</kbd><span>ULANGI</span><kbd data-hint="cycle">Q</kbd><span>GANTI SIHIR</span></div></div>
       <div class="spell-dock">
-        <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span><button id="earth-battle-toggle" class="earth-battle-toggle" type="button" aria-label="Aktifkan sihir tanah: Battle Mode" aria-pressed="false" disabled><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15.5 5.2 9l2.2 2.1L10 5l2 4 2.2-1.8L17 15.5H3Z"/><path d="M6.1 15.5h7.8"/></svg><span>BATTLE MODE</span><i></i></button></div>
+        <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span><button id="earth-battle-toggle" class="earth-battle-toggle" type="button" aria-label="Aktifkan ultimate sihir tanah: Battle Mode" aria-pressed="false" disabled hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15.5 5.2 9l2.2 2.1L10 5l2 4 2.2-1.8L17 15.5H3Z"/><path d="M6.1 15.5h7.8"/></svg><span>ULTIMATE · BATTLE MODE</span><i></i></button></div>
         <div class="spell-slots" id="spell-slots"></div>
         <div class="energy-row"><span>ENERGI</span><div class="meter energy-meter"><i id="energy-fill"></i></div><b id="energy-value">100</b></div>
       </div>
@@ -251,7 +251,7 @@ function floatDamage(
  * that stays dimmed long after the click reads as a bug; the frame loop only stops when nothing
  * is on screen to look at.
  */
-const dryUntil = [0, 0, 0];
+const dryUntil = Array(SPELLS.length).fill(0) as number[];
 
 function event(event: GameEvent) {
   if (event.type === 'mode') {
@@ -262,7 +262,7 @@ function event(event: GameEvent) {
       earthToggle.setAttribute('aria-pressed', String(active));
       earthToggle.setAttribute(
         'aria-label',
-        active ? 'Nonaktifkan sihir tanah: Battle Mode' : 'Aktifkan sihir tanah: Battle Mode',
+        active ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir tanah: Battle Mode',
       );
     }
     experience.dataset.mode = event.mode;
@@ -364,13 +364,13 @@ function applySettings() {
 }
 
 /* ------------------------------------------------------------------ */
-/* Grimoire: the spell book. Four slots on top, the whole library       */
+/* Grimoire: the spell book. Five slots on top, the whole library      */
 /* below with school filters, and a detail panel for the focused spell. */
 /* ------------------------------------------------------------------ */
 let grimoireSlot = 0;
 let grimoireSpell: SpellId = 3;
 let grimoireFilter = 'Semua';
-const SCHOOL_FILTERS = ['Semua', 'Api', 'Cahaya', 'Gravitasi'] as const;
+const SCHOOL_FILTERS = ['Semua', 'Api', 'Cahaya', 'Gravitasi', 'Tanah'] as const;
 
 function renderSpellSlots() {
   const dock = document.querySelector<HTMLElement>('#spell-slots');
@@ -380,6 +380,7 @@ function renderSpellSlots() {
     settings.bindings.slot2,
     settings.bindings.slot3,
     settings.bindings.slot4,
+    settings.bindings.slot5,
   ];
   dock.innerHTML = settings.loadout
     .map((id, i) => {
@@ -798,6 +799,26 @@ function updateHud(s: Snapshot) {
     'cooling',
     s.cooldowns[s.spell] > 0 || s.energy < SPELLS[s.spell].cost,
   );
+  const earthUltimate = $<HTMLButtonElement>('#earth-battle-toggle');
+  earthUltimate.hidden = s.spell !== 4;
+  earthUltimate.disabled =
+    s.mode !== 'playing' ||
+    s.earthBattleActive ||
+    s.earthUltimateCooldown > 0 ||
+    s.energy < 55;
+  earthUltimate.setAttribute('aria-pressed', String(s.earthBattleActive));
+  earthUltimate.setAttribute(
+    'aria-label',
+    s.earthBattleActive ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir tanah: Battle Mode',
+  );
+  earthUltimate.title = s.earthBattleActive
+    ? 'Battle Mode aktif'
+    : s.earthUltimateCooldown > 0
+      ? 'Ultimate Battle Mode sedang cooldown'
+      : s.energy < 55
+        ? 'Perlu 55 energi untuk Battle Mode'
+        : 'Ultimate sihir tanah · Battle Mode · 55 energi · 8,5 detik';
+  earthUltimate.style.setProperty('--ultimate-cooldown', String(s.earthUltimateCooldown));
   $('#touch-dash').classList.toggle('cooling', s.dash < 1);
   $('#flight-state').textContent = {
     contact: 'KONTAK',
@@ -874,12 +895,12 @@ async function boot() {
     $('#earth-battle-toggle').onclick = (event) => {
       event.preventDefault();
       event.stopPropagation();
-      const active = game.toggleEarthBattle();
+      const active = game.activateEarthBattle();
       const button = $<HTMLButtonElement>('#earth-battle-toggle');
       button.setAttribute('aria-pressed', String(active));
       button.setAttribute(
         'aria-label',
-        active ? 'Nonaktifkan sihir tanah: Battle Mode' : 'Aktifkan sihir tanah: Battle Mode',
+        active ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir tanah: Battle Mode',
       );
     };
     $('#brand').onclick = () => {

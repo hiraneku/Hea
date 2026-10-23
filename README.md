@@ -3,7 +3,8 @@
 Prototipe game pertarungan sihir 3D **mobile-first** yang bisa langsung dimainkan di
 browser: satu pemain melawan satu boss terbang, **IGNIS**, di arena kota 600 × 600 m
 yang bisa dihancurkan. Terbang bebas, perisai Aegis directional (depan + samping,
-belakang titik buta), empat sihir yang bisa disusun bebas, hempasan ragdoll, dan navigasi boss yang sadar
+belakang titik buta), lima sihir yang bisa disusun bebas, termasuk serangan dasar tanah
+  dengan Battle Mode sebagai ultimate khususnya, hempasan ragdoll, dan navigasi boss yang sadar
 cover. Tanpa backend, akun, atau koneksi eksternal saat bermain.
 
 ▶ **Mainkan:** https://hiraneku.github.io/Hea/

@@ -2,7 +2,7 @@ export type Mode = 'menu' | 'playing' | 'paused' | 'demo' | 'gameover' | 'victor
 export type Quality = 'auto' | 'low' | 'high';
 export type CameraMode = 'third' | 'first';
 export type BossMode = 'battle' | 'silent';
-export type SpellId = 0 | 1 | 2 | 3;
+export type SpellId = 0 | 1 | 2 | 3 | 4;
 /** HUD/telegraph palette: the standard one, or a colour-vision-safe alternative. */
 export type ColorVision = 'standard' | 'deuteranopia' | 'protanopia' | 'tritanopia';
 
@@ -30,6 +30,7 @@ export interface KeyBindings {
   slot2: string;
   slot3: string;
   slot4: string;
+  slot5: string;
 }
 
 export const DEFAULT_BINDINGS: KeyBindings = {
@@ -50,6 +51,7 @@ export const DEFAULT_BINDINGS: KeyBindings = {
   slot2: 'Digit2',
   slot3: 'Digit3',
   slot4: 'Digit4',
+  slot5: 'Digit5',
 };
 
 /** The binding actions in the order the settings panel lists them. */
@@ -71,6 +73,7 @@ export const BINDING_ACTIONS: { id: keyof KeyBindings; label: string }[] = [
   { id: 'slot2', label: 'Slot sihir 2' },
   { id: 'slot3', label: 'Slot sihir 3' },
   { id: 'slot4', label: 'Slot sihir 4' },
+  { id: 'slot5', label: 'Slot sihir 5' },
 ];
 
 const KEY_CODE = /^[A-Za-z][A-Za-z0-9]*$/;
@@ -130,7 +133,7 @@ export interface Settings {
   hudScale: number;
   /** Remappable keyboard actions. */
   bindings: KeyBindings;
-  /** The spell loadout: which spell sits in each of the four slots (spell ids, no repeats). */
+  /** The spell loadout: which spell sits in each of the five slots (spell ids, no repeats). */
   loadout: SpellId[];
   /** Spells that have been equipped at least once; the rest wear a BARU badge in the Grimoire. */
   equipped: SpellId[];
@@ -160,14 +163,14 @@ export const DEFAULT_SETTINGS: Settings = {
   colorVision: 'standard',
   hudScale: 1,
   bindings: { ...DEFAULT_BINDINGS },
-  loadout: [0, 1, 2, 3],
+  loadout: [0, 1, 2, 3, 4],
   equipped: [0, 1, 2],
 };
 
 /** The range the HUD scale slider covers (also the clamp applied to stored values). */
 export const HUD_SCALE_RANGE = { min: 0.85, max: 1.3 } as const;
 
-export type SpellSchool = 'Api' | 'Cahaya' | 'Gravitasi';
+export type SpellSchool = 'Api' | 'Cahaya' | 'Gravitasi' | 'Tanah';
 export type SpellCast = 'Ketuk' | 'Tahan' | 'Ketuk / tahan';
 
 export const SPELLS: readonly {
@@ -234,14 +237,27 @@ export const SPELLS: readonly {
     description:
       'Tahan: kolom gravitasi mengunci boss, menghantamnya ke tanah dan menahannya di sana — ia tidak bisa lolos. Tekanan tersimpan meledak saat dilepas; tanah retak dan amblas selama ia tertahan.',
   },
+  {
+    name: 'TITAN',
+    subtitle: 'Batu cepat · Battle Mode',
+    color: '#c5a477',
+    cost: 9,
+    cooldown: 0.62,
+    damage: 27,
+    school: 'Tanah',
+    cast: 'Ketuk',
+    control: 2,
+    description:
+      'Serangan dasar: lempar batu cepat ke arah bidikan. Ultimate (55 energi, 8,5 detik): Battle Mode memanggil tinju batu besar; pecahan terangkat dari titik tanah tetap, lalu menyatu bertahap.',
+  },
 ];
 
-/** The default loadout and the most spells the four slots can hold. */
-export const MAX_SLOTS = 4;
+/** The default loadout and the most spells the five slots can hold. */
+export const MAX_SLOTS = 5;
 
 /**
  * A stored loadout, made safe: unknown ids and repeats are dropped, then any spell never
- * placed fills the remaining slots in registry order, so the dock always shows four
+ * placed fills the remaining slots in registry order, so the dock always shows five
  * working slots and no spell is ever stranded outside it while the library is small.
  */
 export function normalizeLoadout(raw: unknown): SpellId[] {
@@ -304,7 +320,7 @@ export interface Snapshot {
   };
   dash: number;
   spell: SpellId;
-  /** Which of the four loadout slots is selected (the spell above is what sits in it). */
+  /** Which of the five loadout slots is selected (the spell above is what sits in it). */
   slot: number;
   /** The loadout in slot order, for dressing the dock. */
   loadout: SpellId[];
@@ -314,6 +330,9 @@ export interface Snapshot {
   charge: number;
   charged: boolean;
   cooldowns: number[];
+  earthBattleActive: boolean;
+  /** Fraction of the earth ultimate cooldown remaining (1 = just used, 0 = ready). */
+  earthUltimateCooldown: number;
   damageDealt: number;
   impacts: number;
   wallsBroken: number;

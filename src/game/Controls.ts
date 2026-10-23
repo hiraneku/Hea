@@ -210,10 +210,10 @@ export class Controls {
     if (e.code === b.rise) this.jumpRequested = true;
     if (e.code === b.cycle || e.code === 'Tab') this.onCycle();
     // Spell slots: the remappable binding first, the number row as a fixed secondary.
-    const slots = [b.slot1, b.slot2, b.slot3, b.slot4];
+    const slots = [b.slot1, b.slot2, b.slot3, b.slot4, b.slot5];
     const bound = slots.indexOf(e.code);
     if (bound >= 0) this.onSpell(bound);
-    else if (['Digit1', 'Digit2', 'Digit3', 'Digit4'].includes(e.code))
+    else if (['Digit1', 'Digit2', 'Digit3', 'Digit4', 'Digit5'].includes(e.code))
       this.onSpell(Number(e.code.at(-1)) - 1);
   }
   private bindTouch() {

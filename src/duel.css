@@ -689,6 +689,8 @@
 
 /* --- Accessibility: boss direction indicator, HUD scale, colour-vision palettes --- */
 .earth-battle-toggle {
+  position: relative;
+  overflow: hidden;
   pointer-events: auto;
   flex: 0 0 auto;
   display: inline-flex;
@@ -711,6 +713,9 @@
     background 0.2s,
     border-color 0.2s,
     box-shadow 0.2s;
+}
+.earth-battle-toggle[hidden] {
+  display: none;
 }
 .earth-battle-toggle svg {
   width: 13px;
@@ -738,6 +743,15 @@
 .earth-battle-toggle[aria-pressed='true'] i {
   opacity: 1;
   box-shadow: 0 0 7px currentColor;
+}
+.earth-battle-toggle::after {
+  position: absolute;
+  inset: auto 0 0;
+  height: 2px;
+  transform: scaleX(var(--ultimate-cooldown, 0));
+  transform-origin: left;
+  background: #d9b885;
+  content: '';
 }
 .earth-battle-toggle:focus-visible {
   outline: 2px solid #f2ddb2;
@@ -889,7 +903,8 @@
   transition: opacity 0.35s ease;
   background: radial-gradient(ellipse at center, transparent 52%, rgba(74, 32, 160, 0.5) 100%);
 }
-/* A fourth slot joins the dock: keep the row compact. */
+/* Five schools share one compact dock on desktop and touch screens. */
 .spell-slots {
-  grid-template-columns: repeat(4, 1fr);
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }

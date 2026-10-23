@@ -2198,14 +2198,14 @@ test('summon: FALL takes the constructs too, not just their master', async ({ pa
   await page.mouse.up();
 });
 
-test('grimoire: spells can be rearranged across the four slots and lose their BARU badge', async ({
+test('grimoire: spells can be rearranged across the five slots and lose their BARU badge', async ({
   page,
 }) => {
   await load(page);
   await scenario(page, 'flight');
   await step(page, 0.2);
   await page.locator('#settings-button').click();
-  await expect(page.locator('.grim-card')).toHaveCount(4);
+  await expect(page.locator('.grim-card')).toHaveCount(5);
   // FALL has never been equipped: it wears the badge until it is placed in a slot.
   const fallCard = page.locator('[data-grim-spell="3"]');
   await expect(fallCard.locator('.grim-new')).toHaveText('BARU');
