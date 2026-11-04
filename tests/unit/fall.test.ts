@@ -59,13 +59,13 @@ describe('FALL pressure', () => {
     expect(director.stage).toBe('recover');
   });
 
-  it('keeps FALL as a held gravity control and registers TITAN as a basic earth attack', () => {
+  it('keeps FALL as a held gravity control and registers BATU as a basic spike attack', () => {
     expect(SPELLS[3].name).toBe('FALL');
     expect(SPELLS[3].school).toBe('Gravitasi');
     expect(SPELLS[3].cast).toBe('Tahan');
     expect(SPELLS[3].cooldown).toBe(FALL.cooldown);
-    expect(SPELLS[4].name).toBe('TITAN');
-    expect(SPELLS[4].school).toBe('Tanah');
+    expect(SPELLS[4].name).toBe('BATU');
+    expect(SPELLS[4].school).toBe('Batu');
     expect(SPELLS[4].cast).toBe('Ketuk');
     expect(SPELLS[4].damage).toBeGreaterThan(0);
   });

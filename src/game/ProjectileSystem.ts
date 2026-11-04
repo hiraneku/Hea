@@ -64,12 +64,6 @@ export class ProjectileSystem {
   ).rotateX(Math.PI / 2);
   private fireCore = new THREE.MeshBasicMaterial({ color: '#fff5b8', toneMapped: false });
   private projectileGeometry = new THREE.IcosahedronGeometry(0.17, 1);
-  private earthProjectileGeometry = new THREE.DodecahedronGeometry(0.2, 0);
-  private earthProjectileMaterial = new THREE.MeshStandardMaterial({
-    color: '#9b805d',
-    roughness: 0.96,
-    flatShading: true,
-  });
   private projectileMaterials = {
     player: new THREE.MeshBasicMaterial({ color: new THREE.Color('#ffad53').multiplyScalar(3) }),
     fire: new THREE.MeshBasicMaterial({ color: '#ff842b', toneMapped: false }),
@@ -115,16 +109,11 @@ export class ProjectileSystem {
     aimOffset: THREE.Vector3 | null = null,
     power = 1,
     radiusOverride?: number,
-    appearance?: 'earth',
   ): Projectile {
     if (this.list.length >= MAX_LIVE) this.remove(0);
     const mesh = new THREE.Mesh(
-      appearance === 'earth'
-        ? this.earthProjectileGeometry
-        : kind === 'fire'
-          ? this.fireGeometry
-          : this.projectileGeometry,
-      appearance === 'earth' ? this.earthProjectileMaterial : this.projectileMaterials[kind],
+      kind === 'fire' ? this.fireGeometry : this.projectileGeometry,
+      this.projectileMaterials[kind],
     );
     mesh.position.copy(at);
     // Marked as a shot's body while it is one, so a stray left in the scene can be counted
@@ -150,7 +139,7 @@ export class ProjectileSystem {
     const ribbon = new Ribbon(
       kind === 'missile' ? 40 : 24,
       kind === 'hammer' ? 0.24 : kind === 'fire' ? 0.075 : 0.055,
-      appearance === 'earth' ? '#bba17a' : kind === 'hammer' ? '#ffeecf' : '#ffae77',
+      kind === 'hammer' ? '#ffeecf' : '#ffae77',
     );
     ribbon.reset(at);
     this.scene.add(ribbon.mesh);

@@ -106,6 +106,8 @@ export class World {
     fragments?: THREE.InstancedMesh;
   }[] = [];
   private fixedObstacles: Obstacle[] = [];
+  /** Dynamic fight-made blockers (e.g. stone spikes) share the same broad phase as city walls. */
+  private dynamicObstacles: Obstacle[] = [];
   /** Parapets and floor bands, with the buildings they belong to and the pose of each piece: a
    *  broken host scales its pieces away, and an arena reset stamps them back. */
   private trimBatches: {
@@ -646,14 +648,27 @@ export class World {
       b.mesh.visible = true;
       if (b.fragments) b.fragments.visible = false;
     }
+    this.dynamicObstacles = [];
     this.terrain.reset();
     this.updateTerrain();
+    this.rebuildColliders();
+  }
+  addDynamicObstacles(obstacles: Obstacle[]) {
+    this.dynamicObstacles.push(
+      ...obstacles.filter((obstacle) => !this.dynamicObstacles.includes(obstacle)),
+    );
+    this.rebuildColliders();
+  }
+  removeDynamicObstacles(obstacles: Obstacle[]) {
+    const remove = new Set(obstacles);
+    this.dynamicObstacles = this.dynamicObstacles.filter((obstacle) => !remove.has(obstacle));
     this.rebuildColliders();
   }
   private rebuildColliders() {
     this.obstacles = [
       ...this.fixedObstacles,
       ...this.buildings.flatMap((b) => b.volume.colliders()),
+      ...this.dynamicObstacles,
     ];
     this.buildObstacleGrid();
     this.updateIntactBatches();

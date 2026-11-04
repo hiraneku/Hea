@@ -88,6 +88,7 @@ import { ARENA, BOSS, FLIGHT, GROUND, HEAVY } from './config';
 import { flightWish, advanceFlight, dashBoost } from './flight';
 import { Ragdoll, type RagdollSurface } from './Ragdoll';
 import { EarthFists } from './EarthFists';
+import { StoneSpikes, type SpikeLine } from './StoneSpikes';
 import type { FiringLane } from './AttackSight';
 import {
   AirDash,
@@ -125,6 +126,7 @@ export class Game {
   readonly audio: AudioEngine;
   private world: World;
   private earthFists!: EarthFists;
+  private stoneSpikes!: StoneSpikes;
   private fx: Effects;
   private boss: Boss;
   private aegis = new AutoShield();
@@ -350,6 +352,36 @@ export class Game {
     this.projectileSystem = new ProjectileSystem(this.scene, this.fx.sigilMap);
     this.world = new World(this.scene, this.fx);
     this.earthFists = new EarthFists(this.scene);
+    this.stoneSpikes = new StoneSpikes(
+      this.scene,
+      {
+        groundAt: (x, z) => this.world.surfaceHeight(x, z),
+        candidates: (start, end, padding) => this.world.segmentCandidates(start, end, padding),
+        addObstacles: (obstacles) => this.world.addDynamicObstacles(obstacles),
+        removeObstacles: (obstacles) => this.world.removeDynamicObstacles(obstacles),
+        onErupt: (obstacle, line: SpikeLine) => {
+          if (line.hasStruckBoss || !this.boss?.alive) return;
+          const boss = this.boss.position;
+          if (
+            boss.x < obstacle.minX - BOSS.radius ||
+            boss.x > obstacle.maxX + BOSS.radius ||
+            boss.z < obstacle.minZ - BOSS.radius ||
+            boss.z > obstacle.maxZ + BOSS.radius ||
+            boss.y - BOSS.radius > obstacle.top ||
+            boss.y + BOSS.radius < (obstacle.bottom ?? 0)
+          )
+            return;
+          line.hasStruckBoss = true;
+          const strike = boss.clone().sub(this.player).normalize();
+          this.damageBoss(SPELLS[4].damage, strike.clone().multiplyScalar(3.5), {
+            spell: 4,
+            at: boss.clone(),
+            along: strike,
+          });
+        },
+      },
+      this.fx,
+    );
     this.fx.setGroundSampler((x, z) => this.world.surfaceHeight(x, z));
     this.boss = new Boss(this.scene, this.fx);
     this.enemyHost = {
@@ -827,6 +859,7 @@ export class Game {
         (o) => o.userData.projectile && !this.projectiles.some((p) => p.mesh === o),
       ).length,
       colliders: this.world.obstacles.length,
+      stoneSpikes: this.stoneSpikes.diagnostics,
       enemies: this.enemies.length,
       lastImpact: this.lastImpact,
     };
@@ -836,6 +869,7 @@ export class Game {
     this.clearEnemies();
     this.fx.clear();
     this.earthFists.reset();
+    this.stoneSpikes.reset();
     this.earthBattleTimer = 0;
     this.earthUltimateCooldown = 0;
     this.cooldowns = Array(SPELLS.length).fill(0) as number[];
@@ -1016,6 +1050,7 @@ export class Game {
   }
 
   private changeMode(mode: Mode) {
+    if (mode === 'victory' || mode === 'gameover') this.stoneSpikes.reset();
     this.mode = mode;
     this.modeTime = 0;
     this.renderNeeded = true;
@@ -1158,6 +1193,7 @@ export class Game {
       this.impactGate.boss = Math.max(0, this.impactGate.boss - dt);
       this.previousPlayer.copy(this.player);
       this.updatePlayer(dt, this.mode !== 'playing');
+      this.stoneSpikes.update(dt);
       if (this.hitPause.remaining === 0) this.prisma.update(dt);
       if (this.hitPause.remaining === 0)
         this.fallSystem.update(
@@ -1512,12 +1548,32 @@ export class Game {
           clamp(position.y + height * 0.55, wall.bottom ?? 0, wall.top),
           clamp(nz, wall.minZ, wall.maxZ),
         );
-        const force = impulse.length(),
-          broken = this.world.damageWall(wall, at, impulse, actor === 'boss' ? 3.15 : 2.6);
-        if (this.impactGate[actor] <= 0) {
+        const force = impulse.length();
+        const mayImpact = this.impactGate[actor] <= 0;
+        const spikeImpact = mayImpact
+          ? this.stoneSpikes.impact(wall, at, impulse, Math.max(24, force * 1.6))
+          : 'unknown';
+        const broken =
+          spikeImpact === 'destroyed' ||
+          (spikeImpact === 'unknown' &&
+            this.world.damageWall(wall, at, impulse, actor === 'boss' ? 3.15 : 2.6));
+        if (mayImpact) {
           this.worldImpact(at, force, 'wall', actor);
           impulse.multiplyScalar(broken ? 0.83 : -0.15);
         }
+      } else if (wall && this.impactGate[actor] <= 0) {
+        const at = new THREE.Vector3(
+          clamp(nx, wall.minX, wall.maxX),
+          clamp(position.y + height * 0.55, wall.bottom ?? 0, wall.top),
+          clamp(nz, wall.minZ, wall.maxZ),
+        );
+        const collisionHit = this.stoneSpikes.impact(
+          wall,
+          at,
+          total,
+          Math.max(4, Math.min(12, total.length() * 2)),
+        );
+        if (collisionHit !== 'unknown') this.impactGate[actor] = 0.22;
       }
       const resolved = resolveCircle(
         nx,
@@ -1560,8 +1616,15 @@ export class Game {
                 nz >= b.minZ - radius &&
                 nz <= b.maxZ + radius,
             );
-          if (support) this.world.damageWall(support, at, total, 2.8);
-          else this.world.crater(at, force);
+          if (support) {
+            const spikeImpact = this.stoneSpikes.impact(
+              support,
+              at,
+              total,
+              Math.max(24, force * 1.7),
+            );
+            if (spikeImpact === 'unknown') this.world.damageWall(support, at, total, 2.8);
+          } else this.world.crater(at, force);
           this.worldImpact(at, force, support ? 'wall' : 'ground', actor);
           floor = groundHeight(
             nx,
@@ -2575,18 +2638,8 @@ export class Game {
       this.spawn(origin, direction.clone().multiplyScalar(40), 'player', spell.damage, hasTarget);
       this.fx.glyph(origin, direction, '#ffa34f', 0.27, 0.25);
     } else if (this.spell === 4) {
-      this.spawn(
-        origin,
-        direction.clone().multiplyScalar(31),
-        'player',
-        spell.damage,
-        hasTarget,
-        null,
-        1,
-        0.24,
-        'earth',
-      );
-      this.fx.glyph(origin, direction, '#c7a87c', 0.32, 0.2);
+      const targetDistance = hasTarget ? this.player.distanceTo(this.boss.position) : 14;
+      this.stoneSpikes.cast(this.player, direction, targetDistance);
     } else if (this.spell === 1) {
       this.prisma.raiseCircle(hasTarget);
     } else {
@@ -2670,7 +2723,6 @@ export class Game {
     aimOffset: THREE.Vector3 | null = null,
     power = 1,
     radiusOverride?: number,
-    appearance?: 'earth',
   ) {
     this.projectileSystem.spawn(
       at,
@@ -2681,7 +2733,6 @@ export class Game {
       aimOffset,
       power,
       radiusOverride,
-      appearance,
     );
     if (kind !== 'player') this.attacksFired[kind]++;
   }
@@ -2892,17 +2943,23 @@ export class Game {
         if (worldHit.enemy) this.damageEnemy(worldHit.enemy, p.damage);
         else if (worldHit.boss)
           this.damageBoss(p.damage, p.velocity.clone().normalize().multiplyScalar(1.7));
-        else if (p.kind === 'hammer' || p.kind === 'missile') {
-          if (worldHit.obstacle)
+        if (worldHit.obstacle) {
+          const spikeHit = this.stoneSpikes.hit(
+            worldHit.obstacle,
+            p.damage,
+            p.mesh.position,
+            p.velocity,
+          );
+          if (spikeHit === 'unknown' && (p.kind === 'hammer' || p.kind === 'missile'))
             this.world.damageWall(
               worldHit.obstacle,
               p.mesh.position,
               p.velocity,
               p.kind === 'hammer' ? 4.2 : 1.8,
             );
-          if (worldHit.ground && p.kind === 'hammer') this.world.crater(p.mesh.position, 36);
-          if (p.kind === 'hammer') this.hammerSplash(p.mesh.position, !!worldHit.ground);
         }
+        if (worldHit.ground && p.kind === 'hammer') this.world.crater(p.mesh.position, 36);
+        if (p.kind === 'hammer') this.hammerSplash(p.mesh.position, !!worldHit.ground);
         if (worldHit.ground && (p.kind === 'fire' || p.kind === 'missile'))
           this.fx.scorch(p.mesh.position, p.kind);
         this.removeProjectile(i);
@@ -3505,6 +3562,7 @@ export class Game {
     this.clearProjectiles();
     this.fx.clear();
     this.earthFists.dispose();
+    this.stoneSpikes.dispose();
     this.composer.dispose();
     this.impactFrame.dispose();
     this.renderer.dispose();

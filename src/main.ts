@@ -122,7 +122,7 @@ app.innerHTML = `
       <div id="pointer-tip">KLIK ARENA UNTUK MEMBIDIK <span>·</span> ESC UNTUK JEDA</div>
       <div class="desktop-hints"><div><kbd data-hint="forward">W</kbd><kbd data-hint="left">A</kbd><kbd data-hint="back">S</kbd><kbd data-hint="right">D</kbd><span>GERAK</span></div><div><kbd><span data-hint="rise">SPACE</span> / <span data-hint="descend">C</span></kbd><span>NAIK / TURUN</span><kbd data-hint="flight">F</kbd><span>MODE</span><kbd data-hint="focus">E</kbd><span>FOKUS BOSS</span></div><div class="hints-muted"><kbd data-hint="pace">T</kbd><span>JALAN / LARI / SPRINT</span><kbd data-hint="view">V</kbd><span>SUDUT PANDANG</span><kbd>R</kbd><span>ULANGI</span><kbd data-hint="cycle">Q</kbd><span>GANTI SIHIR</span></div></div>
       <div class="spell-dock">
-        <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span><button id="earth-battle-toggle" class="earth-battle-toggle" type="button" aria-label="Aktifkan ultimate sihir tanah: Battle Mode" aria-pressed="false" disabled hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15.5 5.2 9l2.2 2.1L10 5l2 4 2.2-1.8L17 15.5H3Z"/><path d="M6.1 15.5h7.8"/></svg><span>ULTIMATE · BATTLE MODE</span><i></i></button></div>
+        <div class="spell-dock-label"><span>PILIH SIHIR</span><span class="cast-hint">${isTouch ? 'TAHAN TOMBOL SERANG' : 'KLIK KIRI UNTUK MENYERANG'}</span><button id="earth-battle-toggle" class="earth-battle-toggle" type="button" aria-label="Aktifkan ultimate sihir Batu: Battle Mode" aria-pressed="false" disabled hidden><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 15.5 5.2 9l2.2 2.1L10 5l2 4 2.2-1.8L17 15.5H3Z"/><path d="M6.1 15.5h7.8"/></svg><span>ULTIMATE · BATTLE MODE</span><i></i></button></div>
         <div class="spell-slots" id="spell-slots"></div>
         <div class="energy-row"><span>ENERGI</span><div class="meter energy-meter"><i id="energy-fill"></i></div><b id="energy-value">100</b></div>
       </div>
@@ -262,7 +262,7 @@ function event(event: GameEvent) {
       earthToggle.setAttribute('aria-pressed', String(active));
       earthToggle.setAttribute(
         'aria-label',
-        active ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir tanah: Battle Mode',
+        active ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir Batu: Battle Mode',
       );
     }
     experience.dataset.mode = event.mode;
@@ -370,7 +370,7 @@ function applySettings() {
 let grimoireSlot = 0;
 let grimoireSpell: SpellId = 3;
 let grimoireFilter = 'Semua';
-const SCHOOL_FILTERS = ['Semua', 'Api', 'Cahaya', 'Gravitasi', 'Tanah'] as const;
+const SCHOOL_FILTERS = ['Semua', 'Api', 'Cahaya', 'Gravitasi', 'Batu'] as const;
 
 function renderSpellSlots() {
   const dock = document.querySelector<HTMLElement>('#spell-slots');
@@ -802,14 +802,11 @@ function updateHud(s: Snapshot) {
   const earthUltimate = $<HTMLButtonElement>('#earth-battle-toggle');
   earthUltimate.hidden = s.spell !== 4;
   earthUltimate.disabled =
-    s.mode !== 'playing' ||
-    s.earthBattleActive ||
-    s.earthUltimateCooldown > 0 ||
-    s.energy < 55;
+    s.mode !== 'playing' || s.earthBattleActive || s.earthUltimateCooldown > 0 || s.energy < 55;
   earthUltimate.setAttribute('aria-pressed', String(s.earthBattleActive));
   earthUltimate.setAttribute(
     'aria-label',
-    s.earthBattleActive ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir tanah: Battle Mode',
+    s.earthBattleActive ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir Batu: Battle Mode',
   );
   earthUltimate.title = s.earthBattleActive
     ? 'Battle Mode aktif'
@@ -817,7 +814,7 @@ function updateHud(s: Snapshot) {
       ? 'Ultimate Battle Mode sedang cooldown'
       : s.energy < 55
         ? 'Perlu 55 energi untuk Battle Mode'
-        : 'Ultimate sihir tanah · Battle Mode · 55 energi · 8,5 detik';
+        : 'Ultimate sihir Batu · Battle Mode · 55 energi · 8,5 detik';
   earthUltimate.style.setProperty('--ultimate-cooldown', String(s.earthUltimateCooldown));
   $('#touch-dash').classList.toggle('cooling', s.dash < 1);
   $('#flight-state').textContent = {
@@ -900,7 +897,7 @@ async function boot() {
       button.setAttribute('aria-pressed', String(active));
       button.setAttribute(
         'aria-label',
-        active ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir tanah: Battle Mode',
+        active ? 'Battle Mode aktif' : 'Aktifkan ultimate sihir Batu: Battle Mode',
       );
     };
     $('#brand').onclick = () => {

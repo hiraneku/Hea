@@ -170,7 +170,7 @@ export const DEFAULT_SETTINGS: Settings = {
 /** The range the HUD scale slider covers (also the clamp applied to stored values). */
 export const HUD_SCALE_RANGE = { min: 0.85, max: 1.3 } as const;
 
-export type SpellSchool = 'Api' | 'Cahaya' | 'Gravitasi' | 'Tanah';
+export type SpellSchool = 'Api' | 'Cahaya' | 'Gravitasi' | 'Batu';
 export type SpellCast = 'Ketuk' | 'Tahan' | 'Ketuk / tahan';
 
 export const SPELLS: readonly {
@@ -238,17 +238,17 @@ export const SPELLS: readonly {
       'Tahan: kolom gravitasi mengunci boss, menghantamnya ke tanah dan menahannya di sana — ia tidak bisa lolos. Tekanan tersimpan meledak saat dilepas; tanah retak dan amblas selama ia tertahan.',
   },
   {
-    name: 'TITAN',
-    subtitle: 'Batu cepat · Battle Mode',
+    name: 'BATU',
+    subtitle: 'Duri stalagmit · Battle Mode',
     color: '#c5a477',
-    cost: 9,
-    cooldown: 0.62,
+    cost: 16,
+    cooldown: 1.1,
     damage: 27,
-    school: 'Tanah',
+    school: 'Batu',
     cast: 'Ketuk',
     control: 2,
     description:
-      'Serangan dasar: lempar batu cepat ke arah bidikan. Ultimate (55 energi, 8,5 detik): Battle Mode memanggil tinju batu besar; pecahan terangkat dari titik tanah tetap, lalu menyatu bertahap.',
+      'Serangan dasar: deretan duri batu besar merambat dari tanah menuju bidikan pada jarak menengah. Duri menjadi penghalang solid sampai dihancurkan atau battle boss berakhir. Ultimate (55 energi, 8,5 detik): Battle Mode memanggil sepasang tinju batu.',
   },
 ];
 
