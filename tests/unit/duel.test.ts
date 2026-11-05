@@ -224,6 +224,28 @@ describe('persistent world destruction', () => {
     expect(v.cells.every((c) => c.alive)).toBe(true);
     expect(v.colliders()).toHaveLength(1);
   });
+  it('preserves a shaped destructible mask across impacts and resets', () => {
+    const volume = new DestructibleVolume(
+      { minX: -3, maxX: 3, minZ: -1.5, maxZ: 1.5, bottom: 0, top: 8 },
+      -1,
+      0.8,
+      ({ x, y, z }) => {
+        const taper = 1 - 0.8 * (y / 8);
+        return (x / taper) ** 2 + (z / taper) ** 2 <= 1;
+      },
+    );
+    const original = volume.initialAliveCount;
+    expect(original).toBeGreaterThan(0);
+    expect(original).toBeLessThan(volume.cells.length);
+    expect(volume.colliders().length).toBeGreaterThan(0);
+
+    expect(volume.breakAt(new Vector3(0.3, 4, 0), 1.1).length).toBeGreaterThan(0);
+    expect(volume.aliveCount).toBeLessThan(original);
+    volume.reset();
+    expect(volume.aliveCount).toBe(original);
+    expect(volume.damaged).toBe(true);
+    expect(volume.colliders().length).toBeGreaterThan(0);
+  });
   it('craters deform the actual ground and support feet below the original plane', () => {
     const ground = new TerrainDeformation();
     ground.add(2, 4, 3, 1.2);

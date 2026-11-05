@@ -1,17 +1,15 @@
 import * as THREE from 'three';
 import type { Effects } from './Effects';
-import { clamp, seededRandom, segmentBox, type Obstacle } from './math';
+import { DestructibleVolume } from './destruction';
+import { clamp, seededRandom, segmentBox, type Obstacle, type Point3 } from './math';
 
-const MIN_RANGE = 6;
-const MAX_RANGE = 18;
-const START_OFFSET = 2.4;
-const SPIKE_WIDTH = 2.05;
-const SPIKE_DEPTH = 1.75;
-const MAX_SPIKES_PER_LINE = 7;
-const RISE_TIME = 0.48;
-const SEQUENTIAL_DELAY = 0.14;
-const SPIKE_HEALTH = 72;
-const SPIKE_DARK = new THREE.Color('#44392b');
+const MIN_RANGE = 6.5;
+const MAX_RANGE = 30;
+const START_OFFSET = 2.6;
+const SPIKE_WIDTH = 4.1;
+const SPIKE_DEPTH = 3.6;
+const CELL_SIZE = 1.35;
+const RISE_TIME = 0.62;
 
 export interface SpikeLine {
   id: number;
@@ -20,60 +18,66 @@ export interface SpikeLine {
 
 interface StoneSpike {
   mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
-  obstacle: Obstacle;
-  base: THREE.Color;
+  volume: DestructibleVolume;
   line: SpikeLine;
-  age: number;
-  delay: number;
-  height: number;
+  owner: number;
+  base: THREE.Vector3;
+  tip: THREE.Vector3;
+  axis: THREE.Vector3;
   width: number;
   depth: number;
-  health: number;
+  radius: number;
+  length: number;
+  age: number;
   solid: boolean;
-  started: boolean;
 }
 
 export interface StoneSpikeHost {
   groundAt: (x: number, z: number) => number;
   candidates: (start: THREE.Vector3, end: THREE.Vector3, padding: number) => Obstacle[];
-  addObstacles: (obstacles: Obstacle[]) => void;
-  removeObstacles: (obstacles: Obstacle[]) => void;
-  onErupt: (obstacle: Obstacle, line: SpikeLine) => void;
+  addWall: (mesh: THREE.Mesh, volume: DestructibleVolume) => void;
+  removeWalls: (owners: number[]) => void;
+  hasWall: (owner: number) => boolean;
+  onEmerge: (
+    spike: { base: THREE.Vector3; tip: THREE.Vector3; radius: number },
+    line: SpikeLine,
+  ) => void;
 }
 
-type SpikeEffects = Pick<Effects, 'dust' | 'debris' | 'impact'>;
+type SpikeEffects = Pick<Effects, 'dust' | 'debris'>;
 
 function smooth01(value: number) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
   return t * t * (3 - 2 * t);
 }
 
-/** A broad, rough low-poly stalagmite with an irregular base and an off-centre tip. */
+/** One oversized, faceted stone lance; its local Y axis is aimed along the cast. */
 function spireGeometry(seed: number) {
   const random = seededRandom(seed);
-  const sides = 7;
+  const sides = 9;
   const rings = [
     { y: 0, radius: 0.52 },
-    { y: 0.24, radius: 0.49 },
-    { y: 0.59, radius: 0.34 },
-    { y: 0.84, radius: 0.19 },
+    { y: 0.18, radius: 0.5 },
+    { y: 0.43, radius: 0.4 },
+    { y: 0.7, radius: 0.29 },
+    { y: 0.9, radius: 0.17 },
   ];
   const positions: number[] = [];
   for (let ring = 0; ring < rings.length; ring++) {
     const { y, radius } = rings[ring];
-    const offset = ring % 2 ? 0.13 : 0;
+    const offset = ring % 2 ? 0.11 : 0;
     for (let side = 0; side < sides; side++) {
       const angle = (side / sides) * Math.PI * 2 + offset;
-      const uneven = 0.82 + random() * 0.34;
+      const uneven = 0.84 + random() * 0.32;
       positions.push(
-        Math.cos(angle) * radius * uneven + (random() - 0.5) * 0.08,
-        y + (random() - 0.5) * (ring === 0 ? 0.025 : 0.05),
-        Math.sin(angle) * radius * uneven + (random() - 0.5) * 0.08,
+        Math.cos(angle) * radius * uneven + (random() - 0.5) * 0.035,
+        y + (random() - 0.5) * 0.012,
+        Math.sin(angle) * radius * uneven + (random() - 0.5) * 0.035,
       );
     }
   }
   const tip = sides * rings.length;
-  positions.push((random() - 0.5) * 0.22, 1, (random() - 0.5) * 0.22);
+  positions.push((random() - 0.5) * 0.06, 1, (random() - 0.5) * 0.06);
   const indices: number[] = [];
   for (let ring = 0; ring < rings.length - 1; ring++)
     for (let side = 0; side < sides; side++) {
@@ -93,28 +97,59 @@ function spireGeometry(seed: number) {
   return geometry;
 }
 
-function footprint(center: THREE.Vector3, forward: THREE.Vector3, width: number, depth: number) {
-  const side = new THREE.Vector3(-forward.z, 0, forward.x);
-  const corners: THREE.Vector3[] = [];
-  for (const x of [-1, 1])
-    for (const z of [-1, 1])
-      corners.push(
-        center
-          .clone()
-          .addScaledVector(side, (width / 2) * x)
-          .addScaledVector(forward, (depth / 2) * z),
-      );
+function structureBounds(
+  base: THREE.Vector3,
+  axis: THREE.Vector3,
+  right: THREE.Vector3,
+  side: THREE.Vector3,
+  length: number,
+  width: number,
+  depth: number,
+): Obstacle {
+  const points: THREE.Vector3[] = [];
+  for (const t of [0, length])
+    for (const x of [-1, 1])
+      for (const z of [-1, 1])
+        points.push(
+          base
+            .clone()
+            .addScaledVector(axis, t)
+            .addScaledVector(right, x * width * 0.52)
+            .addScaledVector(side, z * depth * 0.52),
+        );
   return {
-    minX: Math.min(...corners.map((point) => point.x)),
-    maxX: Math.max(...corners.map((point) => point.x)),
-    minZ: Math.min(...corners.map((point) => point.z)),
-    maxZ: Math.max(...corners.map((point) => point.z)),
+    minX: Math.min(...points.map((point) => point.x)),
+    maxX: Math.max(...points.map((point) => point.x)),
+    minZ: Math.min(...points.map((point) => point.z)),
+    maxZ: Math.max(...points.map((point) => point.z)),
+    bottom: Math.min(...points.map((point) => point.y)),
+    top: Math.max(...points.map((point) => point.y)),
+  };
+}
+
+function spikeCellMask(
+  base: THREE.Vector3,
+  axis: THREE.Vector3,
+  right: THREE.Vector3,
+  side: THREE.Vector3,
+  length: number,
+  width: number,
+  depth: number,
+) {
+  return (point: Point3) => {
+    const fromBase = new THREE.Vector3(point.x, point.y, point.z).sub(base);
+    const along = fromBase.dot(axis);
+    if (along < 0 || along > length) return false;
+    const taper = 1 - 0.82 * (along / length);
+    const x = fromBase.dot(right) / (width * 0.52 * taper);
+    const z = fromBase.dot(side) / (depth * 0.52 * taper);
+    return x * x + z * z <= 1;
   };
 }
 
 /**
- * Raised stone spikes for the Batu spell. Each cast leaves a chain of independent, solid
- * stalagmites in the world; their hitboxes remain registered until broken or the duel resets.
+ * Each cast creates one huge leaning spear that grows out from near the caster toward the aim.
+ * Its voxel mask, hit response, fragments and collider lifetime use the arena wall system.
  */
 export class StoneSpikes {
   private spikes: StoneSpike[] = [];
@@ -132,162 +167,131 @@ export class StoneSpikes {
 
   get diagnostics() {
     return this.spikes.map((spike) => ({
-      position: spike.mesh.position.toArray(),
-      health: spike.health,
+      position: spike.base.toArray(),
+      tip: spike.tip.toArray(),
+      length: spike.length,
       solid: spike.solid,
-      bounds: { ...spike.obstacle },
+      damaged: spike.volume.aliveCount < spike.volume.initialAliveCount,
+      cellsAlive: spike.volume.aliveCount,
+      cellsTotal: spike.volume.initialAliveCount,
+      meshVisible: spike.mesh.visible,
+      bounds: { ...spike.volume.bounds },
       line: spike.line.id,
     }));
   }
 
-  /**
-   * Raise one medium-range row from the player's current ground position toward the aim. A
-   * nearby wall shortens the row so the stones never grow through the city geometry.
-   */
+  /** Create one long stone spear, with its base beside the caster and its tip aimed downrange. */
   cast(player: THREE.Vector3, aim: THREE.Vector3, targetDistance: number) {
     const forward = new THREE.Vector3(aim.x, 0, aim.z);
-    if (forward.lengthSq() < 1e-6 || targetDistance < MIN_RANGE) return 0;
+    if (forward.lengthSq() < 1e-6 || targetDistance < MIN_RANGE + START_OFFSET + 0.8) return 0;
     forward.normalize();
-    let range = clamp(targetDistance - 1.5, MIN_RANGE, MAX_RANGE);
-    const origin = player.clone();
-    const start = origin.clone().addScaledVector(forward, START_OFFSET);
-    start.y = this.host.groundAt(start.x, start.z) + 1.05;
-    const end = origin.clone().addScaledVector(forward, range);
-    end.y = this.host.groundAt(end.x, end.z) + 1.05;
-    for (const obstacle of this.host.candidates(start, end, SPIKE_WIDTH * 0.4)) {
-      const hit = segmentBox(start, end, obstacle, SPIKE_WIDTH * 0.3);
-      if (hit === null || hit < 0.02) continue;
-      range = Math.min(range, START_OFFSET + (range - START_OFFSET) * hit - 0.7);
+    const slope = clamp(aim.y / Math.max(0.001, Math.hypot(aim.x, aim.z)), 0.32, 0.5);
+    const axis = forward
+      .clone()
+      .addScaledVector(new THREE.Vector3(0, 1, 0), slope)
+      .normalize();
+    const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
+    const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion).normalize();
+    const side = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion).normalize();
+    const ground = this.host.groundAt(player.x, player.z);
+    const base = player.clone().addScaledVector(forward, START_OFFSET);
+    base.y = this.host.groundAt(base.x, base.z) + 0.03;
+    let horizontalReach = clamp(
+      targetDistance - START_OFFSET - 0.8,
+      MIN_RANGE,
+      MAX_RANGE - START_OFFSET,
+    );
+    let length = horizontalReach / Math.hypot(axis.x, axis.z);
+    const castStart = base.clone().addScaledVector(axis, 0.2);
+    const castEnd = base.clone().addScaledVector(axis, length);
+    for (const obstacle of this.host.candidates(castStart, castEnd, SPIKE_WIDTH * 0.3)) {
+      const hit = segmentBox(castStart, castEnd, obstacle, SPIKE_WIDTH * 0.2);
+      if (hit === null || hit < 0.03) continue;
+      length = Math.min(length, length * hit - 0.8);
     }
-    range = Math.max(START_OFFSET + 1.2, range);
-    const spacing = 2.55;
-    const count = clamp(Math.ceil((range - START_OFFSET) / spacing) + 1, 2, MAX_SPIKES_PER_LINE);
-    const line: SpikeLine = { id: this.nextLine++, hasStruckBoss: false };
-    const newSpikes: StoneSpike[] = [];
-    const random = seededRandom(line.id * 7919);
+    horizontalReach = length * Math.hypot(axis.x, axis.z);
+    if (horizontalReach < MIN_RANGE) return 0;
 
-    for (let index = 0; index < count; index++) {
-      const t = index / (count - 1);
-      const along = THREE.MathUtils.lerp(START_OFFSET, range, t);
-      const position = origin.clone().addScaledVector(forward, along);
-      const ground = this.host.groundAt(position.x, position.z);
-      const width = SPIKE_WIDTH * (0.88 + random() * 0.22);
-      const depth = SPIKE_DEPTH * (0.9 + random() * 0.18);
-      const height = 3.65 + random() * 0.75;
-      const bounds = footprint(position, forward, width, depth);
-      const obstacle: Obstacle = {
-        ...bounds,
-        bottom: ground,
-        top: ground + height,
-      };
-      const base = new THREE.Color().setHSL(0.095 + random() * 0.025, 0.22, 0.35 + random() * 0.08);
-      const material = new THREE.MeshStandardMaterial({
-        color: base,
-        roughness: 0.97,
-        flatShading: true,
-      });
-      const mesh = new THREE.Mesh(spireGeometry(line.id * 101 + index), material);
-      mesh.name = `stone-stalagmite-${line.id}-${index}`;
-      mesh.position.set(position.x, ground - height, position.z);
-      mesh.rotation.y = Math.atan2(forward.x, forward.z) + (random() - 0.5) * 0.18;
-      mesh.scale.set(width, height, depth);
-      mesh.castShadow = mesh.receiveShadow = true;
-      this.scene.add(mesh);
-      newSpikes.push({
-        mesh,
-        obstacle,
-        base,
-        line,
-        age: 0,
-        delay: index * SEQUENTIAL_DELAY,
-        height,
-        width,
-        depth,
-        health: SPIKE_HEALTH,
-        solid: false,
-        started: false,
-      });
-    }
-    this.spikes.push(...newSpikes);
-    return newSpikes.length;
+    const id = this.nextLine++;
+    const line: SpikeLine = { id, hasStruckBoss: false };
+    const tip = base.clone().addScaledVector(axis, length);
+    const width = SPIKE_WIDTH;
+    const depth = SPIKE_DEPTH;
+    const radius = Math.max(width, depth) * 0.52;
+    const bounds = structureBounds(base, axis, right, side, length, width, depth);
+    // Keep the collider and voxel fragments above the walkable ground plane at the buried base.
+    bounds.bottom = Math.max(ground - 0.35, bounds.bottom ?? ground);
+    const owner = -id;
+    const volume = new DestructibleVolume(
+      bounds,
+      owner,
+      CELL_SIZE,
+      spikeCellMask(base, axis, right, side, length, width, depth),
+    );
+    const random = seededRandom(id * 7919);
+    const material = new THREE.MeshStandardMaterial({
+      color: new THREE.Color().setHSL(0.095 + random() * 0.025, 0.22, 0.35 + random() * 0.08),
+      roughness: 0.97,
+      flatShading: true,
+    });
+    const mesh = new THREE.Mesh(spireGeometry(id * 101), material);
+    mesh.name = `stone-spear-${id}`;
+    mesh.position.copy(base);
+    mesh.quaternion.copy(quaternion);
+    mesh.scale.set(width, 0.01, depth);
+    mesh.castShadow = mesh.receiveShadow = true;
+    this.scene.add(mesh);
+    this.spikes.push({
+      mesh,
+      volume,
+      line,
+      owner,
+      base,
+      tip,
+      axis,
+      width,
+      depth,
+      radius,
+      length,
+      age: 0,
+      solid: false,
+    });
+    return 1;
   }
 
   update(dt: number) {
-    const becomeSolid: Obstacle[] = [];
-    for (const spike of this.spikes) {
-      spike.age += dt;
-      const phase = clamp((spike.age - spike.delay) / RISE_TIME, 0, 1);
-      if (phase <= 0) continue;
-      if (!spike.started) {
-        spike.started = true;
-        const ground = spike.obstacle.bottom ?? 0;
-        const base = new THREE.Vector3(spike.mesh.position.x, ground, spike.mesh.position.z);
-        this.fx.dust(base, 11, 1.5, new THREE.Vector3(0, 3.2, 0));
+    for (const spike of [...this.spikes]) {
+      if (spike.solid) {
+        if (!this.host.hasWall(spike.owner)) this.remove(spike);
+        continue;
       }
-      const rise = smooth01(phase);
-      spike.mesh.position.y = (spike.obstacle.bottom ?? 0) - spike.height * (1 - rise);
-      const scale = 0.82 + 0.18 * rise;
-      spike.mesh.scale.set(spike.width * scale, spike.height, spike.depth * scale);
-      if (phase < 1 || spike.solid) continue;
+      spike.age += dt;
+      const phase = clamp(spike.age / RISE_TIME, 0, 1);
+      const growth = smooth01(phase);
+      spike.mesh.scale.set(spike.width, Math.max(0.01, spike.length * growth), spike.depth);
+      if (phase < 1) continue;
       spike.solid = true;
-      becomeSolid.push(spike.obstacle);
-      const base = new THREE.Vector3(
-        spike.mesh.position.x,
-        spike.obstacle.bottom ?? 0,
-        spike.mesh.position.z,
+      this.host.addWall(spike.mesh, spike.volume);
+      this.fx.dust(spike.base, 18, 2.8, spike.axis.clone().multiplyScalar(2));
+      this.fx.debris(spike.base, 14, 4.5, 1.4, spike.axis.clone().multiplyScalar(3));
+      this.host.onEmerge(
+        { base: spike.base.clone(), tip: spike.tip.clone(), radius: spike.radius },
+        spike.line,
       );
-      this.fx.debris(base, 5, 2.4, 0.8, new THREE.Vector3(0, 1.6, 0));
-      this.host.onErupt(spike.obstacle, spike.line);
     }
-    if (becomeSolid.length) this.host.addObstacles(becomeSolid);
   }
 
-  /** Applies damage to a registered spike and reports whether it cracked or was destroyed. */
-  hit(
-    obstacle: Obstacle,
-    amount: number,
-    at: THREE.Vector3,
-    force: THREE.Vector3,
-  ): 'unknown' | 'damaged' | 'destroyed' {
-    const spike = this.spikes.find((candidate) => candidate.obstacle === obstacle);
-    if (!spike || !spike.solid) return 'unknown';
-    spike.health -= Math.max(1, amount);
-    const lost = 1 - clamp(spike.health / SPIKE_HEALTH, 0, 1);
-    spike.mesh.material.color.copy(spike.base).lerp(SPIKE_DARK, lost * 0.68);
-    spike.mesh.material.emissive.set('#6e4b2e');
-    spike.mesh.material.emissiveIntensity = 0.3 + lost * 0.35;
-    this.fx.impact(at, '#c8aa7b', false, 0.75);
-    if (spike.health <= 0) {
-      this.destroy(spike, at, force);
-      return 'destroyed';
-    }
-    return 'damaged';
-  }
-
-  /** A high-speed player/boss body impact can break the wall segment it strikes. */
-  impact(obstacle: Obstacle, at: THREE.Vector3, force: THREE.Vector3, power: number) {
-    return this.hit(obstacle, power, at, force);
-  }
-
-  private destroy(spike: StoneSpike, at: THREE.Vector3, force: THREE.Vector3) {
-    if (spike.solid) this.host.removeObstacles([spike.obstacle]);
+  private remove(spike: StoneSpike) {
     this.scene.remove(spike.mesh);
     spike.mesh.geometry.dispose();
     spike.mesh.material.dispose();
-    this.fx.debris(at, 18, 5.5, 1.5, force);
-    this.fx.dust(at, 12, 2.2, force);
     this.spikes = this.spikes.filter((candidate) => candidate !== spike);
   }
 
   reset() {
-    const solid = this.spikes.filter((spike) => spike.solid).map((spike) => spike.obstacle);
-    if (solid.length) this.host.removeObstacles(solid);
-    for (const spike of this.spikes) {
-      this.scene.remove(spike.mesh);
-      spike.mesh.geometry.dispose();
-      spike.mesh.material.dispose();
-    }
-    this.spikes = [];
+    const owners = this.spikes.filter((spike) => spike.solid).map((spike) => spike.owner);
+    if (owners.length) this.host.removeWalls(owners);
+    for (const spike of this.spikes) this.remove(spike);
     this.nextLine = 1;
   }
 

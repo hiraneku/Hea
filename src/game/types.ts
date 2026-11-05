@@ -239,7 +239,7 @@ export const SPELLS: readonly {
   },
   {
     name: 'BATU',
-    subtitle: 'Duri stalagmit · Battle Mode',
+    subtitle: 'Duri batu miring · Battle Mode',
     color: '#c5a477',
     cost: 16,
     cooldown: 1.1,
@@ -248,7 +248,7 @@ export const SPELLS: readonly {
     cast: 'Ketuk',
     control: 2,
     description:
-      'Serangan dasar: deretan duri batu besar merambat dari tanah menuju bidikan pada jarak menengah. Duri menjadi penghalang solid sampai dihancurkan atau battle boss berakhir. Ultimate (55 energi, 8,5 detik): Battle Mode memanggil sepasang tinju batu.',
+      'Serangan dasar: satu duri batu raksasa yang miring tumbuh dari dekat pemain ke arah bidikan, dengan jangkauan menengah-jauh. Duri menjadi penghalang solid dan hancur bertahap seperti dinding arena; ia menetap sampai hancur atau battle boss berakhir. Ultimate (55 energi, 8,5 detik): Battle Mode memanggil sepasang tinju batu.',
   },
 ];
 

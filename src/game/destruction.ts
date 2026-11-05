@@ -16,6 +16,7 @@ export interface Cell {
 /** Lazy fractured geometry uses these same cells for rendering AND collision. */
 export class DestructibleVolume {
   readonly cells: Cell[] = [];
+  private readonly initialMask: boolean[] = [];
   readonly nx: number;
   readonly ny: number;
   readonly nz: number;
@@ -24,6 +25,7 @@ export class DestructibleVolume {
     readonly bounds: Obstacle,
     readonly owner: number,
     cellSize = 1.35,
+    includeCell?: (center: Point3) => boolean,
   ) {
     const width = bounds.maxX - bounds.minX,
       height = bounds.top - (bounds.bottom ?? 0),
@@ -37,24 +39,36 @@ export class DestructibleVolume {
     for (let x = 0; x < this.nx; x++)
       for (let z = 0; z < this.nz; z++)
         for (let y = 0; y < this.ny; y++) {
-          this.cells.push({
+          const center = {
             x: bounds.minX + (x + 0.5) * w,
             y: (bounds.bottom ?? 0) + (y + 0.5) * h,
             z: bounds.minZ + (z + 0.5) * d,
+          };
+          const alive = includeCell?.(center) ?? true;
+          this.initialMask.push(alive);
+          this.cells.push({
+            ...center,
             w,
             h,
             d,
-            alive: true,
+            alive,
             ix: x,
             iy: y,
             iz: z,
           });
         }
+    this.damaged = this.initialMask.some((alive) => !alive);
+  }
+  get aliveCount() {
+    return this.cells.reduce((count, cell) => count + Number(cell.alive), 0);
+  }
+  get initialAliveCount() {
+    return this.initialMask.reduce((count, alive) => count + Number(alive), 0);
   }
   reset() {
-    this.damaged = false;
-    this.cells.forEach((c) => {
-      c.alive = true;
+    this.damaged = this.initialMask.some((alive) => !alive);
+    this.cells.forEach((cell, index) => {
+      cell.alive = this.initialMask[index];
     });
   }
   breakAt(point: Point3, radius: number): Cell[] {

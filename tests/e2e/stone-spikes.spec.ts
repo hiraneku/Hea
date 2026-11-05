@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test('Batu raises persistent stalagmites and owns the Battle Mode ultimate', async ({ page }) => {
+test('Batu thrusts one leaning stone spear and owns the Battle Mode ultimate', async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem(
       'hea-settings',
@@ -20,32 +20,42 @@ test('Batu raises persistent stalagmites and owns the Battle Mode ultimate', asy
   await expect(button).toBeEnabled();
   await expect(button).toHaveAttribute('aria-pressed', 'false');
 
-  // Basic attack: a rising line becomes solid and remains at its cast location.
+  // One attack grows a single oversized lance from beside the player toward the aim.
   await page.evaluate(() => {
     window.__HEA_DEBUG__.harness!.castPlayer();
     window.__HEA_DEBUG__.harness!.step(2.2);
   });
   const firstLine = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().stoneSpikes);
-  expect(firstLine.length).toBeGreaterThanOrEqual(2);
-  expect(firstLine.every((spike) => spike.solid)).toBe(true);
-  const fixedPosition = firstLine[firstLine.length - 1].position;
+  expect(firstLine).toHaveLength(1);
+  expect(firstLine[0].solid).toBe(true);
+  expect(firstLine[0].length).toBeGreaterThan(10);
+  expect(firstLine[0].tip[1]).toBeGreaterThan(firstLine[0].position[1]);
+  const fixedPosition = firstLine[0].position;
+  const originalCells = firstLine[0].cellsAlive;
 
-  // Another spell's projectiles collide with the solid row, damage a spike, then break it.
+  // Projectiles break it using the same voxel/chunk destruction response as arena walls.
   await page.locator('.spell-slot[data-spell="0"]').click();
   await page.evaluate(() => {
     const debug = window.__HEA_DEBUG__;
+    debug.harness!.face(0, -0.22);
     debug.harness!.castPlayer();
     debug.harness!.step(0.5);
   });
   const cracked = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().stoneSpikes);
-  expect(cracked[0].health).toBeLessThan(72);
+  expect(cracked).toHaveLength(1);
+  expect(cracked[0].damaged).toBe(true);
+  expect(cracked[0].meshVisible).toBe(false);
+  expect(cracked[0].cellsAlive).toBeLessThan(originalCells);
+  const cellsAfterFirstHit = cracked[0].cellsAlive;
   await page.evaluate(() => {
     const debug = window.__HEA_DEBUG__;
+    debug.harness!.step(0.4);
     debug.harness!.castPlayer();
     debug.harness!.step(0.5);
   });
   const afterBreak = await page.evaluate(() => window.__HEA_DEBUG__.diagnostics().stoneSpikes);
-  expect(afterBreak).toHaveLength(firstLine.length - 1);
+  expect(afterBreak).toHaveLength(1);
+  expect(afterBreak[0].cellsAlive).toBeLessThan(cellsAfterFirstHit);
 
   await page.evaluate(() => {
     const debug = window.__HEA_DEBUG__;

@@ -106,8 +106,11 @@ export class World {
     fragments?: THREE.InstancedMesh;
   }[] = [];
   private fixedObstacles: Obstacle[] = [];
-  /** Dynamic fight-made blockers (e.g. stone spikes) share the same broad phase as city walls. */
-  private dynamicObstacles: Obstacle[] = [];
+  /** Fight-made structures use the same destructible cells and collision rebuilding as city walls. */
+  private dynamicWalls = new Map<
+    number,
+    { mesh: THREE.Mesh; volume: DestructibleVolume; fragments?: THREE.InstancedMesh }
+  >();
   /** Parapets and floor bands, with the buildings they belong to and the pose of each piece: a
    *  broken host scales its pieces away, and an arena reset stamps them back. */
   private trimBatches: {
@@ -648,27 +651,59 @@ export class World {
       b.mesh.visible = true;
       if (b.fragments) b.fragments.visible = false;
     }
-    this.dynamicObstacles = [];
+    for (const wall of this.dynamicWalls.values()) {
+      this.scene.remove(wall.mesh);
+      wall.mesh.geometry.dispose();
+      (wall.mesh.material as THREE.Material).dispose();
+      if (wall.fragments) {
+        this.scene.remove(wall.fragments);
+        wall.fragments.geometry.dispose();
+      }
+    }
+    this.dynamicWalls.clear();
     this.terrain.reset();
     this.updateTerrain();
     this.rebuildColliders();
   }
-  addDynamicObstacles(obstacles: Obstacle[]) {
-    this.dynamicObstacles.push(
-      ...obstacles.filter((obstacle) => !this.dynamicObstacles.includes(obstacle)),
-    );
+  addDynamicWall(mesh: THREE.Mesh, volume: DestructibleVolume) {
+    this.dynamicWalls.set(volume.owner, { mesh, volume });
     this.rebuildColliders();
   }
-  removeDynamicObstacles(obstacles: Obstacle[]) {
-    const remove = new Set(obstacles);
-    this.dynamicObstacles = this.dynamicObstacles.filter((obstacle) => !remove.has(obstacle));
+  hasDynamicWall(owner: number) {
+    return this.dynamicWalls.has(owner);
+  }
+  isDynamicWall(obstacle: Obstacle) {
+    return obstacle.owner !== undefined && this.dynamicWalls.has(obstacle.owner);
+  }
+  removeDynamicWall(owner: number) {
+    const wall = this.dynamicWalls.get(owner);
+    if (!wall) return;
+    this.dynamicWalls.delete(owner);
+    this.scene.remove(wall.mesh);
+    if (wall.fragments) {
+      this.scene.remove(wall.fragments);
+      wall.fragments.geometry.dispose();
+    }
+    this.rebuildColliders();
+  }
+  removeDynamicWalls(owners: number[]) {
+    for (const owner of owners) {
+      const wall = this.dynamicWalls.get(owner);
+      if (!wall) continue;
+      this.dynamicWalls.delete(owner);
+      this.scene.remove(wall.mesh);
+      if (wall.fragments) {
+        this.scene.remove(wall.fragments);
+        wall.fragments.geometry.dispose();
+      }
+    }
     this.rebuildColliders();
   }
   private rebuildColliders() {
     this.obstacles = [
       ...this.fixedObstacles,
       ...this.buildings.flatMap((b) => b.volume.colliders()),
-      ...this.dynamicObstacles,
+      ...[...this.dynamicWalls.values()].flatMap((wall) => wall.volume.colliders()),
     ];
     this.buildObstacleGrid();
     this.updateIntactBatches();
@@ -771,10 +806,13 @@ export class World {
   }
   damageWall(obstacle: Obstacle, at: THREE.Vector3, force: THREE.Vector3, radius = 2.05): boolean {
     if (obstacle.owner === undefined) return false;
-    const b = this.buildings[obstacle.owner];
-    const removed = b.volume.breakAt(at, radius);
+    const dynamic = obstacle.owner < 0 ? this.dynamicWalls.get(obstacle.owner) : undefined;
+    const wall = dynamic ?? this.buildings[obstacle.owner];
+    if (!wall) return false;
+    const removed = wall.volume.breakAt(at, radius);
     if (!removed.length) return false;
-    this.showDamage(b, removed, at, force);
+    this.showDamage(wall, removed, at, force);
+    if (dynamic && wall.volume.aliveCount === 0) this.removeDynamicWall(obstacle.owner);
     return true;
   }
   private showDamage(

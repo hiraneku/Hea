@@ -357,20 +357,16 @@ export class Game {
       {
         groundAt: (x, z) => this.world.surfaceHeight(x, z),
         candidates: (start, end, padding) => this.world.segmentCandidates(start, end, padding),
-        addObstacles: (obstacles) => this.world.addDynamicObstacles(obstacles),
-        removeObstacles: (obstacles) => this.world.removeDynamicObstacles(obstacles),
-        onErupt: (obstacle, line: SpikeLine) => {
+        addWall: (mesh, volume) => this.world.addDynamicWall(mesh, volume),
+        removeWalls: (owners) => this.world.removeDynamicWalls(owners),
+        hasWall: (owner) => this.world.hasDynamicWall(owner),
+        onEmerge: ({ base, tip, radius }, line: SpikeLine) => {
           if (line.hasStruckBoss || !this.boss?.alive) return;
           const boss = this.boss.position;
-          if (
-            boss.x < obstacle.minX - BOSS.radius ||
-            boss.x > obstacle.maxX + BOSS.radius ||
-            boss.z < obstacle.minZ - BOSS.radius ||
-            boss.z > obstacle.maxZ + BOSS.radius ||
-            boss.y - BOSS.radius > obstacle.top ||
-            boss.y + BOSS.radius < (obstacle.bottom ?? 0)
-          )
-            return;
+          const axis = tip.clone().sub(base);
+          const along = clamp(boss.clone().sub(base).dot(axis) / axis.lengthSq(), 0, 1);
+          const closest = base.addScaledVector(axis, along);
+          if (boss.distanceTo(closest) > BOSS.radius + radius * (1 - 0.82 * along)) return;
           line.hasStruckBoss = true;
           const strike = boss.clone().sub(this.player).normalize();
           this.damageBoss(SPELLS[4].damage, strike.clone().multiplyScalar(3.5), {
@@ -1549,31 +1545,11 @@ export class Game {
           clamp(nz, wall.minZ, wall.maxZ),
         );
         const force = impulse.length();
-        const mayImpact = this.impactGate[actor] <= 0;
-        const spikeImpact = mayImpact
-          ? this.stoneSpikes.impact(wall, at, impulse, Math.max(24, force * 1.6))
-          : 'unknown';
-        const broken =
-          spikeImpact === 'destroyed' ||
-          (spikeImpact === 'unknown' &&
-            this.world.damageWall(wall, at, impulse, actor === 'boss' ? 3.15 : 2.6));
-        if (mayImpact) {
+        const broken = this.world.damageWall(wall, at, impulse, actor === 'boss' ? 3.15 : 2.6);
+        if (this.impactGate[actor] <= 0) {
           this.worldImpact(at, force, 'wall', actor);
           impulse.multiplyScalar(broken ? 0.83 : -0.15);
         }
-      } else if (wall && this.impactGate[actor] <= 0) {
-        const at = new THREE.Vector3(
-          clamp(nx, wall.minX, wall.maxX),
-          clamp(position.y + height * 0.55, wall.bottom ?? 0, wall.top),
-          clamp(nz, wall.minZ, wall.maxZ),
-        );
-        const collisionHit = this.stoneSpikes.impact(
-          wall,
-          at,
-          total,
-          Math.max(4, Math.min(12, total.length() * 2)),
-        );
-        if (collisionHit !== 'unknown') this.impactGate[actor] = 0.22;
       }
       const resolved = resolveCircle(
         nx,
@@ -1616,15 +1592,8 @@ export class Game {
                 nz >= b.minZ - radius &&
                 nz <= b.maxZ + radius,
             );
-          if (support) {
-            const spikeImpact = this.stoneSpikes.impact(
-              support,
-              at,
-              total,
-              Math.max(24, force * 1.7),
-            );
-            if (spikeImpact === 'unknown') this.world.damageWall(support, at, total, 2.8);
-          } else this.world.crater(at, force);
+          if (support) this.world.damageWall(support, at, total, 2.8);
+          else this.world.crater(at, force);
           this.worldImpact(at, force, support ? 'wall' : 'ground', actor);
           floor = groundHeight(
             nx,
@@ -2796,6 +2765,7 @@ export class Game {
       // Carve only the measured thin material span, then re-run CCD for the remaining path.
       if (p.kind === 'hammer')
         for (let n = 0; n < 4 && worldHit?.obstacle; n++) {
+          if (this.world.isDynamicWall(worldHit.obstacle)) break;
           const contact = p.last.clone().lerp(p.mesh.position, worldHit.t);
           const result = this.world.pierceThin(
             worldHit.obstacle,
@@ -2944,18 +2914,13 @@ export class Game {
         else if (worldHit.boss)
           this.damageBoss(p.damage, p.velocity.clone().normalize().multiplyScalar(1.7));
         if (worldHit.obstacle) {
-          const spikeHit = this.stoneSpikes.hit(
-            worldHit.obstacle,
-            p.damage,
-            p.mesh.position,
-            p.velocity,
-          );
-          if (spikeHit === 'unknown' && (p.kind === 'hammer' || p.kind === 'missile'))
+          const dynamic = this.world.isDynamicWall(worldHit.obstacle);
+          if (dynamic || p.kind === 'hammer' || p.kind === 'missile')
             this.world.damageWall(
               worldHit.obstacle,
               p.mesh.position,
               p.velocity,
-              p.kind === 'hammer' ? 4.2 : 1.8,
+              p.kind === 'hammer' ? 4.2 : p.kind === 'missile' ? 1.8 : 2.05,
             );
         }
         if (worldHit.ground && p.kind === 'hammer') this.world.crater(p.mesh.position, 36);

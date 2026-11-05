@@ -3,7 +3,7 @@
 Prototipe game pertarungan sihir 3D **mobile-first** yang bisa langsung dimainkan di
 browser: satu pemain melawan satu boss terbang, **IGNIS**, di arena kota 600 × 600 m
 yang bisa dihancurkan. Terbang bebas, perisai Aegis directional (depan + samping,
-belakang titik buta), lima sihir yang bisa disusun bebas, termasuk sihir Batu dengan serangan duri stalagmit
+belakang titik buta), lima sihir yang bisa disusun bebas, termasuk sihir Batu dengan satu duri batu raksasa miring
 dan Battle Mode sebagai ultimate khususnya, hempasan ragdoll, dan navigasi boss yang sadar
 cover. Tanpa backend, akun, atau koneksi eksternal saat bermain.
 
