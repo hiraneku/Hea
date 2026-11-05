@@ -1189,6 +1189,7 @@ export class Game {
       this.impactGate.boss = Math.max(0, this.impactGate.boss - dt);
       this.previousPlayer.copy(this.player);
       this.updatePlayer(dt, this.mode !== 'playing');
+      this.world.update(dt);
       this.stoneSpikes.update(dt);
       if (this.hitPause.remaining === 0) this.prisma.update(dt);
       if (this.hitPause.remaining === 0)

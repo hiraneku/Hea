@@ -109,7 +109,17 @@ export class World {
   /** Fight-made structures use the same destructible cells and collision rebuilding as city walls. */
   private dynamicWalls = new Map<
     number,
-    { mesh: THREE.Mesh; volume: DestructibleVolume; fragments?: THREE.InstancedMesh }
+    {
+      mesh: THREE.Mesh;
+      volume: DestructibleVolume;
+      fragments?: THREE.InstancedMesh;
+      fracture?: {
+        elapsed: number;
+        duration: number;
+        intact: THREE.MeshStandardMaterial;
+        chips: THREE.MeshStandardMaterial;
+      };
+    }
   >();
   /** Parapets and floor bands, with the buildings they belong to and the pose of each piece: a
    *  broken host scales its pieces away, and an arena reset stamps them back. */
@@ -604,6 +614,19 @@ export class World {
   get wallsBroken() {
     return this.buildings.filter((b) => b.volume.damaged).length;
   }
+  /** Cross-fade a spear into irregular stone chips rather than swapping to cubes in one frame. */
+  update(dt: number) {
+    for (const wall of this.dynamicWalls.values()) {
+      const fracture = wall.fracture;
+      if (!fracture) continue;
+      fracture.elapsed = Math.min(fracture.duration, fracture.elapsed + dt);
+      const t = fracture.elapsed / fracture.duration;
+      const eased = t * t * (3 - 2 * t);
+      fracture.intact.opacity = 1 - eased;
+      fracture.chips.opacity = eased;
+      if (t >= 1) wall.mesh.visible = false;
+    }
+  }
   /** Where the sun's shadow map is centred; call with the player every frame. */
   focusShadow(focus: THREE.Vector3) {
     const direction = new THREE.Vector3(56, 100, 35).normalize(),
@@ -659,6 +682,7 @@ export class World {
         this.scene.remove(wall.fragments);
         wall.fragments.geometry.dispose();
       }
+      wall.fracture?.chips.dispose();
     }
     this.dynamicWalls.clear();
     this.terrain.reset();
@@ -684,6 +708,7 @@ export class World {
       this.scene.remove(wall.fragments);
       wall.fragments.geometry.dispose();
     }
+    wall.fracture?.chips.dispose();
     this.rebuildColliders();
   }
   removeDynamicWalls(owners: number[]) {
@@ -696,6 +721,7 @@ export class World {
         this.scene.remove(wall.fragments);
         wall.fragments.geometry.dispose();
       }
+      wall.fracture?.chips.dispose();
     }
     this.rebuildColliders();
   }
@@ -816,16 +842,43 @@ export class World {
     return true;
   }
   private showDamage(
-    b: { mesh: THREE.Mesh; volume: DestructibleVolume; fragments?: THREE.InstancedMesh },
+    b: {
+      mesh: THREE.Mesh;
+      volume: DestructibleVolume;
+      fragments?: THREE.InstancedMesh;
+      fracture?: {
+        elapsed: number;
+        duration: number;
+        intact: THREE.MeshStandardMaterial;
+        chips: THREE.MeshStandardMaterial;
+      };
+    },
     removed: Cell[],
     at: THREE.Vector3,
     force: THREE.Vector3,
   ) {
-    b.mesh.visible = false;
+    const isSpear = b.mesh.name.startsWith('stone-spear-');
+    if (isSpear && !b.fracture) {
+      const intact = b.mesh.material as THREE.MeshStandardMaterial;
+      intact.transparent = true;
+      intact.depthWrite = false;
+      intact.needsUpdate = true;
+      const chips = intact.clone();
+      chips.transparent = true;
+      chips.opacity = 0;
+      chips.depthWrite = false;
+      chips.vertexColors = false;
+      chips.needsUpdate = true;
+      b.fracture = { elapsed: 0, duration: 0.2, intact, chips };
+    }
+    if (!isSpear) b.mesh.visible = false;
     if (!b.fragments) {
+      const geometry = isSpear
+        ? new THREE.DodecahedronGeometry(1, 0)
+        : new THREE.BoxGeometry(1, 1, 1);
       b.fragments = new THREE.InstancedMesh(
-        new THREE.BoxGeometry(1, 1, 1),
-        b.mesh.material,
+        geometry,
+        b.fracture?.chips ?? b.mesh.material,
         b.volume.cells.length,
       );
       b.fragments.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
@@ -837,11 +890,16 @@ export class World {
     b.fragments.visible = true;
     b.volume.cells.forEach((cell, i) => {
       this.fragmentStamp.position.set(cell.x, cell.y, cell.z);
-      this.fragmentStamp.rotation.set(0, 0, 0);
+      this.fragmentStamp.rotation.set(
+        isSpear ? cell.iy * 0.73 + cell.iz * 0.31 : 0,
+        isSpear ? cell.ix * 0.49 + cell.iy * 0.27 : 0,
+        isSpear ? cell.iz * 0.67 + cell.ix * 0.19 : 0,
+      );
+      const chipScale = isSpear ? 0.62 : 1;
       this.fragmentStamp.scale.set(
-        cell.alive ? cell.w : 0,
-        cell.alive ? cell.h : 0,
-        cell.alive ? cell.d : 0,
+        cell.alive ? cell.w * chipScale : 0,
+        cell.alive ? cell.h * chipScale : 0,
+        cell.alive ? cell.d * chipScale : 0,
       );
       this.fragmentStamp.updateMatrix();
       b.fragments!.setMatrixAt(i, this.fragmentStamp.matrix);

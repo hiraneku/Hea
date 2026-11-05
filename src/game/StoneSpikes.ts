@@ -6,10 +6,11 @@ import { clamp, seededRandom, segmentBox, type Obstacle, type Point3 } from './m
 const MIN_RANGE = 6.5;
 const MAX_RANGE = 30;
 const START_OFFSET = 2.6;
-const SPIKE_WIDTH = 4.1;
-const SPIKE_DEPTH = 3.6;
-const CELL_SIZE = 1.35;
-const RISE_TIME = 0.62;
+const SPIKE_WIDTH = 6.2;
+const SPIKE_DEPTH = 5.4;
+const CELL_SIZE = 0.82;
+const RISE_TIME = 0.28;
+const ROOT_BURY = 1.35;
 
 export interface SpikeLine {
   id: number;
@@ -22,8 +23,10 @@ interface StoneSpike {
   line: SpikeLine;
   owner: number;
   base: THREE.Vector3;
+  root: THREE.Vector3;
   tip: THREE.Vector3;
   axis: THREE.Vector3;
+  solidLength: number;
   width: number;
   depth: number;
   radius: number;
@@ -46,38 +49,49 @@ export interface StoneSpikeHost {
 
 type SpikeEffects = Pick<Effects, 'dust' | 'debris'>;
 
-function smooth01(value: number) {
+function thrustEase(value: number) {
   const t = THREE.MathUtils.clamp(value, 0, 1);
-  return t * t * (3 - 2 * t);
+  return 1 - (1 - t) ** 3;
 }
 
-/** One oversized, faceted stone lance; its local Y axis is aimed along the cast. */
+/** Broad, faceted stone lance with a buried root and full shoulders; local Y follows the cast. */
 function spireGeometry(seed: number) {
   const random = seededRandom(seed);
-  const sides = 9;
+  const sides = 10;
   const rings = [
-    { y: 0, radius: 0.52 },
-    { y: 0.18, radius: 0.5 },
-    { y: 0.43, radius: 0.4 },
-    { y: 0.7, radius: 0.29 },
-    { y: 0.9, radius: 0.17 },
+    { y: 0, radius: 0.4 },
+    { y: 0.025, radius: 0.54 },
+    { y: 0.075, radius: 0.58 },
+    { y: 0.14, radius: 0.51 },
+    { y: 0.32, radius: 0.43 },
+    { y: 0.55, radius: 0.34 },
+    { y: 0.75, radius: 0.24 },
+    { y: 0.9, radius: 0.14 },
+    { y: 0.97, radius: 0.065 },
   ];
   const positions: number[] = [];
+  const colors: number[] = [];
   for (let ring = 0; ring < rings.length; ring++) {
     const { y, radius } = rings[ring];
-    const offset = ring % 2 ? 0.11 : 0;
+    const offset = ring % 2 ? 0.09 : 0;
+    const stoneTone = 0.92 + random() * 0.18;
     for (let side = 0; side < sides; side++) {
       const angle = (side / sides) * Math.PI * 2 + offset;
-      const uneven = 0.84 + random() * 0.32;
+      const uneven = 0.94 + random() * 0.13;
       positions.push(
-        Math.cos(angle) * radius * uneven + (random() - 0.5) * 0.035,
-        y + (random() - 0.5) * 0.012,
-        Math.sin(angle) * radius * uneven + (random() - 0.5) * 0.035,
+        Math.cos(angle) * radius * uneven + (random() - 0.5) * 0.018,
+        y + (random() - 0.5) * 0.008,
+        Math.sin(angle) * radius * uneven + (random() - 0.5) * 0.018,
       );
+      colors.push(stoneTone, stoneTone * (0.98 + random() * 0.04), stoneTone * 0.92);
     }
   }
   const tip = sides * rings.length;
-  positions.push((random() - 0.5) * 0.06, 1, (random() - 0.5) * 0.06);
+  positions.push((random() - 0.5) * 0.025, 1, (random() - 0.5) * 0.025);
+  colors.push(1, 0.97, 0.9);
+  const bottomCenter = positions.length / 3;
+  positions.push(0, 0, 0);
+  colors.push(0.88, 0.85, 0.79);
   const indices: number[] = [];
   for (let ring = 0; ring < rings.length - 1; ring++)
     for (let side = 0; side < sides; side++) {
@@ -88,10 +102,14 @@ function spireGeometry(seed: number) {
       indices.push(a, c, b, b, c, d);
     }
   const lastRing = (rings.length - 1) * sides;
-  for (let side = 0; side < sides; side++)
-    indices.push(lastRing + side, tip, lastRing + ((side + 1) % sides));
+  for (let side = 0; side < sides; side++) {
+    const next = (side + 1) % sides;
+    indices.push(lastRing + side, tip, lastRing + next);
+    indices.push(bottomCenter, next, side);
+  }
   const geometry = new THREE.BufferGeometry();
   geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geometry.setIndex(indices);
   geometry.computeVertexNormals();
   return geometry;
@@ -128,7 +146,7 @@ function structureBounds(
 }
 
 function spikeCellMask(
-  base: THREE.Vector3,
+  root: THREE.Vector3,
   axis: THREE.Vector3,
   right: THREE.Vector3,
   side: THREE.Vector3,
@@ -137,13 +155,15 @@ function spikeCellMask(
   depth: number,
 ) {
   return (point: Point3) => {
-    const fromBase = new THREE.Vector3(point.x, point.y, point.z).sub(base);
-    const along = fromBase.dot(axis);
+    const fromRoot = new THREE.Vector3(point.x, point.y, point.z).sub(root);
+    const along = fromRoot.dot(axis);
     if (along < 0 || along > length) return false;
     const taper = 1 - 0.82 * (along / length);
-    const x = fromBase.dot(right) / (width * 0.52 * taper);
-    const z = fromBase.dot(side) / (depth * 0.52 * taper);
-    return x * x + z * z <= 1;
+    // A small conservative margin makes the voxel collider meet at cell edges instead of
+    // leaving hairline walk-through gaps between the visual stone and its collision skin.
+    const x = fromRoot.dot(right) / (width * 0.54 * taper);
+    const z = fromRoot.dot(side) / (depth * 0.54 * taper);
+    return x * x + z * z <= 1.06;
   };
 }
 
@@ -193,9 +213,9 @@ export class StoneSpikes {
     const quaternion = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), axis);
     const right = new THREE.Vector3(1, 0, 0).applyQuaternion(quaternion).normalize();
     const side = new THREE.Vector3(0, 0, 1).applyQuaternion(quaternion).normalize();
-    const ground = this.host.groundAt(player.x, player.z);
     const base = player.clone().addScaledVector(forward, START_OFFSET);
-    base.y = this.host.groundAt(base.x, base.z) + 0.03;
+    const ground = this.host.groundAt(base.x, base.z);
+    base.y = ground + 0.03;
     let horizontalReach = clamp(
       targetDistance - START_OFFSET - 0.8,
       MIN_RANGE,
@@ -215,40 +235,47 @@ export class StoneSpikes {
     const id = this.nextLine++;
     const line: SpikeLine = { id, hasStruckBoss: false };
     const tip = base.clone().addScaledVector(axis, length);
+    const root = base.clone().addScaledVector(axis, -ROOT_BURY);
+    const solidLength = length + ROOT_BURY;
     const width = SPIKE_WIDTH;
     const depth = SPIKE_DEPTH;
-    const radius = Math.max(width, depth) * 0.52;
-    const bounds = structureBounds(base, axis, right, side, length, width, depth);
-    // Keep the collider and voxel fragments above the walkable ground plane at the buried base.
-    bounds.bottom = Math.max(ground - 0.35, bounds.bottom ?? ground);
+    const radius = Math.max(width, depth) * 0.54;
+    const bounds = structureBounds(root, axis, right, side, solidLength, width, depth);
+    // Sink the shoulder well below the floor so the emerging stone never has an open-looking
+    // cut end at ground level; keep a little buried volume for continuous collision support.
+    bounds.bottom = Math.max(ground - 0.28, bounds.bottom ?? ground);
     const owner = -id;
     const volume = new DestructibleVolume(
       bounds,
       owner,
       CELL_SIZE,
-      spikeCellMask(base, axis, right, side, length, width, depth),
+      spikeCellMask(root, axis, right, side, solidLength, width, depth),
     );
     const random = seededRandom(id * 7919);
     const material = new THREE.MeshStandardMaterial({
-      color: new THREE.Color().setHSL(0.095 + random() * 0.025, 0.22, 0.35 + random() * 0.08),
-      roughness: 0.97,
+      color: new THREE.Color().setHSL(0.095 + random() * 0.025, 0.17, 0.42 + random() * 0.035),
+      roughness: 0.94,
       flatShading: true,
+      vertexColors: true,
     });
     const mesh = new THREE.Mesh(spireGeometry(id * 101), material);
     mesh.name = `stone-spear-${id}`;
-    mesh.position.copy(base);
+    mesh.position.copy(root);
     mesh.quaternion.copy(quaternion);
     mesh.scale.set(width, 0.01, depth);
     mesh.castShadow = mesh.receiveShadow = true;
     this.scene.add(mesh);
+    this.fx.dust(base, 8, 1.4, axis.clone().multiplyScalar(4));
     this.spikes.push({
       mesh,
       volume,
       line,
       owner,
       base,
+      root,
       tip,
       axis,
+      solidLength,
       width,
       depth,
       radius,
@@ -267,13 +294,12 @@ export class StoneSpikes {
       }
       spike.age += dt;
       const phase = clamp(spike.age / RISE_TIME, 0, 1);
-      const growth = smooth01(phase);
-      spike.mesh.scale.set(spike.width, Math.max(0.01, spike.length * growth), spike.depth);
+      const growth = thrustEase(phase);
+      spike.mesh.scale.set(spike.width, Math.max(0.01, spike.solidLength * growth), spike.depth);
       if (phase < 1) continue;
       spike.solid = true;
       this.host.addWall(spike.mesh, spike.volume);
-      this.fx.dust(spike.base, 18, 2.8, spike.axis.clone().multiplyScalar(2));
-      this.fx.debris(spike.base, 14, 4.5, 1.4, spike.axis.clone().multiplyScalar(3));
+      this.fx.dust(spike.base, 26, 3.2, spike.axis.clone().multiplyScalar(3.4));
       this.host.onEmerge(
         { base: spike.base.clone(), tip: spike.tip.clone(), radius: spike.radius },
         spike.line,
